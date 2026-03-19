@@ -64,10 +64,12 @@ import { ProductDetail } from "./pages/inventory/ProductDetail";
 import { FleetManagement } from "./pages/logistics/FleetManagement";
 
 import { ToastProvider } from "./components/ui/Toast";
+import { PasswordGate } from "./components/PasswordGate";
 
 function App() {
   return (
     <ToastProvider>
+      <PasswordGate>
       <BrowserRouter>
         <Routes>
           {/* Demo Landing Page */}
@@ -157,6 +159,7 @@ function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </PasswordGate>
     </ToastProvider>
   );
 }
