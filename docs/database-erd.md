@@ -1,4 +1,4 @@
-# GableLBM: Extended Entity Relationship Diagram (ERD)
+# GableLBM: Database Entity Relationship Diagram
 
 This document defines the physical data model for GableLBM. We prioritize data integrity, unit-awareness, and a "double-entry" ledger for all asset movements (Inventory, Cash, Receivables).
 
@@ -85,7 +85,7 @@ erDiagram
     }
 ```
 
-### PostgreSQL Schema Definition (Excerpt)
+### PostgreSQL Schema (Excerpt)
 
 ```sql
 -- Core Types
@@ -97,7 +97,7 @@ CREATE TABLE products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sku VARCHAR(100) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
-    base_uom_id UUID NOT NULL, -- References uoms.id
+    base_uom_id UUID NOT NULL,
     category VARCHAR(100),
     weight_lbs DECIMAL(19,4) DEFAULT 0,
     volume_bf DECIMAL(19,4) DEFAULT 0,
@@ -117,7 +117,7 @@ CREATE TABLE uoms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     family_id UUID REFERENCES uom_families(id),
     name VARCHAR(50) NOT NULL,
-    ratio DECIMAL(19,8) NOT NULL, -- MBF ratio 0.00533
+    ratio DECIMAL(19,8) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -160,6 +160,7 @@ CREATE TABLE inventory_move_lines (
     qty DECIMAL(19,4) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+```
 
 ---
 
@@ -259,7 +260,7 @@ erDiagram
     }
 ```
 
-### PostgreSQL Schema Definition (Excerpt)
+### PostgreSQL Schema (Excerpt)
 
 ```sql
 -- Pricing
@@ -290,18 +291,18 @@ CREATE TABLE customer_jobs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- The Waterfall Logic
+-- The Pricing Waterfall
 CREATE TABLE price_rules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     product_id UUID REFERENCES products(id),
     customer_id UUID REFERENCES customers(id),
     job_id UUID REFERENCES customer_jobs(id),
-    type VARCHAR(50) NOT NULL, -- 'NetPrice', 'DiscountPercentage'
+    type VARCHAR(50) NOT NULL,
     value DECIMAL(19,4) NOT NULL,
     min_qty DECIMAL(19,4) DEFAULT 0,
     start_date TIMESTAMP WITH TIME ZONE,
     end_date TIMESTAMP WITH TIME ZONE,
-    priority INTEGER DEFAULT 0 -- For conflict resolution
+    priority INTEGER DEFAULT 0
 );
 
 -- Quotes & Orders
@@ -345,6 +346,7 @@ CREATE TABLE sales_order_lines (
     unit_price DECIMAL(19,4) NOT NULL,
     line_total DECIMAL(19,4) NOT NULL
 );
+```
 
 ---
 
@@ -395,7 +397,7 @@ erDiagram
         enum method "check, cash, credit, e-payment"
         string reference "check# or transaction_id"
         timestamp payment_date
-        jsonb application_map "how payment was split across invoices"
+        jsonb application_map "split across invoices"
     }
 
     LIEN_NOTICE {
@@ -430,10 +432,10 @@ erDiagram
     }
 ```
 
-### PostgreSQL Schema Definition (Excerpt)
+### PostgreSQL Schema (Excerpt)
 
 ```sql
--- Finance Headers
+-- Chart of Accounts
 CREATE TABLE chart_of_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(50) UNIQUE NOT NULL,
@@ -442,6 +444,7 @@ CREATE TABLE chart_of_accounts (
     is_active BOOLEAN DEFAULT TRUE
 );
 
+-- Invoices
 CREATE TABLE invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID REFERENCES customers(id),
@@ -467,6 +470,7 @@ CREATE TABLE invoice_lines (
     line_total DECIMAL(19,4) NOT NULL
 );
 
+-- Payments
 CREATE TABLE payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID REFERENCES customers(id),
@@ -474,7 +478,7 @@ CREATE TABLE payments (
     payment_method VARCHAR(50),
     reference_number VARCHAR(255),
     payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    application_map JSONB -- Mapping how payment applies to specific invoices
+    application_map JSONB
 );
 
 -- Construction Lien Tracking
@@ -487,10 +491,10 @@ CREATE TABLE lien_notices (
     document_url VARCHAR(2048)
 );
 
--- Double-Entry Engine
+-- Double-Entry Ledger
 CREATE TABLE ledger_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    reference VARCHAR(255), -- "INV-1001" or "PAY-500"
+    reference VARCHAR(255),
     posted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     memo TEXT
 );
@@ -503,4 +507,3 @@ CREATE TABLE ledger_lines (
     credit DECIMAL(19,4) NOT NULL DEFAULT 0
 );
 ```
-
