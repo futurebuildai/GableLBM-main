@@ -26,14 +26,7 @@ export const PortalLayout = () => {
     });
 
     useEffect(() => {
-        // Demo mode: skip auth redirect, set demo defaults if needed
-        if (!localStorage.getItem('portal_user')) {
-            localStorage.setItem('portal_user', JSON.stringify({
-                name: 'Summit Contracting',
-                email: 'summit@gable.com',
-                role: 'admin',
-            }));
-        }
+        // TODO: Replace with real auth — redirect to login if no portal_user
     }, []);
 
     const handleLogout = () => {

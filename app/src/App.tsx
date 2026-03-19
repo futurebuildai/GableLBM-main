@@ -1,6 +1,6 @@
 import { BrowserRouter, Route, Routes, Outlet, Navigate } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
-import { DemoLanding } from "./pages/DemoLanding";
+
 import { Dashboard } from "./pages/Dashboard";
 import { Inventory } from "./pages/Inventory";
 import { QuoteBuilder } from "./pages/QuoteBuilder";
@@ -64,16 +64,14 @@ import { ProductDetail } from "./pages/inventory/ProductDetail";
 import { FleetManagement } from "./pages/logistics/FleetManagement";
 
 import { ToastProvider } from "./components/ui/Toast";
-import { PasswordGate } from "./components/PasswordGate";
 
 function App() {
   return (
     <ToastProvider>
-      <PasswordGate>
       <BrowserRouter>
         <Routes>
-          {/* Demo Landing Page */}
-          <Route path="/" element={<DemoLanding />} />
+          {/* Root redirect */}
+          <Route path="/" element={<Navigate to="/erp" replace />} />
 
           {/* POS Terminal */}
           <Route path="/pos" element={<POSTerminal />} />
@@ -141,7 +139,7 @@ function App() {
             <Route path="receiving" element={<ReceivePO />} />
           </Route>
 
-          {/* Sovereign Dealer Portal (B2B) - No login required for demo */}
+          {/* Sovereign Dealer Portal (B2B) */}
           <Route path="/portal" element={<PortalLayout />}>
             <Route index element={<PortalDashboard />} />
             <Route path="orders" element={<PortalOrders />} />
@@ -159,7 +157,6 @@ function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-      </PasswordGate>
     </ToastProvider>
   );
 }

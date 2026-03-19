@@ -10,7 +10,7 @@ export function PortalMyAccount() {
     const [saving, setSaving] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
 
-    // Use a hardcoded customer ID for the portal demo context
+    // TODO: Resolve from auth context
     const portalCustomerId = '364a0cd6-c7f2-4529-92c7-3639c36f6b8f';
 
     useEffect(() => {

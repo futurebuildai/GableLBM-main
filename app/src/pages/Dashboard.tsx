@@ -48,15 +48,7 @@ export const Dashboard = () => {
     const [refreshing, setRefreshing] = useState(false);
     const { showToast } = useToast();
 
-    useEffect(() => {
-        // Welcome toast for demo
-        const timer = setTimeout(() => {
-            showToast('Welcome to GableLBM Universal Suite', 'success');
-        }, 1000);
-        return () => clearTimeout(timer);
-    }, [showToast]);
-
-    const fetchDashboardData = useCallback(async (showSpinner = false) => {
+const fetchDashboardData = useCallback(async (showSpinner = false) => {
         if (showSpinner) setRefreshing(true);
         try {
             const [summaryData, alertsData, customersData, activityData, trendData] = await Promise.all([

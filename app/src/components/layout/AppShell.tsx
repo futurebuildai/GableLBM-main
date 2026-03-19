@@ -6,7 +6,7 @@ import { Omnibar } from '../ui/Omnibar';
 import { ShortcutsModal } from '../ui/ShortcutsModal';
 import { PageTransition } from '../ui/PageTransition';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DemoModeIndicator } from '../ui/DemoModeIndicator';
+
 
 import { BrandLogo } from '../ui/BrandLogo';
 
@@ -142,7 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </motion.main>
             <Omnibar />
             <ShortcutsModal isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-            <DemoModeIndicator />
+
         </div>
     );
 }
