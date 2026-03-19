@@ -31,7 +31,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         setError('');
 
         try {
-            await onSave({ sku, description, uom_primary: uom, base_price: basePrice, vendor, upc });
+            await onSave({ sku, description, uom_primary: uom, base_price: basePrice, vendor, upc, average_unit_cost: 0, target_margin: 0.30, commission_rate: 0.05 });
             onClose();
             // Reset form
             setSku('');

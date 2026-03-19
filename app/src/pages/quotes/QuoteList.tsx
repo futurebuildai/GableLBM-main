@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide-react';
 import { QuoteService } from '../../services/QuoteService';
 import { OrderService } from '../../services/OrderService';

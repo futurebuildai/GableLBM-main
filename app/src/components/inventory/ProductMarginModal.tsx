@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { Product } from '../../types/product';
-import { X, DollarSign, Percent } from 'lucide-react';
+import { X, Percent } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface ProductMarginModalProps {
