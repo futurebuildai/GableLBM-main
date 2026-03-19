@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/google/uuid"
 )
@@ -24,11 +25,12 @@ Always be factual about product attributes. Never fabricate species, grades, or 
 
 // Service contains PIM business logic
 type Service struct {
-	repo       Repository
-	productSvc *product.Service
-	textAI     *TextAIClient
-	imageAI    *ImageAIClient
-	geminiAI   *GeminiImageClient
+	repo            Repository
+	productSvc      *product.Service
+	textAI          *TextAIClient
+	imageAI         *ImageAIClient
+	geminiAI        *GeminiImageClient
+	geminiKeyStore  *ai.KeyStore
 }
 
 // NewService creates a new PIM service
@@ -52,6 +54,11 @@ func (s *Service) WithImageAI(client *ImageAIClient) {
 // WithGeminiAI attaches the Google Gemini image client
 func (s *Service) WithGeminiAI(client *GeminiImageClient) {
 	s.geminiAI = client
+}
+
+// WithGeminiKeyStore attaches the Gemini key store for dynamic client resolution
+func (s *Service) WithGeminiKeyStore(ks *ai.KeyStore) {
+	s.geminiKeyStore = ks
 }
 
 // GetProductDetail returns the full product + PIM aggregate
@@ -316,6 +323,17 @@ Respond with ONLY valid JSON (no markdown fences):
 
 // GenerateImage generates a product image using Gemini (preferred) or Claude SVG fallback
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
+	// Resolve Gemini client from KeyStore (handles key added/changed after startup)
+	if s.geminiKeyStore != nil {
+		if key := s.geminiKeyStore.Get(ctx); key != "" {
+			if s.geminiAI == nil || s.geminiAI.apiKey != key {
+				s.geminiAI = NewGeminiImageClient(key)
+			}
+		} else {
+			s.geminiAI = nil
+		}
+	}
+
 	if s.geminiAI == nil && s.textAI == nil {
 		return nil, fmt.Errorf("no image AI configured — set GEMINI_API_KEY in Admin > AI Settings")
 	}

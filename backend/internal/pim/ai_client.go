@@ -2,19 +2,23 @@ package pim
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
+
+	"github.com/gablelbm/gable/internal/ai"
 )
 
 // TextAIClient calls the Anthropic Messages API for text generation
 type TextAIClient struct {
-	apiKey string
-	model  string
-	client *http.Client
+	apiKey   string
+	keyStore *ai.KeyStore
+	model    string
+	client   *http.Client
 }
 
 // NewTextAIClient creates a new Anthropic API client
@@ -27,6 +31,26 @@ func NewTextAIClient(apiKey, model string) *TextAIClient {
 		model:  model,
 		client: &http.Client{},
 	}
+}
+
+// NewTextAIClientWithKeyStore creates an Anthropic client that reads the key dynamically.
+func NewTextAIClientWithKeyStore(ks *ai.KeyStore, model string) *TextAIClient {
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+	return &TextAIClient{
+		keyStore: ks,
+		model:    model,
+		client:   &http.Client{},
+	}
+}
+
+// getKey resolves the API key, preferring keystore over static.
+func (c *TextAIClient) getKey(ctx context.Context) string {
+	if c.keyStore != nil {
+		return c.keyStore.Get(ctx)
+	}
+	return c.apiKey
 }
 
 // anthropicRequest is the Anthropic Messages API request body
@@ -53,6 +77,11 @@ type anthropicResponse struct {
 
 // Generate sends a prompt to the Anthropic API and returns the text response
 func (c *TextAIClient) Generate(systemPrompt, userPrompt string, maxTokens int) (string, string, error) {
+	apiKey := c.getKey(context.Background())
+	if apiKey == "" {
+		return "", "", fmt.Errorf("no Anthropic API key configured — set key in Admin > AI Settings")
+	}
+
 	if maxTokens == 0 {
 		maxTokens = 2048
 	}
@@ -76,7 +105,7 @@ func (c *TextAIClient) Generate(systemPrompt, userPrompt string, maxTokens int) 
 		return "", "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := c.client.Do(req)

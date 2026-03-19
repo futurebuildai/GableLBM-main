@@ -134,10 +134,11 @@ func main() {
 	pimRepo := pim.NewRepository(db)
 	pimSvc := pim.NewService(pimRepo, productSvc)
 
-	// PIM text AI (Anthropic Claude)
-	pimSvc.WithTextAI(pim.NewTextAIClient(aiKeyStore.Get(context.Background()), cfg.AnthropicModel))
+	// PIM text AI (Anthropic Claude) — uses KeyStore for dynamic key resolution
+	pimSvc.WithTextAI(pim.NewTextAIClientWithKeyStore(aiKeyStore, cfg.AnthropicModel))
 
-	// PIM image AI — prefer Gemini, fall back to Stability, then Claude SVG
+	// PIM image AI — always attach KeyStore for dynamic resolution, then try eager init
+	pimSvc.WithGeminiKeyStore(geminiKeyStore)
 	geminiKey := geminiKeyStore.Get(context.Background())
 	if geminiKey != "" {
 		pimSvc.WithGeminiAI(pim.NewGeminiImageClient(geminiKey))
@@ -146,7 +147,7 @@ func main() {
 		pimSvc.WithImageAI(pim.NewImageAIClient(cfg.StabilityAPIKey))
 		logger.Info("PIM image AI (Stability) initialized")
 	} else {
-		logger.Info("PIM image AI: will use Claude SVG fallback (set GEMINI_API_KEY for real images)")
+		logger.Info("PIM image AI: will resolve dynamically from KeyStore (configure via Tech Admin > AI Settings)")
 	}
 
 	pimHandler := pim.NewHandler(pimSvc)
