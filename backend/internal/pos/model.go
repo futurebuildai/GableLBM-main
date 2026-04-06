@@ -30,6 +30,10 @@ type POSTransaction struct {
 	CompletedAt *time.Time        `json:"completed_at,omitempty" db:"completed_at"`
 	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
 
+	// Offline sync fields
+	SyncedFrom      *string    `json:"synced_from,omitempty" db:"synced_from"`             // nil = live, "offline-v1" = synced
+	ClientCreatedAt *time.Time `json:"client_created_at,omitempty" db:"client_created_at"` // original offline timestamp
+
 	// Populated on read
 	LineItems []POSLineItem `json:"line_items,omitempty"`
 	Tenders   []POSTender   `json:"tenders,omitempty"`
@@ -110,4 +114,49 @@ type TransactionSummary struct {
 	ItemCount   int               `json:"item_count"`
 	CompletedAt *time.Time        `json:"completed_at,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
+}
+
+// --- Offline Sync DTOs ---
+
+// OfflineSyncRequest is a batch of completed transactions from an offline POS.
+type OfflineSyncRequest struct {
+	BatchID    string               `json:"batch_id"`
+	RegisterID string               `json:"register_id"`
+	Items      []OfflineTransaction `json:"items"`
+}
+
+// OfflineTransaction is a single completed POS transaction captured offline.
+type OfflineTransaction struct {
+	ClientID        uuid.UUID          `json:"client_id"`                   // client-generated UUID
+	RegisterID      string             `json:"register_id"`
+	CashierID       uuid.UUID          `json:"cashier_id"`
+	CustomerID      *uuid.UUID         `json:"customer_id,omitempty"`
+	Items           []AddLineItemRequest `json:"items"`
+	Tenders         []AddTenderRequest   `json:"tenders"`
+	ClientCreatedAt time.Time          `json:"client_created_at"`
+}
+
+// OfflineSyncResponse reports results of a batch sync.
+type OfflineSyncResponse struct {
+	BatchID        string      `json:"batch_id"`
+	SyncedCount    int         `json:"synced_count"`
+	DuplicateCount int         `json:"duplicate_count"`
+	ErrorCount     int         `json:"error_count"`
+	Errors         []SyncError `json:"errors,omitempty"`
+}
+
+// SyncError describes a single transaction that failed during sync.
+type SyncError struct {
+	ClientID string `json:"client_id"`
+	Reason   string `json:"reason"`
+}
+
+// CatalogProduct is a lightweight product for the offline catalog cache.
+type CatalogProduct struct {
+	ProductID   uuid.UUID `json:"product_id"`
+	SKU         string    `json:"sku"`
+	Description string    `json:"description"`
+	Price       float64   `json:"price"` // dollars
+	UOM         string    `json:"uom"`
+	InStock     float64   `json:"in_stock"`
 }

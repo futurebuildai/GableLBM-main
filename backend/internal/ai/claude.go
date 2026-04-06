@@ -20,10 +20,13 @@ const (
 
 // Client wraps the Anthropic Messages API.
 // It supports both a static key and a dynamic KeyStore.
+// When a MaestroClient is configured, text-based AI calls route through
+// FB Brain's metered gateway instead of calling Anthropic directly.
 type Client struct {
 	staticKey  string
 	keyStore   *KeyStore
 	httpClient *http.Client
+	maestro    *MaestroClient // optional: routes text AI through Brain
 }
 
 // NewClient creates a new Claude API client with a static key.
@@ -52,6 +55,27 @@ func (c *Client) getKey(ctx context.Context) string {
 		return c.keyStore.Get(ctx)
 	}
 	return c.staticKey
+}
+
+// WithMaestro attaches a MaestroClient for routing text-based AI through Brain.
+func (c *Client) WithMaestro(m *MaestroClient) *Client {
+	c.maestro = m
+	return c
+}
+
+// --- JWT context propagation for Maestro ---
+
+type jwtContextKey struct{}
+
+// ContextWithJWT returns a context carrying the user's JWT for Maestro forwarding.
+func ContextWithJWT(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, jwtContextKey{}, token)
+}
+
+// jwtFromContext extracts the JWT from context, if set.
+func jwtFromContext(ctx context.Context) string {
+	token, _ := ctx.Value(jwtContextKey{}).(string)
+	return token
 }
 
 // IsConfigured returns true if a key is available.
@@ -276,7 +300,22 @@ Example output:
 
 // ExtractMaterialList sends a file to Claude for material list extraction.
 // Supports images (jpeg, png, gif, webp), PDFs, and pre-processed text from spreadsheets.
+//
+// When a MaestroClient is configured and the input is text-based (text/plain, text/csv),
+// the request is routed through FB Brain's metered Maestro gateway. Image and PDF inputs
+// continue to use the direct Anthropic API until Brain's Maestro supports multimodal (Phase 2).
 func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, contentType string) (string, error) {
+	// Maestro routing for text-based inputs.
+	if c.maestro != nil && (contentType == "text/plain" || contentType == "text/csv") {
+		jwt := jwtFromContext(ctx)
+		result, err := c.maestro.ChatWithSystemPrompt(ctx, jwt, systemPrompt,
+			"Extract all material list items from this text data. Output each item as: QUANTITY UOM - DESCRIPTION\n\n"+string(fileBytes))
+		if err == nil {
+			return result, nil
+		}
+		// Fall through to direct Anthropic on Maestro failure.
+	}
+
 	apiKey := c.getKey(ctx)
 	if apiKey == "" {
 		return "", fmt.Errorf("no Anthropic API key configured")

@@ -13,13 +13,15 @@ import (
 )
 
 type Service struct {
-	db          *database.DB
-	repo        Repository
-	invoiceRepo invoice.Repository
-	account     account.Service
-	gateway     PaymentGateway // Run Payments (or nil for non-card payments)
-	publicKey   string         // Run Payments public key for Runner.js
-	logger      *slog.Logger
+	db             *database.DB
+	repo           Repository
+	invoiceRepo    invoice.Repository
+	account        account.Service
+	gateway        PaymentGateway // Run Payments (or nil for non-card payments)
+	publicKey      string         // Run Payments public key for Runner.js
+	brainNotifier  *BrainNotifier // FB Brain financial engine notifier (or nil)
+	brainOrgID     string         // Brain org_id for this tenant
+	logger         *slog.Logger
 }
 
 func NewService(db *database.DB, repo Repository, invoiceRepo invoice.Repository, accountService account.Service) *Service {
@@ -36,6 +38,14 @@ func NewService(db *database.DB, repo Repository, invoiceRepo invoice.Repository
 func (s *Service) WithGateway(gw PaymentGateway, publicKey string) *Service {
 	s.gateway = gw
 	s.publicKey = publicKey
+	return s
+}
+
+// WithBrainNotifier sets the FB Brain financial notifier and returns the service for chaining.
+// When set, successfully paid invoices will fire an async notification to Brain's 10bps engine.
+func (s *Service) WithBrainNotifier(n *BrainNotifier, orgID string) *Service {
+	s.brainNotifier = n
+	s.brainOrgID = orgID
 	return s
 }
 
@@ -222,6 +232,11 @@ func (s *Service) updateInvoiceStatus(ctx context.Context, invoiceID uuid.UUID, 
 
 	if err := s.invoiceRepo.UpdateInvoice(ctx, inv); err != nil {
 		return fmt.Errorf("failed to update invoice status: %w", err)
+	}
+
+	// Notify FB Brain's financial engine when an invoice is fully paid.
+	if inv.Status == invoice.InvoiceStatusPaid && s.brainNotifier != nil {
+		s.brainNotifier.notifyInvoicePaid(s.brainOrgID, inv.ID, inv.TotalAmount)
 	}
 
 	return nil

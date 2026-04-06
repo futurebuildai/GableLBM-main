@@ -184,7 +184,8 @@ func main() {
 	accountHandler.RegisterRoutes(mux)
 
 	quoteRepo := quote.NewRepository(db)
-	quoteHandler := quote.NewHandler(quote.NewService(quoteRepo))
+	quoteSvc := quote.NewService(quoteRepo)
+	quoteHandler := quote.NewHandler(quoteSvc)
 	quoteHandler.RegisterRoutes(mux)
 
 	// GL Module (Full General Ledger)
@@ -237,8 +238,17 @@ func main() {
 	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
 	poHandler.RegisterRoutes(mux)
 
+	// Auto-PO: wire quote service to create POs when quotes are accepted
+	quoteSvc.WithAutoPO(&autoPOAdapter{poSvc: poSvc, productSvc: productSvc})
+
 	// Buying Group EDI Service (832/846 catalog sync)
-	_ = edi.NewBuyingGroupService(logger) // Available for catalog import endpoints
+	bgSvc := edi.NewBuyingGroupService(logger)
+
+	// EDI Trading Partner Admin (vendor-agnostic)
+	ediRepo := edi.NewEDIRepository(db)
+	ediHandler := edi.NewEDIHandler(ediRepo, bgSvc, ediSvc)
+	// Auth: EDI routes protected by global JWT middleware (see finalHandler wrapping below)
+	ediHandler.RegisterRoutes(mux)
 
 	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc)
 	orderHandler := order.NewHandler(orderSvc)
@@ -354,6 +364,9 @@ func main() {
 	// Delivery Notification Orchestrator
 	deliveryNotifier := notification.NewDeliveryNotifier(smsSvc, emailSvc, logger)
 	deliverySvc.WithNotifier(&deliveryNotifierAdapter{notifier: deliveryNotifier})
+
+	// Wire invoice service for auto-invoicing on delivery POD
+	deliverySvc.WithInvoiceService(&invoiceServiceAdapter{invoiceSvc: invoiceSvc, orderSvc: orderSvc})
 
 	// Millwork Module
 	millworkRepo := millwork.NewRepository(db)
@@ -536,4 +549,53 @@ func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 			"remote_addr", r.RemoteAddr,
 		)
 	})
+}
+
+// invoiceServiceAdapter bridges invoice.Service to delivery.InvoiceServiceInterface.
+type invoiceServiceAdapter struct {
+	invoiceSvc *invoice.Service
+	orderSvc   *order.Service
+}
+
+func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uuid.UUID) error {
+	ord, err := a.orderSvc.GetOrder(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("get order for invoice: %w", err)
+	}
+
+	// Build invoice from order
+	var lines []invoice.InvoiceLine
+	for _, ol := range ord.Lines {
+		lines = append(lines, invoice.InvoiceLine{
+			ProductID: ol.ProductID,
+			Quantity:  ol.Quantity,
+			PriceEach: int64(ol.PriceEach * 100), // dollars to cents
+		})
+	}
+
+	inv := &invoice.Invoice{
+		CustomerID: ord.CustomerID,
+		OrderID:    ord.ID,
+		Lines:      lines,
+	}
+
+	return a.invoiceSvc.CreateInvoice(ctx, inv)
+}
+
+// autoPOAdapter bridges purchase_order.Service to quote.AutoPOService.
+type autoPOAdapter struct {
+	poSvc      *purchase_order.Service
+	productSvc *product.Service
+}
+
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+	// Resolve product description for the PO line
+	desc := productID.String()
+	if a.productSvc != nil {
+		p, err := a.productSvc.GetProduct(ctx, productID)
+		if err == nil && p != nil {
+			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
+		}
+	}
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, vendorID, desc, quantity, unitCost)
 }

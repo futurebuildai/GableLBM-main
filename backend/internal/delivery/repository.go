@@ -403,16 +403,59 @@ func (r *PostgresRepository) UpdateDeliveryStatus(ctx context.Context, id uuid.U
 	if pod != nil {
 		query := `
 			UPDATE deliveries 
-			SET status = $1, pod_proof_url = $2, pod_signed_by = $3, pod_timestamp = $4, updated_at = NOW() 
-			WHERE id = $5
+			SET status = $1, pod_proof_url = $2, pod_signed_by = $3, pod_timestamp = $4, 
+			    signature_data_url = $5, updated_at = NOW() 
+			WHERE id = $6
 		`
-		_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, pod.ProofURL, pod.SignedBy, pod.Time, id)
+		_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, pod.ProofURL, pod.SignedBy, pod.Time, pod.SignatureDataURL, id)
 		return err
 	}
 
 	query := `UPDATE deliveries SET status = $1, updated_at = NOW() WHERE id = $2`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, id)
 	return err
+}
+
+// POD Photos
+
+func (r *PostgresRepository) SavePODPhoto(ctx context.Context, photo *PODPhoto) error {
+	if photo.ID == uuid.Nil {
+		photo.ID = uuid.New()
+	}
+	photo.UploadedAt = time.Now()
+
+	query := `
+		INSERT INTO delivery_pod_photos (id, delivery_id, photo_url, photo_type, uploaded_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+		photo.ID, photo.DeliveryID, photo.PhotoURL, photo.PhotoType, photo.UploadedAt,
+	)
+	return err
+}
+
+func (r *PostgresRepository) GetPODPhotos(ctx context.Context, deliveryID uuid.UUID) ([]PODPhoto, error) {
+	query := `
+		SELECT id, delivery_id, photo_url, photo_type, uploaded_at
+		FROM delivery_pod_photos
+		WHERE delivery_id = $1
+		ORDER BY uploaded_at ASC
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var photos []PODPhoto
+	for rows.Next() {
+		var p PODPhoto
+		if err := rows.Scan(&p.ID, &p.DeliveryID, &p.PhotoURL, &p.PhotoType, &p.UploadedAt); err != nil {
+			return nil, err
+		}
+		photos = append(photos, p)
+	}
+	return photos, nil
 }
 
 func (r *PostgresRepository) ReorderRouteDeliveries(ctx context.Context, routeID uuid.UUID, deliveryIDs []uuid.UUID) error {

@@ -24,12 +24,16 @@ type AuthMiddleware struct {
 	logger      *slog.Logger
 }
 
-// UserClaims holds standard OIDC claims we care about
+// UserClaims holds standard OIDC claims and FB Brain custom claims.
 type UserClaims struct {
 	jwt.RegisteredClaims
 	Email string   `json:"email,omitempty"`
 	Roles []string `json:"roles,omitempty"`
-	// Add other claims as needed (e.g. metadata)
+
+	// FutureBuild Brain custom claims — populated when tokens are issued by Brain's OIDC.
+	OrgID    string `json:"org_id,omitempty"`    // Brain tenant/org UUID
+	Role     string `json:"role,omitempty"`       // Brain role: owner, admin, member
+	PlanTier string `json:"plan_tier,omitempty"`  // Brain plan: free, pro, enterprise
 }
 
 // Key for Context
@@ -116,4 +120,38 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// --- FutureBuild Brain context helpers ---
+
+// ClaimsFromContext retrieves UserClaims from the request context.
+// Returns nil if no claims are present (unauthenticated or integration-key request).
+func ClaimsFromContext(ctx context.Context) *UserClaims {
+	claims, _ := ctx.Value(UserContextKey).(*UserClaims)
+	return claims
+}
+
+// BrainOrgIDFromContext extracts the FB Brain org_id from JWT claims.
+// Returns empty string if not present.
+func BrainOrgIDFromContext(ctx context.Context) string {
+	if claims := ClaimsFromContext(ctx); claims != nil {
+		return claims.OrgID
+	}
+	return ""
+}
+
+// BrainRoleFromContext extracts the FB Brain role from JWT claims.
+func BrainRoleFromContext(ctx context.Context) string {
+	if claims := ClaimsFromContext(ctx); claims != nil {
+		return claims.Role
+	}
+	return ""
+}
+
+// BrainPlanTierFromContext extracts the FB Brain plan tier from JWT claims.
+func BrainPlanTierFromContext(ctx context.Context) string {
+	if claims := ClaimsFromContext(ctx); claims != nil {
+		return claims.PlanTier
+	}
+	return ""
 }

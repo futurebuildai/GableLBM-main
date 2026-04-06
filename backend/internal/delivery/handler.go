@@ -50,6 +50,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/delivery/deliveries", h.HandleAssignOrder)                     // Assign Order to Route
 	mux.HandleFunc("PUT /api/v1/delivery/deliveries/{id}/status", h.HandleUpdateDeliveryStatus) // Complete Delivery
 	mux.HandleFunc("POST /api/v1/delivery/deliveries/{id}/adjust-qty", h.HandleAdjustQuantity)
+
+	// POD Photos
+	mux.HandleFunc("POST /api/v1/delivery/deliveries/{id}/pod-photo", h.HandleUploadPODPhoto)
+	mux.HandleFunc("GET /api/v1/delivery/deliveries/{id}/pod-photos", h.HandleListPODPhotos)
 }
 
 // Fleet
@@ -521,4 +525,96 @@ func (h *Handler) HandleAdjustQuantity(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "adjusted"})
+}
+
+// HandleUploadPODPhoto handles POST /api/v1/delivery/deliveries/{id}/pod-photo
+func (h *Handler) HandleUploadPODPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid delivery ID", http.StatusBadRequest)
+		return
+	}
+
+	// Parse multipart form (max 10MB)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "File too large", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("photo")
+	if err != nil {
+		http.Error(w, "Photo file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	photoType := r.FormValue("photo_type")
+	if photoType == "" {
+		photoType = "site"
+	}
+
+	// Save file to uploads directory
+	uploadsDir := filepath.Join("uploads", "pod")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		slog.Error("Failed to create POD uploads dir", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" {
+		ext = ".jpg"
+	}
+	filename := fmt.Sprintf("%s-%s%s", id.String(), uuid.New().String()[:8], ext)
+	filePath := filepath.Join(uploadsDir, filename)
+
+	dst, err := os.Create(filePath)
+	if err != nil {
+		slog.Error("Failed to create file", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		slog.Error("Failed to write file", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	photoURL := "/uploads/pod/" + filename
+
+	photo, err := h.service.UploadPODPhoto(r.Context(), id, photoURL, photoType)
+	if err != nil {
+		slog.Error("UploadPODPhoto failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(photo)
+}
+
+// HandleListPODPhotos handles GET /api/v1/delivery/deliveries/{id}/pod-photos
+func (h *Handler) HandleListPODPhotos(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid delivery ID", http.StatusBadRequest)
+		return
+	}
+
+	photos, err := h.service.GetPODPhotos(r.Context(), id)
+	if err != nil {
+		slog.Error("GetPODPhotos failed", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if photos == nil {
+		photos = []PODPhoto{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(photos)
 }

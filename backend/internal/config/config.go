@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -41,6 +42,12 @@ type Config struct {
 
 	// Google Gemini (PIM Image Generation)
 	GeminiAPIKey string
+
+	// FutureBuild Brain Integration
+	FBBrainEnabled        bool   // Global kill switch for Brain integration
+	FBBrainBaseURL        string // Brain API base URL (e.g. https://brain.futurebuild.io)
+	FBBrainIntegrationKey string // Shared secret for service-to-service X-Integration-Key auth
+	FBBrainPublicKeyPath  string // Path to Brain's RSA public key PEM for A2A JWS verification
 }
 
 func Load() *Config {
@@ -81,6 +88,12 @@ func Load() *Config {
 
 		// Google Gemini (PIM Image Generation)
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
+
+		// FutureBuild Brain Integration
+		FBBrainEnabled:        strings.EqualFold(getEnv("FB_BRAIN_ENABLED", "false"), "true"),
+		FBBrainBaseURL:        getEnv("FB_BRAIN_BASE_URL", "http://localhost:8081"),
+		FBBrainIntegrationKey: getEnv("FB_BRAIN_INTEGRATION_KEY", ""),
+		FBBrainPublicKeyPath:  getEnv("FB_BRAIN_PUBLIC_KEY_PATH", ""),
 	}
 }
 

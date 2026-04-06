@@ -3,17 +3,30 @@ package quote
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// AutoPOService is an optional interface for triggering purchase orders from accepted quotes.
+type AutoPOService interface {
+	CreatePOFromSpecialOrderLine(ctx context.Context, productID uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
+}
+
 type Service struct {
-	repo Repository
+	repo    Repository
+	poSvc   AutoPOService
+	logger  *slog.Logger
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, logger: slog.Default()}
+}
+
+// WithAutoPO injects the purchase order service for auto-PO on quote accept.
+func (s *Service) WithAutoPO(poSvc AutoPOService) {
+	s.poSvc = poSvc
 }
 
 func (s *Service) CreateQuote(ctx context.Context, q *Quote) error {
@@ -79,7 +92,43 @@ func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, state QuoteStat
 		q.RejectedAt = &now
 	}
 
-	return s.repo.UpdateQuote(ctx, q)
+	if err := s.repo.UpdateQuote(ctx, q); err != nil {
+		return err
+	}
+
+	// Auto-PO: when accepted, trigger POs for special-order items
+	if state == QuoteStateAccepted && s.poSvc != nil {
+		s.triggerAutoPO(ctx, q)
+	}
+
+	return nil
+}
+
+// triggerAutoPO creates purchase orders for special-order quote lines.
+// This is fire-and-forget — failures are logged but don't block acceptance.
+func (s *Service) triggerAutoPO(ctx context.Context, q *Quote) {
+	for _, line := range q.Lines {
+		// Only create POs for lines that have a unit cost (special order indicator)
+		if line.UnitCost > 0 {
+			err := s.poSvc.CreatePOFromSpecialOrderLine(
+				ctx, line.ProductID, nil, line.Quantity, line.UnitCost, line.ID,
+			)
+			if err != nil {
+				s.logger.Warn("auto-PO failed for quote line",
+					"quote_id", q.ID,
+					"line_id", line.ID,
+					"product_id", line.ProductID,
+					"error", err,
+				)
+			} else {
+				s.logger.Info("auto-PO created for quote line",
+					"quote_id", q.ID,
+					"line_id", line.ID,
+					"product_id", line.ProductID,
+				)
+			}
+		}
+	}
 }
 
 func (s *Service) UpdateQuote(ctx context.Context, q *Quote) error {

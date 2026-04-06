@@ -24,6 +24,11 @@ type Repository interface {
 	GetTenders(ctx context.Context, txID uuid.UUID) ([]POSTender, error)
 
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
+
+	// Offline sync
+	TransactionExists(ctx context.Context, id uuid.UUID) (bool, error)
+	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
+	LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error
 }
 
 // PostgresRepository implements Repository for PostgreSQL.
@@ -43,18 +48,87 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	tx.CreatedAt = time.Now()
 
 	query := `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CreatedAt,
+		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create POS transaction: %w", err)
 	}
 	return nil
+}
+
+// TransactionExists checks if a transaction with the given ID already exists (for idempotent sync).
+func (r *PostgresRepository) TransactionExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pos_transactions WHERE id = $1)`, id,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check transaction existence: %w", err)
+	}
+	return exists, nil
+}
+
+// GetProductCatalog returns all active products for offline caching.
+func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogProduct, error) {
+	query := `
+		SELECT p.id, p.sku, p.description, COALESCE(p.base_price, 0) as price,
+			COALESCE(p.uom_primary::text, 'EA') as uom,
+			COALESCE(i.quantity, 0) as in_stock
+		FROM products p
+		LEFT JOIN inventory i ON i.product_id = p.id
+		WHERE p.is_active = true OR p.is_active IS NULL
+		ORDER BY p.sku ASC
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get product catalog: %w", err)
+	}
+	defer rows.Close()
+
+	var products []CatalogProduct
+	for rows.Next() {
+		var p CatalogProduct
+		if err := rows.Scan(&p.ProductID, &p.SKU, &p.Description, &p.Price, &p.UOM, &p.InStock); err != nil {
+			return nil, fmt.Errorf("failed to scan catalog product: %w", err)
+		}
+		products = append(products, p)
+	}
+	return products, nil
+}
+
+// LogSyncBatch records a sync batch result for auditing.
+func (r *PostgresRepository) LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error {
+	errJSON := "[]"
+	if len(errorDetails) > 0 {
+		// Simple JSON encode
+		parts := make([]string, len(errorDetails))
+		for i, e := range errorDetails {
+			parts[i] = fmt.Sprintf(`{"client_id":"%s","reason":"%s"}`, e.ClientID, e.Reason)
+		}
+		errJSON = "[" + joinStrings(parts, ",") + "]"
+	}
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+		batchID, registerID, synced, duplicates, errors, errJSON,
+	)
+	return err
+}
+
+func joinStrings(parts []string, sep string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
+	}
+	return result
 }
 
 func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error) {

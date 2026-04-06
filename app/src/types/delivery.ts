@@ -66,6 +66,7 @@ export interface Delivery {
     pod_proof_url?: string;
     pod_signed_by?: string;
     pod_timestamp?: string;
+    signature_data_url?: string;
 
     delivery_instructions?: string;
 
@@ -81,6 +82,9 @@ export interface Delivery {
 
     // ETA (from route optimization)
     estimated_arrival?: string;
+
+    // Multi-photo POD
+    pod_photos?: { id: string; photo_url: string; photo_type: string; uploaded_at: string }[];
 }
 
 export interface CreateVehicleRequest {
@@ -152,6 +156,7 @@ export interface UpdateDeliveryStatusRequest {
     status: DeliveryStatus;
     pod_proof_url?: string;
     pod_signed_by?: string;
+    signature_data_url?: string;
 }
 
 export interface CapacityWarning {

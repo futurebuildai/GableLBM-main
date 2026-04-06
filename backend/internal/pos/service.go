@@ -281,3 +281,95 @@ func (s *Service) recalculateTotals(ctx context.Context, txID uuid.UUID) (*POSTr
 	tx.LineItems = items
 	return tx, nil
 }
+
+// --- Offline Sync ---
+
+// SyncOfflineTransactions replays a batch of offline POS transactions.
+// It uses client-generated UUIDs for idempotency (duplicate detection).
+func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRequest) (*OfflineSyncResponse, error) {
+	resp := &OfflineSyncResponse{
+		BatchID: req.BatchID,
+	}
+
+	syncTag := "offline-v1"
+
+	for _, offlineTx := range req.Items {
+		// 1. Idempotency check — skip if already synced
+		exists, err := s.repo.TransactionExists(ctx, offlineTx.ClientID)
+		if err != nil {
+			s.logger.Error("sync: existence check failed", "client_id", offlineTx.ClientID, "error", err)
+			resp.ErrorCount++
+			resp.Errors = append(resp.Errors, SyncError{
+				ClientID: offlineTx.ClientID.String(),
+				Reason:   fmt.Sprintf("existence check: %v", err),
+			})
+			continue
+		}
+		if exists {
+			resp.DuplicateCount++
+			continue
+		}
+
+		// 2. Create the transaction with offline metadata
+		registerID := offlineTx.RegisterID
+		if registerID == "" {
+			registerID = req.RegisterID
+		}
+
+		tx := &POSTransaction{
+			ID:              offlineTx.ClientID,
+			RegisterID:      registerID,
+			CashierID:       offlineTx.CashierID,
+			CustomerID:      offlineTx.CustomerID,
+			Status:          TransactionStatusOpen,
+			SyncedFrom:      &syncTag,
+			ClientCreatedAt: &offlineTx.ClientCreatedAt,
+		}
+
+		if err := s.repo.CreateTransaction(ctx, tx); err != nil {
+			s.logger.Error("sync: create transaction failed", "client_id", offlineTx.ClientID, "error", err)
+			resp.ErrorCount++
+			resp.Errors = append(resp.Errors, SyncError{
+				ClientID: offlineTx.ClientID.String(),
+				Reason:   fmt.Sprintf("create: %v", err),
+			})
+			continue
+		}
+
+		// 3. Replay line items
+		itemErr := false
+		for _, item := range offlineTx.Items {
+			if _, err := s.AddItem(ctx, tx.ID, item); err != nil {
+				s.logger.Warn("sync: add item failed", "client_id", offlineTx.ClientID, "product_id", item.ProductID, "error", err)
+				itemErr = true
+			}
+		}
+
+		// 4. Complete the transaction with tenders
+		if !itemErr && len(offlineTx.Tenders) > 0 {
+			if _, err := s.CompleteTransaction(ctx, tx.ID, offlineTx.Tenders); err != nil {
+				s.logger.Warn("sync: complete transaction failed", "client_id", offlineTx.ClientID, "error", err)
+				resp.ErrorCount++
+				resp.Errors = append(resp.Errors, SyncError{
+					ClientID: offlineTx.ClientID.String(),
+					Reason:   fmt.Sprintf("complete: %v", err),
+				})
+				continue
+			}
+		}
+
+		resp.SyncedCount++
+	}
+
+	// 5. Log the sync batch
+	if err := s.repo.LogSyncBatch(ctx, req.BatchID, req.RegisterID, resp.SyncedCount, resp.DuplicateCount, resp.ErrorCount, resp.Errors); err != nil {
+		s.logger.Error("sync: failed to log batch", "batch_id", req.BatchID, "error", err)
+	}
+
+	return resp, nil
+}
+
+// GetProductCatalog returns full product catalog for offline caching.
+func (s *Service) GetProductCatalog(ctx context.Context) ([]CatalogProduct, error) {
+	return s.repo.GetProductCatalog(ctx)
+}

@@ -112,6 +112,9 @@ type Delivery struct {
 	PODSignedBy  *string    `json:"pod_signed_by" db:"pod_signed_by"`
 	PODTimestamp *time.Time `json:"pod_timestamp" db:"pod_timestamp"`
 
+	// Signature canvas data (base64 PNG)
+	SignatureDataURL *string `json:"signature_data_url,omitempty" db:"signature_data_url"`
+
 	DeliveryInstructions *string `json:"delivery_instructions" db:"delivery_instructions"`
 
 	// Geolocation
@@ -131,7 +134,10 @@ type Delivery struct {
 	// Joined
 	CustomerName *string `json:"customer_name,omitempty" db:"customer_name"`
 	OrderNumber  *string `json:"order_number,omitempty" db:"order_number"`
-	Address      *string `json:"address,omitempty" db:"address"` // From Order/Customer
+	Address      *string `json:"address,omitempty" db:"address"`
+
+	// Multi-photo POD
+	PODPhotos []PODPhoto `json:"pod_photos,omitempty" db:"-"`
 }
 
 // DTOs
@@ -202,9 +208,10 @@ type AssignOrderRequest struct {
 }
 
 type UpdateDeliveryStatusRequest struct {
-	Status      DeliveryStatus `json:"status"`
-	PODProofURL *string        `json:"pod_proof_url"`
-	PODSignedBy *string        `json:"pod_signed_by"`
+	Status           DeliveryStatus `json:"status"`
+	PODProofURL      *string        `json:"pod_proof_url"`
+	PODSignedBy      *string        `json:"pod_signed_by"`
+	SignatureDataURL *string        `json:"signature_data_url,omitempty"`
 }
 
 type ReorderStopsRequest struct {
@@ -243,6 +250,10 @@ type Repository interface {
 	SetVehiclePhoto(ctx context.Context, id uuid.UUID, url string) error
 	SetDriverPhoto(ctx context.Context, id uuid.UUID, url string) error
 
+	// POD Photos
+	SavePODPhoto(ctx context.Context, photo *PODPhoto) error
+	GetPODPhotos(ctx context.Context, deliveryID uuid.UUID) ([]PODPhoto, error)
+
 	// Capacity
 	GetRouteLoadWeight(ctx context.Context, routeID uuid.UUID) (float64, error)
 	GetOrderEstimatedWeight(ctx context.Context, orderID uuid.UUID) (float64, error)
@@ -257,9 +268,19 @@ type CapacityWarning struct {
 }
 
 type PODUpdate struct {
-	ProofURL string
-	SignedBy string
-	Time     time.Time
+	ProofURL         string
+	SignedBy         string
+	SignatureDataURL string
+	Time             time.Time
+}
+
+// PODPhoto represents a photo attached to a delivery's proof of delivery.
+type PODPhoto struct {
+	ID         uuid.UUID `json:"id"`
+	DeliveryID uuid.UUID `json:"delivery_id"`
+	PhotoURL   string    `json:"photo_url"`
+	PhotoType  string    `json:"photo_type"` // "signature", "site", "damage"
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
 // QtyAdjustmentRequest is used by drivers to adjust delivered quantities on-site.

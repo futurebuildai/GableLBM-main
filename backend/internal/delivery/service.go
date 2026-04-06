@@ -13,7 +13,13 @@ type Service struct {
 	repo       Repository
 	mapsClient *MapsClient // nil if Google Maps not configured
 	notifier   DeliveryNotifierInterface
+	invoiceSvc InvoiceServiceInterface // nil if invoice service not wired
 	logger     *slog.Logger
+}
+
+// InvoiceServiceInterface auto-creates invoices from orders on delivery completion.
+type InvoiceServiceInterface interface {
+	CreateFromOrder(ctx context.Context, orderID uuid.UUID) error
 }
 
 // DeliveryNotifierInterface allows injecting the notification system.
@@ -46,6 +52,11 @@ func (s *Service) WithMaps(mc *MapsClient, logger *slog.Logger) {
 // WithNotifier sets the delivery notification service.
 func (s *Service) WithNotifier(n DeliveryNotifierInterface) {
 	s.notifier = n
+}
+
+// WithInvoiceService sets the invoice service for auto-invoicing on delivery completion.
+func (s *Service) WithInvoiceService(invoiceSvc InvoiceServiceInterface) {
+	s.invoiceSvc = invoiceSvc
 }
 
 // Fleet Management
@@ -337,9 +348,48 @@ func (s *Service) CompleteDelivery(ctx context.Context, id uuid.UUID, req Update
 			SignedBy: *req.PODSignedBy,
 			Time:     now,
 		}
+		if req.SignatureDataURL != nil {
+			pod.SignatureDataURL = *req.SignatureDataURL
+		}
 	}
 
-	return s.repo.UpdateDeliveryStatus(ctx, id, req.Status, pod)
+	if err := s.repo.UpdateDeliveryStatus(ctx, id, req.Status, pod); err != nil {
+		return err
+	}
+
+	// Auto-invoice: when delivery is completed, create invoice from order
+	if req.Status == DeliveryStatusDelivered && s.invoiceSvc != nil {
+		delivery, err := s.repo.GetDelivery(ctx, id)
+		if err != nil {
+			s.logger.Error("auto-invoice: failed to get delivery", "delivery_id", id, "error", err)
+		} else {
+			if err := s.invoiceSvc.CreateFromOrder(ctx, delivery.OrderID); err != nil {
+				s.logger.Error("auto-invoice: failed to create invoice", "order_id", delivery.OrderID, "error", err)
+			} else {
+				s.logger.Info("auto-invoice: invoice created on POD completion", "delivery_id", id, "order_id", delivery.OrderID)
+			}
+		}
+	}
+
+	return nil
+}
+
+// UploadPODPhoto saves a POD photo record for a delivery.
+func (s *Service) UploadPODPhoto(ctx context.Context, deliveryID uuid.UUID, photoURL string, photoType string) (*PODPhoto, error) {
+	photo := &PODPhoto{
+		DeliveryID: deliveryID,
+		PhotoURL:   photoURL,
+		PhotoType:  photoType,
+	}
+	if err := s.repo.SavePODPhoto(ctx, photo); err != nil {
+		return nil, fmt.Errorf("save POD photo: %w", err)
+	}
+	return photo, nil
+}
+
+// GetPODPhotos returns all POD photos for a delivery.
+func (s *Service) GetPODPhotos(ctx context.Context, deliveryID uuid.UUID) ([]PODPhoto, error) {
+	return s.repo.GetPODPhotos(ctx, deliveryID)
 }
 
 func (s *Service) ReorderStops(ctx context.Context, routeID uuid.UUID, deliveryIDs []uuid.UUID) error {

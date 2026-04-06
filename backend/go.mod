@@ -1,13 +1,14 @@
 module github.com/gablelbm/gable
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.7.0
 	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jackc/pgx/v5 v5.9.1
 	github.com/johnfercher/maroto/v2 v2.3.3
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.11.1

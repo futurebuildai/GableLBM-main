@@ -182,5 +182,23 @@ export const deliveryService = {
             body: JSON.stringify(req),
         });
         if (!res.ok) throw new Error('Failed to update delivery status');
-    }
+    },
+
+    uploadPODPhoto: async (deliveryId: string, file: File, photoType: string = 'site'): Promise<{ id: string; photo_url: string }> => {
+        const form = new FormData();
+        form.append('photo', file);
+        form.append('photo_type', photoType);
+        const res = await fetch(`${API_BASE}/api/v1/delivery/deliveries/${deliveryId}/pod-photo`, {
+            method: 'POST',
+            body: form,
+        });
+        if (!res.ok) throw new Error('Failed to upload POD photo');
+        return res.json();
+    },
+
+    getPODPhotos: async (deliveryId: string): Promise<{ id: string; photo_url: string; photo_type: string; uploaded_at: string }[]> => {
+        const res = await fetch(`${API_BASE}/api/v1/delivery/deliveries/${deliveryId}/pod-photos`);
+        if (!res.ok) throw new Error('Failed to fetch POD photos');
+        return res.json();
+    },
 };

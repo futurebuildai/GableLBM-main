@@ -19,6 +19,7 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers POS API routes.
+// NOTE: POS routes use /api/pos/* (legacy). Migrate to /api/v1/pos/* in API versioning sprint.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Transaction lifecycle
 	mux.HandleFunc("POST /api/pos/transactions", h.StartTransaction)
@@ -31,6 +32,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// History and search
 	mux.HandleFunc("GET /api/pos/transactions", h.ListTransactions)
 	mux.HandleFunc("GET /api/pos/products/search", h.SearchProducts)
+
+	// Offline sync
+	mux.HandleFunc("POST /api/pos/sync", h.SyncOffline)
+	mux.HandleFunc("GET /api/pos/catalog", h.GetCatalog)
 }
 
 // --- Request types ---
@@ -227,3 +232,47 @@ func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
+
+// SyncOffline handles POST /api/pos/sync — replays offline POS transactions.
+func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
+	var req OfflineSyncRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.BatchID == "" {
+		http.Error(w, "batch_id is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Items) == 0 {
+		http.Error(w, "items cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := h.service.SyncOfflineTransactions(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// GetCatalog handles GET /api/pos/catalog — returns full product catalog for offline cache.
+func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
+	catalog, err := h.service.GetProductCatalog(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if catalog == nil {
+		catalog = []CatalogProduct{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(catalog)
+}
+
