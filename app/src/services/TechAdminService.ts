@@ -108,3 +108,47 @@ export const techAdminService = {
         if (!response.ok) throw new Error('Failed to delete Gemini API key');
     },
 };
+
+// --- EDI Trading Partner Types & Service ---
+
+export interface EDITradingPartner {
+    id: string;
+    name: string;
+    isa_sender_id: string;
+    isa_sender_qualifier: string;
+    isa_receiver_id: string;
+    isa_receiver_qualifier: string;
+    gs_sender_id: string;
+    gs_receiver_id: string;
+    edi_version: string;
+    transport_type: string;
+    transport_config: string;
+    supported_documents: string[];
+    is_active: boolean;
+    notes: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export const ediService = {
+    async listPartners(): Promise<EDITradingPartner[]> {
+        const response = await fetch(`${API_URL}/api/v1/edi/partners`);
+        if (!response.ok) throw new Error('Failed to fetch EDI partners');
+        return response.json();
+    },
+
+    async deletePartner(id: string): Promise<void> {
+        const response = await fetch(`${API_URL}/api/v1/edi/partners/${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete EDI partner');
+    },
+
+    async togglePartner(partner: EDITradingPartner): Promise<EDITradingPartner> {
+        const response = await fetch(`${API_URL}/api/v1/edi/partners/${partner.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...partner, is_active: !partner.is_active }),
+        });
+        if (!response.ok) throw new Error('Failed to update EDI partner');
+        return response.json();
+    },
+};

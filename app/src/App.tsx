@@ -28,6 +28,7 @@ import { RFCDashboard } from "./pages/governance/RFCDashboard";
 import { NewRFC } from "./pages/governance/NewRFC";
 import { RFCDetail } from "./pages/governance/RFCDetail";
 import { TechAdminPage } from "./pages/admin/tech_admin/TechAdminPage";
+import { PricingMatrix } from "./pages/admin/pricing/PricingMatrix";
 import { AccountsPage } from "./pages/accounts/AccountsPage";
 import { AccountDetailPage } from "./pages/accounts/AccountDetailPage";
 import QuoteList from "./pages/quotes/QuoteList";
@@ -112,6 +113,7 @@ function App() {
               <Route path=":id" element={<RFCDetail />} />
             </Route>
             <Route path="admin" element={<TechAdminPage />} />
+            <Route path="pricing" element={<PricingMatrix />} />
             <Route path="accounts">
               <Route index element={<AccountsPage />} />
               <Route path=":id" element={<AccountDetailPage />} />

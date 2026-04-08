@@ -10,11 +10,18 @@ import (
 )
 
 type Service struct {
-	repo Repository
+	repo   Repository
+	catSvc *CategoryPricingService
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// WithCategoryPricing enables the category-aware pricing engine.
+// When set, step 5 of the waterfall uses category rules instead of hardcoded tier multipliers.
+func (s *Service) WithCategoryPricing(catSvc *CategoryPricingService) {
+	s.catSvc = catSvc
 }
 
 // CalculatePrice implements a 6-level pricing waterfall:
@@ -106,7 +113,42 @@ func (s *Service) CalculatePriceWithQty(ctx context.Context, cust *customer.Cust
 		}, nil
 	}
 
-	// 5. Check Price Level (Tier)
+	// 5a. Check Category-Based Pricing (if enabled)
+	if s.catSvc != nil {
+		resolved, catErr := s.catSvc.ResolveEffectivePrice(ctx, cust.ID, string(cust.Tier), productID)
+		if catErr == nil && resolved != nil && resolved.Rule != nil {
+			finalPrice := s.catSvc.ApplyRule(resolved.Rule, basePrice, resolved.CostPrice)
+
+			// Margin floor protection
+			if resolved.Rule.MarginFloorPct != nil && basePrice > 0 {
+				minPrice := basePrice * (1 - *resolved.Rule.MarginFloorPct/100)
+				if finalPrice < minPrice {
+					finalPrice = minPrice
+				}
+			}
+
+			discountPct := 0.0
+			if basePrice > 0 {
+				discountPct = (basePrice - finalPrice) / basePrice * 100
+			}
+
+			catSource := SourceCategoryTier
+			if resolved.Rule.TargetType == TargetTypeAccount {
+				catSource = SourceCategoryAccount
+			}
+
+			return CalculatedPrice{
+				ProductID:     productID,
+				OriginalPrice: basePrice,
+				FinalPrice:    math.Round(finalPrice*100) / 100,
+				DiscountPct:   math.Round(discountPct*100) / 100,
+				Source:        catSource,
+				Details:       fmt.Sprintf("%s (%s)", resolved.Rule.CategoryName, resolved.MatchType),
+			}, nil
+		}
+	}
+
+	// 5b. Check Price Level (Tier) — hardcoded fallback when category pricing is disabled or no rule matches
 	multiplier := 1.0
 	details := ""
 	source := SourceRetail

@@ -17,8 +17,20 @@ func (m *MockRepository) ListVehicles(ctx context.Context) ([]Vehicle, error) { 
 func (m *MockRepository) GetVehicle(ctx context.Context, id uuid.UUID) (*Vehicle, error) {
 	return nil, nil
 }
-func (m *MockRepository) CreateDriver(ctx context.Context, d *Driver) error { return nil }
+func (m *MockRepository) UpdateVehicle(ctx context.Context, id uuid.UUID, v *Vehicle) error {
+	return nil
+}
+func (m *MockRepository) DeleteVehicle(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *MockRepository) CreateDriver(ctx context.Context, d *Driver) error     { return nil }
+func (m *MockRepository) GetDriver(ctx context.Context, id uuid.UUID) (*Driver, error) {
+	return nil, nil
+}
 func (m *MockRepository) ListDrivers(ctx context.Context) ([]Driver, error) { return nil, nil }
+func (m *MockRepository) UpdateDriver(ctx context.Context, id uuid.UUID, d *Driver) error {
+	return nil
+}
+// F-01: Missing DeleteDriver stub caused go vet to fail
+func (m *MockRepository) DeleteDriver(ctx context.Context, id uuid.UUID) error { return nil }
 
 func (m *MockRepository) CreateRoute(ctx context.Context, r *Route) error { return nil }
 func (m *MockRepository) GetRoute(ctx context.Context, id uuid.UUID) (*Route, error) {
@@ -62,6 +74,17 @@ func (m *MockRepository) GetRouteLoadWeight(ctx context.Context, routeID uuid.UU
 
 func (m *MockRepository) GetOrderEstimatedWeight(ctx context.Context, orderID uuid.UUID) (float64, error) {
 	return 0, nil
+}
+
+func (m *MockRepository) SetVehiclePhoto(ctx context.Context, id uuid.UUID, url string) error {
+	return nil
+}
+func (m *MockRepository) SetDriverPhoto(ctx context.Context, id uuid.UUID, url string) error {
+	return nil
+}
+func (m *MockRepository) SavePODPhoto(ctx context.Context, photo *PODPhoto) error { return nil }
+func (m *MockRepository) GetPODPhotos(ctx context.Context, deliveryID uuid.UUID) ([]PODPhoto, error) {
+	return nil, nil
 }
 
 func TestReorderStops(t *testing.T) {

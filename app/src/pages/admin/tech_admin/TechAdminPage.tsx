@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles, Shield, AlertCircle, ImageIcon } from 'lucide-react';
+import { Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles, Shield, AlertCircle, ImageIcon, Network, Power, RefreshCw } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
-import { techAdminService, type APIKey, type AISettings } from '../../../services/TechAdminService';
+import { techAdminService, ediService, type APIKey, type AISettings, type EDITradingPartner } from '../../../services/TechAdminService';
 import { cn } from '../../../lib/utils';
 
 // --- Subcomponents (In-file for speed, can break out later) ---
@@ -194,29 +194,166 @@ const IntegrationCard = ({ name, description, icon: Icon, connected = false }: {
     </div>
 );
 
+const EDITradingPartnersManager = () => {
+    const [partners, setPartners] = useState<EDITradingPartner[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        loadPartners();
+    }, []);
+
+    const loadPartners = async () => {
+        setLoading(true);
+        try {
+            const data = await ediService.listPartners();
+            setPartners(data);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggle = async (partner: EDITradingPartner) => {
+        try {
+            await ediService.togglePartner(partner);
+            loadPartners();
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
+        try {
+            await ediService.deletePartner(id);
+            loadPartners();
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    return (
+        <div className="space-y-6 mt-12 pt-12 border-t border-white/10">
+            <div className="flex justify-between items-center">
+                <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Network size={20} className="text-gable-green" />
+                        EDI Trading Partners
+                    </h2>
+                    <p className="text-slate-400 text-sm">Manage vendor-agnostic EDI configurations and catalog sync.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadPartners} className="text-slate-400 hover:text-white">
+                    <RefreshCw size={14} className={cn("mr-2", loading && "animate-spin")} />
+                    Refresh
+                </Button>
+            </div>
+
+            <div className="bg-slate-steel border border-white/5 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-white/5 text-slate-400 font-medium">
+                        <tr>
+                            <th className="px-4 py-3">Partner Name</th>
+                            <th className="px-4 py-3">EDI Version</th>
+                            <th className="px-4 py-3">Transport</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                        {partners.map((partner) => (
+                            <tr key={partner.id} className="hover:bg-white/5 transition-colors group">
+                                <td className="px-4 py-3">
+                                    <span className="font-medium text-white">{partner.name}</span>
+                                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{partner.id.split('-')[0]}...</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                    <code className="text-xs bg-white/5 px-2 py-1 rounded text-slate-300">{partner.edi_version}</code>
+                                </td>
+                                <td className="px-4 py-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-slate-300">{partner.transport_type}</span>
+                                        <span className="text-xs text-slate-500 font-mono">({partner.isa_sender_id} ➔ {partner.isa_receiver_id})</span>
+                                    </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                    <button 
+                                        onClick={() => handleToggle(partner)}
+                                        className={cn(
+                                            "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors",
+                                            partner.is_active ? "bg-gable-green/10 text-gable-green hover:bg-gable-green/20" : "bg-slate-500/10 text-slate-500 hover:bg-slate-500/20"
+                                        )}
+                                    >
+                                        <Power size={10} className="mr-1" />
+                                        {partner.is_active ? 'Active' : 'Inactive'}
+                                    </button>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                    <button
+                                        onClick={() => handleDelete(partner.id)}
+                                        className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-white/5"
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                        {partners.length === 0 && !loading && (
+                            <tr>
+                                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                                    No EDI Trading Partners configured.
+                                </td>
+                            </tr>
+                        )}
+                        {loading && partners.length === 0 && (
+                            <tr>
+                                <td colSpan={5} className="px-4 py-8 text-center text-slate-500 italic">
+                                    Loading partners...
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4 flex gap-4">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+                <div className="text-sm">
+                    <p className="text-amber-200 font-medium mb-1">Developer Mode</p>
+                    <p className="text-amber-500/80">EDI partners are currently in read+toggle mode. Full transport configuration (SFTP/AS2 keys) and catalog mapping UI are planned for the next sprint.</p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const Integrations = () => {
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <IntegrationCard
-                name="Run Payments"
-                description="Secure payment processing for card-present and online transactions. Preferred Partner."
-                icon={Activity} // Placeholder icon
-            />
-            <IntegrationCard
-                name="QuickBooks Online"
-                description="Automatically sync invoices, payments, and customers with your General Ledger."
-                icon={Globe}
-            />
-            <IntegrationCard
-                name="Avalara AvaTax"
-                description="Real-time tax calculation and compliance for all 50 states."
-                icon={Globe}
-            />
-            <IntegrationCard
-                name="Zapier / Make"
-                description="Connect GableLBM to 5,000+ other apps via webhooks."
-                icon={Activity}
-            />
+        <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <IntegrationCard
+                    name="Run Payments"
+                    description="Secure payment processing for card-present and online transactions. Preferred Partner."
+                    icon={Activity} // Placeholder icon
+                />
+                <IntegrationCard
+                    name="QuickBooks Online"
+                    description="Automatically sync invoices, payments, and customers with your General Ledger."
+                    icon={Globe}
+                />
+                <IntegrationCard
+                    name="Avalara AvaTax"
+                    description="Real-time tax calculation and compliance for all 50 states."
+                    icon={Globe}
+                />
+                <IntegrationCard
+                    name="Zapier / Make"
+                    description="Connect GableLBM to 5,000+ other apps via webhooks."
+                    icon={Activity}
+                />
+            </div>
+            
+            <EDITradingPartnersManager />
         </div>
     );
 };

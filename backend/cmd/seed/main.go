@@ -894,6 +894,24 @@ func main() {
 	}
 	fmt.Println("Seed: Portal Users (demo@gable.com / summit@gable.com / elite@gable.com, password: 'password')")
 
+	// =========================================================================
+	// 22. OFFLINE POS SYNC LOGS
+	// =========================================================================
+	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
+		VALUES ('sync-batch-001', 'REG-1', 42, 0, 0, NOW() - interval '2 hours')`)
+	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
+		VALUES ('sync-batch-002', 'REG-2', 15, 2, 0, NOW() - interval '30 minutes')`)
+	fmt.Println("Seed: Offline POS Sync Logs")
+
+	// =========================================================================
+	// 23. EDI TRADING PARTNERS
+	// =========================================================================
+	db.Exec(`INSERT INTO edi_trading_partners (name, isa_sender_id, isa_receiver_id, gs_sender_id, gs_receiver_id, transport_type)
+		VALUES ('Orgill', 'ORG-123456', 'GABLE-987654', 'ORG', 'GAB', 'SFTP')`)
+	db.Exec(`INSERT INTO edi_trading_partners (name, isa_sender_id, isa_receiver_id, gs_sender_id, gs_receiver_id, transport_type)
+		VALUES ('Do It Best', 'DIB-111111', 'GABLE-987654', 'DIB', 'GAB', 'AS2')`)
+	fmt.Println("Seed: EDI Trading Partners")
+
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE FOR PROFESSIONAL DEMO  ")
 	fmt.Println("==================================================")

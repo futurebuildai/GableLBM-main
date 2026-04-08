@@ -17,7 +17,10 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 	}
 
 	// Setup Code (similar to main.go wiring)
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Configuration error: %v", err)
+	}
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
 		t.Fatalf("Failed to connect to DB: %v", err)

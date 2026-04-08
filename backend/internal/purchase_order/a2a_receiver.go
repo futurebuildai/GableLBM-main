@@ -61,11 +61,14 @@ type A2APurchaseOrderPayload struct {
 }
 
 // A2APurchaseOrderLine represents a single line item in an A2A PO.
+// F-03: Quantity and Cost are float64 intentionally — they represent unit quantities
+// and per-unit prices (e.g. 2.5 sheets at $12.50). These are NOT financial fee fields
+// (which use int64 cents in Brain's financial engine). They mirror CreatePOLineInput.
 type A2APurchaseOrderLine struct {
 	ProductID   string  `json:"product_id"`
 	Description string  `json:"description"`
-	Quantity    float64 `json:"quantity"`
-	Cost        float64 `json:"cost"`
+	Quantity    float64 `json:"quantity"` // Unit quantity (e.g. 2.5 sheets), not cents
+	Cost        float64 `json:"cost"`     // Per-unit cost in dollars, not cents
 }
 
 // ReceiveWebhook processes inbound A2A webhook events from FB Brain.

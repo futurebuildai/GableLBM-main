@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// PriceCalculator resolves customer-specific pricing for a product.
+type PriceCalculator interface {
+	CalculateItemPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, basePrice float64, quantity float64) (float64, error)
+}
+
 // Service handles POS business logic.
 type Service struct {
 	db           *database.DB
@@ -22,7 +27,13 @@ type Service struct {
 	inventorySvc *inventory.Service
 	invoiceSvc   *invoice.Service
 	paymentSvc   *payment.Service
+	priceCalc    PriceCalculator
 	logger       *slog.Logger
+}
+
+// WithPricing enables customer-specific pricing resolution for POS line items.
+func (s *Service) WithPricing(calc PriceCalculator) {
+	s.priceCalc = calc
 }
 
 // NewService creates a new POS service.
@@ -74,7 +85,19 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 		return nil, fmt.Errorf("product not found: %w", err)
 	}
 
-	unitPriceCents := int64(prod.BasePrice*100.0 + 0.5)
+	// Resolve effective price (customer-specific if available)
+	effectivePrice := prod.BasePrice
+	if s.priceCalc != nil {
+		// Get the transaction to check for customer association
+		tx, txErr := s.repo.GetTransaction(ctx, txID)
+		if txErr == nil && tx.CustomerID != nil {
+			if resolved, pErr := s.priceCalc.CalculateItemPrice(ctx, *tx.CustomerID, req.ProductID, prod.BasePrice, req.Quantity); pErr == nil {
+				effectivePrice = resolved
+			}
+		}
+	}
+
+	unitPriceCents := int64(effectivePrice*100.0 + 0.5)
 	lineTotalCents := int64(float64(unitPriceCents) * req.Quantity)
 
 	item := &POSLineItem{

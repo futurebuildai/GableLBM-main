@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -48,12 +49,13 @@ type Config struct {
 	FBBrainBaseURL        string // Brain API base URL (e.g. https://brain.futurebuild.io)
 	FBBrainIntegrationKey string // Shared secret for service-to-service X-Integration-Key auth
 	FBBrainPublicKeyPath  string // Path to Brain's RSA public key PEM for A2A JWS verification
+	FBBrainOrgID          string // Tenant org_id for Brain financial attribution
 }
 
-func Load() *Config {
+func Load() (*Config, error) {
 	_ = godotenv.Load() // Load .env if it exists, ignore if not
 
-	return &Config{
+	cfg := &Config{
 		Port:        getEnv("PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://gable_user:gable_password@localhost:5434/gable_db?sslmode=disable"),
 		JWKSURL:     getEnv("JWKS_URL", ""),
@@ -94,7 +96,15 @@ func Load() *Config {
 		FBBrainBaseURL:        getEnv("FB_BRAIN_BASE_URL", "http://localhost:8081"),
 		FBBrainIntegrationKey: getEnv("FB_BRAIN_INTEGRATION_KEY", ""),
 		FBBrainPublicKeyPath:  getEnv("FB_BRAIN_PUBLIC_KEY_PATH", ""),
+		FBBrainOrgID:          getEnv("FB_BRAIN_ORG_ID", ""),
 	}
+
+	// F-05: Startup validation — fail fast if Brain is enabled but missing required config
+	if cfg.FBBrainEnabled && cfg.FBBrainIntegrationKey == "" {
+		return nil, fmt.Errorf("FB_BRAIN_ENABLED=true but FB_BRAIN_INTEGRATION_KEY is empty; cannot authenticate with Brain")
+	}
+
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {

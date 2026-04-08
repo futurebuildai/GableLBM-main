@@ -9,12 +9,14 @@ import (
 type PricingSource string
 
 const (
-	SourceContract      PricingSource = "CONTRACT"
-	SourceTier          PricingSource = "TIER"
-	SourceRetail        PricingSource = "RETAIL"
-	SourceQuantityBreak PricingSource = "QUANTITY_BREAK"
-	SourceJobOverride   PricingSource = "JOB_OVERRIDE"
-	SourcePromotional   PricingSource = "PROMOTIONAL"
+	SourceContract        PricingSource = "CONTRACT"
+	SourceTier            PricingSource = "TIER"
+	SourceRetail          PricingSource = "RETAIL"
+	SourceQuantityBreak   PricingSource = "QUANTITY_BREAK"
+	SourceJobOverride     PricingSource = "JOB_OVERRIDE"
+	SourcePromotional     PricingSource = "PROMOTIONAL"
+	SourceCategoryTier    PricingSource = "CATEGORY_TIER"
+	SourceCategoryAccount PricingSource = "CATEGORY_ACCOUNT"
 )
 
 type RuleType string

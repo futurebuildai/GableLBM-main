@@ -86,6 +86,8 @@ func (n *BrainNotifier) NotifyPayment(ctx context.Context, notification Transact
 		return
 	}
 	defer resp.Body.Close()
+	// F-07: Drain body before close for HTTP/1.1 connection reuse.
+	// The defer runs after this line executes, so the body is fully drained first.
 	io.Copy(io.Discard, resp.Body) //nolint:errcheck
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

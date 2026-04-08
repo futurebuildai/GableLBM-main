@@ -82,7 +82,8 @@ func (m *MaestroClient) Chat(ctx context.Context, jwt, message string) (string, 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// F-02: Cap response body to 10MB to prevent unbounded reads
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return "", fmt.Errorf("reading maestro response: %w", err)
 	}

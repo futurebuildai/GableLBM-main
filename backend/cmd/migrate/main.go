@@ -14,7 +14,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
 
 	// Use standard database/sql with pgx driver for simplicity in migrations
 	db, err := sql.Open("pgx", cfg.DatabaseURL)

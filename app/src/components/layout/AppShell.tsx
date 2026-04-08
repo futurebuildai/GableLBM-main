@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, Truck, FileText, Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search, ShoppingBag, Store, BookOpen } from 'lucide-react';
+import { LayoutDashboard, LayoutGrid, Package, Truck, FileText, Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search, ShoppingBag, Store, BookOpen } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -83,7 +83,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </nav>
 
                 {/* Footer / Admin */}
-                <div className="p-3 border-t border-white/5 bg-slate-steel/50">
+                <div className="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
+                    <NavItem to="/erp/pricing" icon={<LayoutGrid size={20} />} label="Pricing" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/pricing')} />
                     <NavItem to="/erp/admin" icon={<Settings size={20} />} label="Admin" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/admin')} />
                 </div>
 
