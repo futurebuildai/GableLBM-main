@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,7 +64,11 @@ func main() {
 	slog.SetDefault(logger)
 
 	// 2. Load Config
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("Configuration error", "error", err)
+		os.Exit(1)
+	}
 	logger.Info("Starting server...", "port", cfg.Port)
 
 	// 3. Database Connection
@@ -207,6 +212,20 @@ func main() {
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux)
 
+	// Category Pricing Engine (feature-flagged)
+	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
+		catPricingRepo := pricing.NewCategoryRepository(db)
+		catPricingSvc := pricing.NewCategoryPricingService(catPricingRepo)
+		pricingSvc.WithCategoryPricing(catPricingSvc)
+
+		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
+		catPricingHandler.RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
+
+		logger.Info("Category-based pricing engine enabled")
+	} else {
+		logger.Info("Category-based pricing disabled (set CATEGORY_PRICING_ENABLED=true to enable)")
+	}
+
 	// Rebate Module
 	rebateRepo := pricing.NewRebateRepository(db)
 	rebateSvc := pricing.NewRebateService(rebateRepo)
@@ -286,6 +305,7 @@ func main() {
 	// POS Module (Retail Counter Sales)
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
+	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux)
 
@@ -459,6 +479,35 @@ func main() {
 	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc)
 	integrationHandler.RegisterRoutes(mux)
 
+	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch
+	if cfg.FBBrainEnabled {
+		logger.Info("FB Brain integration enabled", "base_url", cfg.FBBrainBaseURL)
+
+		// Maestro AI Gateway — routes AI calls through Brain for metering
+		maestroClient := ai.NewMaestroClient(cfg.FBBrainBaseURL, logger)
+		_ = maestroClient // Available for AI module injection
+
+		// Brain Notifier — sends financial events (invoice payments) to Brain
+		brainNotifier := payment.NewBrainNotifier(cfg.FBBrainBaseURL, cfg.FBBrainIntegrationKey, logger)
+		paymentSvc.WithBrainNotifier(brainNotifier, cfg.FBBrainOrgID)
+
+		// A2A Receiver — inbound purchase order webhooks from Brain
+		if cfg.FBBrainPublicKeyPath != "" {
+			brainPubKey, err := purchase_order.LoadBrainPublicKey(cfg.FBBrainPublicKeyPath)
+			if err != nil {
+				logger.Error("Failed to load Brain public key for A2A receiver", "error", err, "path", cfg.FBBrainPublicKeyPath)
+			} else {
+				a2aReceiver := purchase_order.NewA2AReceiver(brainPubKey, poSvc, db.Pool, logger)
+				mux.HandleFunc("POST /api/v1/a2a/purchase-order", a2aReceiver.ReceiveWebhook)
+				logger.Info("A2A purchase order receiver mounted", "path", "/api/v1/a2a/purchase-order")
+			}
+		} else {
+			logger.Warn("FB_BRAIN_PUBLIC_KEY_PATH not set — A2A receiver disabled (no JWS verification key)")
+		}
+	} else {
+		logger.Info("FB Brain integration disabled (FB_BRAIN_ENABLED=false)")
+	}
+
 	// Static file serving for uploaded photos
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
@@ -598,4 +647,22 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 		}
 	}
 	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, vendorID, desc, quantity, unitCost)
+}
+
+// posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.
+type posCalcAdapter struct {
+	pricingSvc  *pricing.Service
+	customerSvc *customer.Service
+}
+
+func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, basePrice float64, quantity float64) (float64, error) {
+	cust, err := a.customerSvc.GetCustomer(ctx, customerID)
+	if err != nil {
+		return basePrice, nil // Fallback to base price if customer lookup fails
+	}
+	cp, err := a.pricingSvc.CalculatePriceWithQty(ctx, cust, productID, basePrice, quantity, nil)
+	if err != nil {
+		return basePrice, nil
+	}
+	return cp.FinalPrice, nil
 }

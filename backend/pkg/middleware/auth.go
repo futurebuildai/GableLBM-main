@@ -122,6 +122,42 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
+// RequireRole returns middleware that restricts access to users with one of the allowed roles.
+// In dev mode (no auth configured, claims == nil), requests pass through.
+func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(allowedRoles))
+	for _, r := range allowedRoles {
+		allowed[r] = true
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := ClaimsFromContext(r.Context())
+			if claims == nil {
+				// Dev mode: no auth configured, pass through
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Check Brain role (single role field)
+			if claims.Role != "" && allowed[claims.Role] {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Check OIDC roles (array field)
+			for _, role := range claims.Roles {
+				if allowed[role] {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			http.Error(w, "Forbidden: insufficient role", http.StatusForbidden)
+		})
+	}
+}
+
 // --- FutureBuild Brain context helpers ---
 
 // ClaimsFromContext retrieves UserClaims from the request context.
