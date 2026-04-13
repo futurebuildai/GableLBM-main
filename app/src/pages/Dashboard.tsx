@@ -107,7 +107,7 @@ const fetchDashboardData = useCallback(async (showSpinner = false) => {
                         className="flex items-center gap-2 text-zinc-400 text-sm font-medium mb-1"
                     >
                         <Calendar className="w-4 h-4" />
-                        {currentDate} | <span className="text-blue-500 font-mono text-xs">Build: {BUILD_VER}</span>
+                        {currentDate}
                     </motion.div>
                     <h1 className="text-display-large text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                         Good Afternoon, Colton

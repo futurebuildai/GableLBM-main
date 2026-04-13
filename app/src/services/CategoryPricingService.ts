@@ -35,7 +35,7 @@ export const categoryPricingService = {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
     const res = await fetch(`${API_URL}/api/v1/pricing/category-rules${query}`);
     if (!res.ok) throw new Error('Failed to load rules');
-    return res.json();
+    return (await res.json()) ?? [];
   },
 
   listRulesPaginated: async (params?: Record<string, string>): Promise<PaginatedRulesResponse> => {

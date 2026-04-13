@@ -172,6 +172,9 @@ func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if rules == nil {
+		rules = []CategoryPricingRule{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rules)

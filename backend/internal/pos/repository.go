@@ -315,11 +315,12 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, txID uuid.UUID) ([]
 
 func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error) {
 	sql := `
-		SELECT p.id, p.sku, p.description, COALESCE(p.price, 0) as price, COALESCE(p.uom, 'EA') as uom,
-			COALESCE(i.quantity, 0) as in_stock
+		SELECT p.id, p.sku, p.description, COALESCE(p.base_price, 0) as price, COALESCE(p.uom_primary::text, 'EA') as uom,
+			COALESCE(SUM(i.quantity), 0) as in_stock
 		FROM products p
 		LEFT JOIN inventory i ON i.product_id = p.id
 		WHERE p.sku ILIKE $1 OR p.description ILIKE $1
+		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
 		ORDER BY p.sku ASC
 		LIMIT $2
 	`
