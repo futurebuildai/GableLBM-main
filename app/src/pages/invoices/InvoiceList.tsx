@@ -51,7 +51,7 @@ export default function InvoiceList() {
                                 invoices.map((inv) => (
                                     <tr
                                         key={inv.id}
-                                        onClick={() => navigate(`/erp/invoices/${inv.id}`)}
+                                        onClick={() => navigate(`/invoices/${inv.id}`)}
                                         className="hover:bg-zinc-800/50 transition-colors cursor-pointer"
                                     >
                                         <td className="px-6 py-3 font-mono text-zinc-100">{inv.id.slice(0, 8)}</td>

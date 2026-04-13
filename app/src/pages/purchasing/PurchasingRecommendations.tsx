@@ -49,14 +49,14 @@ export function PurchasingRecommendations() {
             cost: String(rec.estimated_cost / rec.suggested_qty),
         });
         if (rec.vendor_name) params.set('vendor_name', rec.vendor_name);
-        navigate(`/erp/purchasing/new?${params.toString()}`);
+        navigate(`/purchasing/new?${params.toString()}`);
     };
 
     return (
         <PageTransition>
             <div className="flex items-center gap-4 mb-6">
                 <button
-                    onClick={() => navigate('/erp/purchasing')}
+                    onClick={() => navigate('/purchasing')}
                     className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors"
                 >
                     <ArrowLeft className="w-5 h-5" />

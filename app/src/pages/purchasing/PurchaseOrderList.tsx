@@ -140,7 +140,7 @@ export function PurchaseOrderList() {
                                 {pos.map((po) => (
                                     <tr
                                         key={po.id}
-                                        onClick={() => navigate(`/erp/purchasing/${po.id}`)}
+                                        onClick={() => navigate(`/purchasing/${po.id}`)}
                                         className="hover:bg-white/5 cursor-pointer transition-colors"
                                     >
                                         <td className="px-6 py-4 font-mono text-white">

@@ -93,7 +93,7 @@ export function RFCDashboard() {
                                         return (
                                             <tr
                                                 key={rfc.id}
-                                                onClick={() => navigate(`/erp/governance/${rfc.id}`)}
+                                                onClick={() => navigate(`/governance/${rfc.id}`)}
                                                 className="group hover:bg-white/5 cursor-pointer transition-colors"
                                             >
                                                 <td className="px-6 py-4">

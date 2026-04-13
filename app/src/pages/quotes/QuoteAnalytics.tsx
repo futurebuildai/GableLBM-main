@@ -34,7 +34,7 @@ export default function QuoteAnalytics() {
         <div className="space-y-6 max-w-6xl mx-auto">
             {/* Header */}
             <div>
-                <button onClick={() => navigate('/erp/quotes')} className="text-zinc-500 hover:text-white text-sm flex items-center gap-1 mb-3 transition-colors">
+                <button onClick={() => navigate('/quotes')} className="text-zinc-500 hover:text-white text-sm flex items-center gap-1 mb-3 transition-colors">
                     <ArrowLeft size={14} /> Back to Quotes
                 </button>
                 <h1 className="text-3xl font-bold tracking-tight text-white font-mono flex items-center gap-3">

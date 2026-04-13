@@ -48,7 +48,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ products, onAdju
                                 const isLowStock = available < 100; // Example threshold
 
                                 return (
-                                    <tr key={p.id} className="group hover:bg-white/5 transition-colors cursor-pointer" onClick={() => navigate(`/erp/inventory/${p.id}`)}>
+                                    <tr key={p.id} className="group hover:bg-white/5 transition-colors cursor-pointer" onClick={() => navigate(`/inventory/${p.id}`)}>
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col">
                                                 <span className="font-mono font-bold text-white group-hover:text-gable-green transition-colors">

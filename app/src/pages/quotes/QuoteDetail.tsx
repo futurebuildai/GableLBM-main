@@ -54,7 +54,7 @@ export default function QuoteDetail() {
             const orderPayload = await QuoteService.convertToOrder(quote.id);
             const order = await OrderService.createOrder(orderPayload);
             showToast('Quote converted to order', 'success');
-            navigate(`/erp/orders/${order.id}`);
+            navigate(`/orders/${order.id}`);
         } catch (error) {
             showToast(`Failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         } finally {
@@ -85,7 +85,7 @@ export default function QuoteDetail() {
             {/* Header */}
             <div className="flex items-center justify-between pb-6 border-b border-white/10">
                 <div>
-                    <button onClick={() => navigate('/erp/quotes')} className="text-zinc-500 hover:text-white text-sm flex items-center gap-1 mb-3 transition-colors">
+                    <button onClick={() => navigate('/quotes')} className="text-zinc-500 hover:text-white text-sm flex items-center gap-1 mb-3 transition-colors">
                         <ArrowLeft size={14} /> Back to Quotes
                     </button>
                     <div className="flex items-center gap-4 mb-2">

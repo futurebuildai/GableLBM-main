@@ -95,7 +95,7 @@ export const QuoteBuilder = () => {
                 const quote = await QuoteService.getQuote(editId);
                 if (quote.state !== 'DRAFT') {
                     showToast('Only draft quotes can be edited', 'error');
-                    navigate(`/erp/quotes/${editId}`);
+                    navigate(`/quotes/${editId}`);
                     return;
                 }
                 // Load customer
@@ -123,7 +123,7 @@ export const QuoteBuilder = () => {
             } catch (err) {
                 console.error('Failed to load quote for editing', err);
                 showToast('Failed to load quote', 'error');
-                navigate('/erp/quotes');
+                navigate('/quotes');
             } finally {
                 setInitialLoading(false);
             }
@@ -213,7 +213,7 @@ export const QuoteBuilder = () => {
                 quote = await QuoteService.createQuote(payload);
                 showToast('Draft quote created', 'success');
             }
-            navigate(`/erp/quotes/${quote.id}`);
+            navigate(`/quotes/${quote.id}`);
         } catch (err) {
             console.error(err);
             showToast('Failed to save quote', 'error');

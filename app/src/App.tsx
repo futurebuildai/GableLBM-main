@@ -63,7 +63,6 @@ import { ProjectDashboard } from "./pages/projects/ProjectDashboard";
 import POSTerminal from "./pages/pos/POSTerminal";
 import { ProductDetail } from "./pages/inventory/ProductDetail";
 import { FleetManagement } from "./pages/logistics/FleetManagement";
-import { DemoLanding } from "./pages/DemoLanding";
 
 import { ToastProvider } from "./components/ui/Toast";
 
@@ -72,14 +71,11 @@ function App() {
     <ToastProvider>
       <BrowserRouter>
         <Routes>
-          {/* Demo Landing */}
-          <Route path="/" element={<DemoLanding />} />
-
           {/* POS Terminal */}
           <Route path="/pos" element={<POSTerminal />} />
 
-          {/* ERP Desktop (moved from / to /erp) */}
-          <Route path="/erp" element={<AppShell><Outlet /></AppShell>}>
+          {/* ERP Desktop */}
+          <Route path="/" element={<AppShell><Outlet /></AppShell>}>
             <Route index element={<Dashboard />} />
             <Route path="inventory" element={<Inventory />} />
             <Route path="inventory/:id" element={<ProductDetail />} />
@@ -107,7 +103,7 @@ function App() {
             <Route path="purchasing" element={<PurchaseOrderList />} />
             <Route path="purchasing/new" element={<NewPurchaseOrder />} />
             <Route path="purchasing/:id" element={<PurchaseOrderDetail />} />
-            <Route path="sales" element={<Navigate to="/erp/quotes" replace />} />
+            <Route path="sales" element={<Navigate to="/quotes" replace />} />
             <Route path="governance">
               <Route index element={<RFCDashboard />} />
               <Route path="new" element={<NewRFC />} />

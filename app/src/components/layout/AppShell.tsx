@@ -54,38 +54,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {/* Navigation */}
                 <nav className="flex-1 p-3 space-y-1 overflow-y-auto no-scrollbar">
                     <div className="mb-6">
-                        <NavItem to="/erp" icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={sidebarOpen} active={location.pathname === '/erp'} />
-                        <NavItem to="/erp/inventory" icon={<Package size={20} />} label="Inventory" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/inventory')} />
-                        <NavItem to="/erp/accounts" icon={<LayoutDashboard size={20} />} label="Accounts" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/accounts')} />
+                        <NavItem to="/" icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={sidebarOpen} active={location.pathname === '/'} />
+                        <NavItem to="/inventory" icon={<Package size={20} />} label="Inventory" isOpen={sidebarOpen} active={location.pathname.startsWith('/inventory')} />
+                        <NavItem to="/accounts" icon={<LayoutDashboard size={20} />} label="Accounts" isOpen={sidebarOpen} active={location.pathname.startsWith('/accounts')} />
                     </div>
 
                     <div className="mb-2 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                         {sidebarOpen && "Operations"}
                     </div>
 
-                    <NavItem to="/erp/quotes" icon={<FileText size={20} />} label="Quotes" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/quotes')} />
-                    <NavItem to="/erp/orders" icon={<FileText size={20} />} label="Orders" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/orders')} />
-                    <NavItem to="/erp/purchasing" icon={<ShoppingBag size={20} />} label="Purchasing" isOpen={sidebarOpen} active={location.pathname === '/erp/purchasing' || (location.pathname.startsWith('/erp/purchasing') && !location.pathname.includes('/vendors'))} />
-                    <NavItem to="/erp/purchasing/vendors" icon={<Store size={20} />} label="Vendors" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/purchasing/vendors')} />
-                    <NavItem to="/erp/invoices" icon={<FileText size={20} />} label="Invoices" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/invoices')} />
-                    <NavItem to="/erp/millwork/configurator" icon={<Hammer size={20} />} label="Millwork" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/millwork')} />
-                    <NavItem to="/erp/dispatch" icon={<Truck size={20} />} label="Logistics" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/dispatch')} />
-                    <NavItem to="/erp/fleet" icon={<Settings size={20} />} label="Fleet" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/fleet')} />
-                    <NavItem to="/erp/reports/daily-till" icon={<LayoutDashboard size={20} />} label="Daily Till" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/reports')} />
+                    <NavItem to="/quotes" icon={<FileText size={20} />} label="Quotes" isOpen={sidebarOpen} active={location.pathname.startsWith('/quotes')} />
+                    <NavItem to="/orders" icon={<FileText size={20} />} label="Orders" isOpen={sidebarOpen} active={location.pathname.startsWith('/orders')} />
+                    <NavItem to="/purchasing" icon={<ShoppingBag size={20} />} label="Purchasing" isOpen={sidebarOpen} active={location.pathname === '/purchasing' || (location.pathname.startsWith('/purchasing') && !location.pathname.includes('/vendors'))} />
+                    <NavItem to="/purchasing/vendors" icon={<Store size={20} />} label="Vendors" isOpen={sidebarOpen} active={location.pathname.startsWith('/purchasing/vendors')} />
+                    <NavItem to="/invoices" icon={<FileText size={20} />} label="Invoices" isOpen={sidebarOpen} active={location.pathname.startsWith('/invoices')} />
+                    <NavItem to="/millwork/configurator" icon={<Hammer size={20} />} label="Millwork" isOpen={sidebarOpen} active={location.pathname.startsWith('/millwork')} />
+                    <NavItem to="/dispatch" icon={<Truck size={20} />} label="Logistics" isOpen={sidebarOpen} active={location.pathname.startsWith('/dispatch')} />
+                    <NavItem to="/fleet" icon={<Settings size={20} />} label="Fleet" isOpen={sidebarOpen} active={location.pathname.startsWith('/fleet')} />
+                    <NavItem to="/reports/daily-till" icon={<LayoutDashboard size={20} />} label="Daily Till" isOpen={sidebarOpen} active={location.pathname.startsWith('/reports')} />
 
                     <div className="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                         {sidebarOpen && "Accounting"}
                     </div>
 
-                    <NavItem to="/erp/accounting/chart-of-accounts" icon={<BookOpen size={20} />} label="Chart of Accounts" isOpen={sidebarOpen} active={location.pathname === '/erp/accounting/chart-of-accounts'} />
-                    <NavItem to="/erp/accounting/journal-entries" icon={<FileText size={20} />} label="Journal Entries" isOpen={sidebarOpen} active={location.pathname === '/erp/accounting/journal-entries'} />
-                    <NavItem to="/erp/accounting/trial-balance" icon={<LayoutDashboard size={20} />} label="Trial Balance" isOpen={sidebarOpen} active={location.pathname === '/erp/accounting/trial-balance'} />
+                    <NavItem to="/accounting/chart-of-accounts" icon={<BookOpen size={20} />} label="Chart of Accounts" isOpen={sidebarOpen} active={location.pathname === '/accounting/chart-of-accounts'} />
+                    <NavItem to="/accounting/journal-entries" icon={<FileText size={20} />} label="Journal Entries" isOpen={sidebarOpen} active={location.pathname === '/accounting/journal-entries'} />
+                    <NavItem to="/accounting/trial-balance" icon={<LayoutDashboard size={20} />} label="Trial Balance" isOpen={sidebarOpen} active={location.pathname === '/accounting/trial-balance'} />
                 </nav>
 
                 {/* Footer / Admin */}
                 <div className="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
-                    <NavItem to="/erp/pricing" icon={<LayoutGrid size={20} />} label="Pricing" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/pricing')} />
-                    <NavItem to="/erp/admin" icon={<Settings size={20} />} label="Admin" isOpen={sidebarOpen} active={location.pathname.startsWith('/erp/admin')} />
+                    <NavItem to="/pricing" icon={<LayoutGrid size={20} />} label="Pricing" isOpen={sidebarOpen} active={location.pathname.startsWith('/pricing')} />
+                    <NavItem to="/admin" icon={<Settings size={20} />} label="Admin" isOpen={sidebarOpen} active={location.pathname.startsWith('/admin')} />
                 </div>
 
                 {/* Collapse Toggle */}

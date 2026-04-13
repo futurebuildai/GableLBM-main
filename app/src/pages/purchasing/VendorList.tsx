@@ -89,7 +89,7 @@ const VendorList: React.FC = () => {
                                     size="sm"
                                     variant="ghost"
                                     className="h-7 text-xs hover:bg-white/5"
-                                    onClick={() => navigate(`/erp/purchasing/vendors/${vendor.id}`)}
+                                    onClick={() => navigate(`/purchasing/vendors/${vendor.id}`)}
                                 >
                                     View Scorecard
                                 </Button>

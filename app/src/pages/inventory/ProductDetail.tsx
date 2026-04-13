@@ -69,7 +69,7 @@ export const ProductDetail: React.FC = () => {
             <div className="flex flex-col items-center justify-center h-96 gap-4">
                 <Package className="w-16 h-16 text-zinc-600" />
                 <p className="text-zinc-500">Product not found</p>
-                <button onClick={() => navigate('/erp/inventory')} className="text-gable-green hover:underline text-sm">
+                <button onClick={() => navigate('/inventory')} className="text-gable-green hover:underline text-sm">
                     Back to Inventory
                 </button>
             </div>
@@ -81,7 +81,7 @@ export const ProductDetail: React.FC = () => {
             {/* Header */}
             <div className="flex items-center gap-4">
                 <button
-                    onClick={() => navigate('/erp/inventory')}
+                    onClick={() => navigate('/inventory')}
                     className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
                 >
                     <ArrowLeft className="w-5 h-5" />

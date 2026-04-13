@@ -88,7 +88,7 @@ export function AccountsPage() {
                         animate={{ opacity: 1, y: 0 }}
                         key={customer.id}
                     >
-                        <Link to={`/erp/accounts/${customer.id}`}>
+                        <Link to={`/accounts/${customer.id}`}>
                             <Card className="grid grid-cols-12 gap-4 px-6 py-4 items-center hover:bg-white/5 transition-colors border-white/5 hover:border-gable-green/30 group">
                                 <div className="col-span-4 flex items-center gap-3">
                                     <div className={cn(

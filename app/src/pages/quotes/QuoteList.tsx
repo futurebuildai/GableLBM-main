@@ -11,7 +11,7 @@ export function QuoteViewTabs({ active }: { active: 'list' | 'new' }) {
     return (
         <div className="flex gap-1 mb-6 border-b border-white/10">
             <Link
-                to="/erp/quotes"
+                to="/quotes"
                 className={cn(
                     "flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors relative",
                     active === 'list' ? "text-gable-green" : "text-zinc-400 hover:text-white"
@@ -21,7 +21,7 @@ export function QuoteViewTabs({ active }: { active: 'list' | 'new' }) {
                 {active === 'list' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-gable-green" />}
             </Link>
             <Link
-                to="/erp/quotes/new"
+                to="/quotes/new"
                 className={cn(
                     "flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors relative",
                     active === 'new' ? "text-gable-green" : "text-zinc-400 hover:text-white"
@@ -63,7 +63,7 @@ export default function QuoteList() {
             const orderPayload = await QuoteService.convertToOrder(quoteId);
             const order = await OrderService.createOrder(orderPayload);
             showToast('Quote converted to order successfully', 'success');
-            navigate(`/erp/orders/${order.id}`);
+            navigate(`/orders/${order.id}`);
         } catch (error) {
             showToast(`Failed to convert: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         } finally {
@@ -103,7 +103,7 @@ export default function QuoteList() {
                 </div>
                 <div className="flex items-center gap-3">
                     <button
-                        onClick={() => navigate('/erp/quotes/analytics')}
+                        onClick={() => navigate('/quotes/analytics')}
                         className="border border-white/10 text-zinc-400 hover:text-white hover:border-white/20 font-medium px-4 py-2 rounded transition-colors flex items-center gap-2 text-sm"
                     >
                         <BarChart3 size={16} /> Analytics
@@ -140,7 +140,7 @@ export default function QuoteList() {
                             quotes.map((quote) => {
                                 const isBusy = converting === quote.id || updatingState === quote.id;
                                 return (
-                                    <tr key={quote.id} className="hover:bg-white/5 transition-colors cursor-pointer" onClick={() => navigate(`/erp/quotes/${quote.id}`)}>
+                                    <tr key={quote.id} className="hover:bg-white/5 transition-colors cursor-pointer" onClick={() => navigate(`/quotes/${quote.id}`)}>
                                         <td className="p-4 font-mono text-white/80">#{quote.id.slice(0, 8)}</td>
                                         <td className="p-4 text-white/80">{new Date(quote.created_at).toLocaleDateString()}</td>
                                         <td className="p-4 text-white font-medium">{quote.customer_name || quote.customer_id.slice(0, 8)}</td>
@@ -175,7 +175,7 @@ export default function QuoteList() {
                                         <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
                                             <div className="flex items-center justify-end gap-1.5">
                                                 {quote.state === 'DRAFT' && (
-                                                    <button onClick={() => navigate(`/erp/quotes/${quote.id}/edit`)} disabled={isBusy}
+                                                    <button onClick={() => navigate(`/quotes/${quote.id}/edit`)} disabled={isBusy}
                                                         className="text-amber-400 hover:text-amber-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Edit Draft">
                                                         <Pencil size={14} />
                                                     </button>
@@ -205,7 +205,7 @@ export default function QuoteList() {
                                                         <ShoppingCart size={14} />
                                                     </button>
                                                 )}
-                                                <button onClick={() => navigate(`/erp/quotes/${quote.id}`)}
+                                                <button onClick={() => navigate(`/quotes/${quote.id}`)}
                                                     className="text-white/50 hover:text-white transition-colors p-1 rounded hover:bg-white/5">
                                                     <ArrowRight size={14} />
                                                 </button>
