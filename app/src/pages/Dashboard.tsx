@@ -89,7 +89,6 @@ const fetchDashboardData = useCallback(async (showSpinner = false) => {
     };
 
     const currentDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    const BUILD_VER = "REL_2026_03_03_1150"; // Definitive Prefix Fix
 
     return (
         <motion.div
