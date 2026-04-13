@@ -63,6 +63,7 @@ import { ProjectDashboard } from "./pages/projects/ProjectDashboard";
 import POSTerminal from "./pages/pos/POSTerminal";
 import { ProductDetail } from "./pages/inventory/ProductDetail";
 import { FleetManagement } from "./pages/logistics/FleetManagement";
+import { DemoLanding } from "./pages/DemoLanding";
 
 import { ToastProvider } from "./components/ui/Toast";
 
@@ -71,8 +72,8 @@ function App() {
     <ToastProvider>
       <BrowserRouter>
         <Routes>
-          {/* Root redirect */}
-          <Route path="/" element={<Navigate to="/erp" replace />} />
+          {/* Demo Landing */}
+          <Route path="/" element={<DemoLanding />} />
 
           {/* POS Terminal */}
           <Route path="/pos" element={<POSTerminal />} />
