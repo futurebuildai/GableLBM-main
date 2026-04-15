@@ -35,6 +35,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOp
             if (data.length > 0) setSelectedLocationId(data[0].id);
         } catch (error) {
             console.error('Failed to load locations', error);
+            showToast('Failed to load locations', 'error');
         }
     };
 
@@ -64,9 +65,9 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOp
     if (!isOpen || !product) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="stock-adjustment-modal-title">
             <div className="bg-[#161821] w-full max-w-md rounded-lg shadow-2xl border border-white/10 p-6">
-                <h2 className="text-xl font-bold text-white mb-1">Adjust Stock</h2>
+                <h2 id="stock-adjustment-modal-title" className="text-xl font-bold text-white mb-1">Adjust Stock</h2>
                 <p className="text-sm text-gray-400 mb-6">{product.sku} - {product.description}</p>
 
                 <form onSubmit={handleSubmit} className="space-y-4">

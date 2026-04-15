@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
 
@@ -15,34 +17,55 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /invoices", h.HandleList)
-	mux.HandleFunc("GET /invoices/{id}", h.HandleGet)
-	mux.HandleFunc("POST /invoices/{id}/credit-memo", h.HandleCreateCreditMemo)
-	mux.HandleFunc("GET /invoices/credit-memos/{customerId}", h.HandleListCreditMemos)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /invoices", guard(h.HandleList))
+	mux.HandleFunc("GET /invoices/{id}", guard(h.HandleGet))
+	mux.HandleFunc("POST /invoices/{id}/credit-memo", guard(h.HandleCreateCreditMemo))
+	mux.HandleFunc("GET /invoices/credit-memos/{customerId}", guard(h.HandleListCreditMemos))
 }
 
 func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
-	invoices, err := h.svc.ListInvoices(r.Context())
+	page := pagination.FromRequest(r)
+	invoices, total, err := h.svc.ListInvoicesPaginated(r.Context(), page.Limit, page.Offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list invoices", http.StatusInternalServerError, err)
 		return
 	}
+
+	resp := pagination.PagedResponse[Invoice]{
+		Data:   invoices,
+		Total:  total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	}
+	if resp.Data == nil {
+		resp.Data = []Invoice{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(invoices)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid invoice ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid invoice ID", http.StatusBadRequest, err)
 		return
 	}
 
 	inv, err := h.svc.GetInvoice(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -51,42 +74,39 @@ func (h *Handler) HandleGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateCreditMemoRequest struct {
-	Amount float64 `json:"amount"` // Dollars
-	Reason string  `json:"reason"`
+	AmountCents int64  `json:"amount_cents"`
+	Reason      string `json:"reason"`
 }
 
 func (h *Handler) HandleCreateCreditMemo(w http.ResponseWriter, r *http.Request) {
 	invoiceIDStr := r.PathValue("id")
 	invoiceID, err := uuid.Parse(invoiceIDStr)
 	if err != nil {
-		http.Error(w, "invalid invoice ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid invoice ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req CreateCreditMemoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if req.AmountCents <= 0 {
+		httputil.RespondError(w, r, "amount_cents must be positive", http.StatusBadRequest, nil)
 		return
 	}
 
 	// Get invoice to find customer
 	inv, err := h.svc.GetInvoice(r.Context(), invoiceID)
 	if err != nil {
-		http.Error(w, "invoice not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
 		return
 	}
 
-	amountCents := int64(req.Amount*100 + 0.5)
-
-	cm, err := h.svc.CreateCreditMemo(r.Context(), inv.CustomerID, &invoiceID, amountCents, req.Reason)
+	cm, err := h.svc.CreateAndApplyCreditMemo(r.Context(), inv.CustomerID, &invoiceID, req.AmountCents, req.Reason)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Auto-apply the credit memo
-	if err := h.svc.ApplyCreditMemoFull(r.Context(), cm); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create credit memo", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -99,13 +119,13 @@ func (h *Handler) HandleListCreditMemos(w http.ResponseWriter, r *http.Request) 
 	customerIDStr := r.PathValue("customerId")
 	customerID, err := uuid.Parse(customerIDStr)
 	if err != nil {
-		http.Error(w, "invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	memos, err := h.svc.ListCreditMemos(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list credit memos", http.StatusInternalServerError, err)
 		return
 	}
 

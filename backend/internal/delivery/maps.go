@@ -117,7 +117,7 @@ func (m *MapsClient) OptimizeRoute(ctx context.Context, origin LatLng, stops []L
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 
 	var gmapsResp gmapsDirectionsResponse
 	if err := json.Unmarshal(body, &gmapsResp); err != nil {

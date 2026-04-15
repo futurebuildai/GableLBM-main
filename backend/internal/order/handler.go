@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
 
@@ -15,24 +17,33 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /orders", h.HandleCreateOrder)
-	mux.HandleFunc("GET /orders", h.HandleListOrders)
-	mux.HandleFunc("GET /orders/{id}", h.HandleGetOrder)
-	mux.HandleFunc("POST /orders/{id}/confirm", h.HandleConfirmOrder)
-	mux.HandleFunc("POST /orders/{id}/fulfill", h.HandleFulfillOrder)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /orders", guard(h.HandleCreateOrder))
+	mux.HandleFunc("GET /orders", guard(h.HandleListOrders))
+	mux.HandleFunc("GET /orders/{id}", guard(h.HandleGetOrder))
+	mux.HandleFunc("POST /orders/{id}/confirm", guard(h.HandleConfirmOrder))
+	mux.HandleFunc("POST /orders/{id}/fulfill", guard(h.HandleFulfillOrder))
 }
 
 func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req CreateOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	o, err := h.service.CreateOrder(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create order", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -41,27 +52,38 @@ func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleListOrders(w http.ResponseWriter, r *http.Request) {
-	orders, err := h.service.ListOrders(r.Context())
+	page := pagination.FromRequest(r)
+	orders, total, err := h.service.ListOrdersPaginated(r.Context(), page.Limit, page.Offset)
 	if err != nil {
-		http.Error(w, "Failed to fetch orders", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch orders", http.StatusInternalServerError, err)
 		return
 	}
 
+	resp := pagination.PagedResponse[Order]{
+		Data:   orders,
+		Total:  total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	}
+	if resp.Data == nil {
+		resp.Data = []Order{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(orders)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) HandleGetOrder(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid Order ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
 		return
 	}
 
 	o, err := h.service.GetOrder(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "order not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -73,30 +95,30 @@ func (h *Handler) HandleConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid Order ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.ConfirmOrder(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to confirm order", http.StatusInternalServerError, err)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) HandleFulfillOrder(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid Order ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.FulfillOrder(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to fulfill order", http.StatusInternalServerError, err)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }

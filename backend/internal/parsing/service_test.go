@@ -42,6 +42,19 @@ func (m *mockProductRepo) UpdateMarginRules(ctx context.Context, id uuid.UUID, t
 	return nil
 }
 
+func (m *mockProductRepo) ListProductsPaginated(_ context.Context, limit, offset int) ([]product.Product, int, error) {
+	// Simple pagination over in-memory products
+	total := len(m.products)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return m.products[offset:end], total, nil
+}
+
 // testCatalog returns a realistic LBM product catalog for matching tests.
 func testCatalog() []product.Product {
 	return []product.Product{

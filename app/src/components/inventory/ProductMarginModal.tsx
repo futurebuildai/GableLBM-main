@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import type { Product } from '../../types/product';
 import { X, Percent } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { fetchWithAuth } from '../../services/fetchClient';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 interface ProductMarginModalProps {
     isOpen: boolean;
@@ -35,7 +38,7 @@ export const ProductMarginModal: React.FC<ProductMarginModalProps> = ({ isOpen, 
         setIsSaving(true);
         setError('');
         try {
-            const res = await fetch(`/api/products/${product.id}/margins`, {
+            const res = await fetchWithAuth(`${API_URL}/api/v1/products/${product.id}/margins`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -51,22 +54,22 @@ export const ProductMarginModal: React.FC<ProductMarginModalProps> = ({ isOpen, 
 
             onSuccess();
             onClose();
-        } catch (err: any) {
-            setError(err.message || 'An error occurred while saving.');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'An error occurred while saving.');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pricing-controls-modal-title">
             <div className="bg-[#0A0B10] border border-white/10 rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative">
                 <div className="flex items-center justify-between p-6 border-b border-white/10">
                     <div>
-                        <h2 className="text-xl font-bold text-white">Pricing Controls</h2>
+                        <h2 id="pricing-controls-modal-title" className="text-xl font-bold text-white">Pricing Controls</h2>
                         <p className="text-sm text-zinc-400 mt-1">{product.sku}</p>
                     </div>
-                    <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full transition-colors">
+                    <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full transition-colors" aria-label="Close pricing controls">
                         <X className="w-5 h-5" />
                     </button>
                 </div>

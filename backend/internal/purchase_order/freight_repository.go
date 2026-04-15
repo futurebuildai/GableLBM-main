@@ -13,7 +13,7 @@ func (r *Repository) SaveFreightCharge(ctx context.Context, fc *FreightCharge) e
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING created_at
 	`
-	return r.db.Pool.QueryRow(ctx, query,
+	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		fc.ID, fc.POID, fc.FilePath, fc.OriginalFilename,
 		fc.CarrierName, fc.InvoiceNumber, fc.TotalAmountCents,
 		fc.AllocationMethod, fc.Status, fc.AIRawResponse,
@@ -28,7 +28,7 @@ func (r *Repository) SaveFreightAllocations(ctx context.Context, allocations []F
 			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING created_at
 		`
-		if err := r.db.Pool.QueryRow(ctx, query,
+		if err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 			a.ID, a.FreightChargeID, a.POLineID, a.ProductID,
 			a.AllocatedCents, a.PerUnitCents,
 		).Scan(&a.CreatedAt); err != nil {
@@ -46,7 +46,7 @@ func (r *Repository) GetFreightCharges(ctx context.Context, poID uuid.UUID) ([]F
 		WHERE po_id = $1
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, poID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, poID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list freight charges: %w", err)
 	}
@@ -75,7 +75,7 @@ func (r *Repository) GetFreightCharge(ctx context.Context, id uuid.UUID) (*Freig
 		WHERE id = $1
 	`
 	var fc FreightCharge
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&fc.ID, &fc.POID, &fc.FilePath, &fc.OriginalFilename,
 		&fc.CarrierName, &fc.InvoiceNumber, &fc.TotalAmountCents,
 		&fc.AllocationMethod, &fc.Status, &fc.CreatedAt,
@@ -96,7 +96,7 @@ func (r *Repository) GetFreightAllocations(ctx context.Context, freightChargeID 
 		WHERE fa.freight_charge_id = $1
 		ORDER BY fa.created_at
 	`
-	rows, err := r.db.Pool.Query(ctx, query, freightChargeID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, freightChargeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list freight allocations: %w", err)
 	}
@@ -118,6 +118,6 @@ func (r *Repository) GetFreightAllocations(ctx context.Context, freightChargeID 
 
 func (r *Repository) UpdateFreightStatus(ctx context.Context, freightChargeID uuid.UUID, status string) error {
 	query := `UPDATE po_freight_charges SET status = $1 WHERE id = $2`
-	_, err := r.db.Pool.Exec(ctx, query, status, freightChargeID)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, freightChargeID)
 	return err
 }

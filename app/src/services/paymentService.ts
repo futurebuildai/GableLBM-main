@@ -7,6 +7,7 @@ import type {
     RefundRequest,
     Refund
 } from '../types/payment';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -14,7 +15,7 @@ export const paymentService = {
     // ---- Existing: Non-card payments (cash, check, account) ----
 
     createPayment: async (req: CreatePaymentRequest): Promise<Payment> => {
-        const response = await fetch(`${API_URL}/api/payments`, {
+        const response = await fetchWithAuth(`${API_URL}/api/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(req),
@@ -24,7 +25,7 @@ export const paymentService = {
     },
 
     getHistory: async (invoiceId: string): Promise<Payment[]> => {
-        const response = await fetch(`${API_URL}/api/invoices/${invoiceId}/payments`);
+        const response = await fetchWithAuth(`${API_URL}/api/invoices/${invoiceId}/payments`);
         if (!response.ok) throw new Error('Failed to fetch payments');
         return response.json();
     },
@@ -36,7 +37,7 @@ export const paymentService = {
      * The public key is used by Runner.js on the frontend to tokenize the card.
      */
     createPaymentIntent: async (req: PaymentIntentRequest): Promise<PaymentIntentResponse> => {
-        const response = await fetch(`${API_URL}/api/payments/intent`, {
+        const response = await fetchWithAuth(`${API_URL}/api/payments/intent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(req),
@@ -53,7 +54,7 @@ export const paymentService = {
      * This charges the card through Run Payments and records the payment.
      */
     processCardPayment: async (req: ProcessCardPaymentRequest): Promise<Payment> => {
-        const response = await fetch(`${API_URL}/api/payments/card`, {
+        const response = await fetchWithAuth(`${API_URL}/api/payments/card`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(req),
@@ -69,7 +70,7 @@ export const paymentService = {
      * Issue a full or partial refund on a completed card payment.
      */
     refundPayment: async (req: RefundRequest): Promise<Refund> => {
-        const response = await fetch(`${API_URL}/api/payments/refund`, {
+        const response = await fetchWithAuth(`${API_URL}/api/payments/refund`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(req),

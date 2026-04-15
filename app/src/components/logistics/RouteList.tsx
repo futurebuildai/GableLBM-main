@@ -4,6 +4,7 @@ import { deliveryService } from '../../services/deliveryService';
 import { Plus, User, Truck, Clock, MapPin } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { CreateRouteModal } from './CreateRouteModal';
+import { useToast } from '../ui/ToastContext';
 
 // Simple helper for dates
 const formatDate = (dateString: string) => {
@@ -27,13 +28,14 @@ interface RouteListProps {
 }
 
 export const RouteList: React.FC<RouteListProps> = ({ onSelectRoute, selectedRouteId }) => {
+    const { showToast } = useToast();
     const [routes, setRoutes] = useState<Route[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreateModal, setShowCreateModal] = useState(false);
 
     useEffect(() => {
         loadRoutes();
-    }, []);
+    }, [showToast]);
 
     const loadRoutes = async () => {
         try {
@@ -41,6 +43,7 @@ export const RouteList: React.FC<RouteListProps> = ({ onSelectRoute, selectedRou
             setRoutes(data);
         } catch (err) {
             console.error(err);
+            showToast('Failed to load routes', 'error');
         } finally {
             setLoading(false);
         }

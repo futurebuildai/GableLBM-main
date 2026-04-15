@@ -1,3 +1,5 @@
+import { fetchWithAuth } from './fetchClient';
+
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export interface ReportDefinition {
@@ -15,7 +17,7 @@ export interface ReportColumn {
 export interface ReportFilter {
   field: string;
   operator: string;
-  value: any;
+  value: string | number | boolean | null;
 }
 
 export interface ReportGrouping {
@@ -39,39 +41,23 @@ export interface ReportSchedule {
   status: string;
 }
 
-const fetchJson = async <T>(url: string, options?: RequestInit): Promise<T> => {
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string> || {}),
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const response = await fetch(url, { ...options, headers });
-  if (!response.ok) throw new Error(`API Error: ${response.status}`);
-  return response.json();
-};
-
 export const reportingApi = {
   // Ad-hoc query preview
   previewReport: async (entityType: string, definition: ReportDefinition) => {
-    return fetchJson<any>(`${API_BASE}/builder/preview`, {
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/builder/preview`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entity_type: entityType, definition })
     });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   },
 
   // Export
   exportReport: async (entityType: string, format: 'csv' | 'xlsx', definition: ReportDefinition) => {
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const response = await fetch(`${API_BASE}/builder/export`, {
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/builder/export`, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entity_type: entityType, format, definition })
     });
     if (!response.ok) throw new Error(`Export failed`);
@@ -80,35 +66,40 @@ export const reportingApi = {
 
   // Saved Reports CRUD
   listSavedReports: async (): Promise<SavedReport[]> => {
-    return fetchJson<SavedReport[]>(`${API_BASE}/saved`);
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/saved`);
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   },
 
   getSavedReport: async (id: string): Promise<SavedReport> => {
-    return fetchJson<SavedReport>(`${API_BASE}/saved/${id}`);
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/saved/${id}`);
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   },
 
   saveReport: async (report: Partial<SavedReport>): Promise<SavedReport> => {
-    return fetchJson<SavedReport>(`${API_BASE}/save`, {
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/save`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(report)
     });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   },
 
   updateSavedReport: async (id: string, report: Partial<SavedReport>) => {
-    return fetchJson<SavedReport>(`${API_BASE}/saved/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/saved/${id}`, {
       method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(report)
     });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   },
 
   deleteSavedReport: async (id: string) => {
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const response = await fetch(`${API_BASE}/saved/${id}`, {
+    const response = await fetchWithAuth(`${API_BASE}/api/reporting/saved/${id}`, {
       method: 'DELETE',
-      headers
     });
     if (!response.ok) throw new Error(`Delete failed`);
   }

@@ -16,11 +16,13 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
 type Service struct {
 	repo         *Repository
+	db           *database.DB
 	edi          *edi.Service
 	inventorySvc *inventory.Service
 	productSvc   *product.Service
@@ -28,8 +30,8 @@ type Service struct {
 	aiClient     *ai.Client
 }
 
-func NewService(repo *Repository, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
-	return &Service{repo: repo, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
+	return &Service{repo: repo, db: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
 }
 
 // WithAIClient sets the AI client for freight invoice extraction.
@@ -175,30 +177,36 @@ func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines 
 		Status:   StatusDraft,
 	}
 
-	if err := s.repo.CreatePO(ctx, po); err != nil {
-		return nil, fmt.Errorf("failed to create PO: %w", err)
-	}
+	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.CreatePO(txCtx, po); err != nil {
+			return fmt.Errorf("failed to create PO: %w", err)
+		}
 
-	for _, l := range lines {
-		var prodID *uuid.UUID
-		if l.ProductID != "" {
-			parsed, err := uuid.Parse(l.ProductID)
-			if err == nil {
-				prodID = &parsed
+		for _, l := range lines {
+			var prodID *uuid.UUID
+			if l.ProductID != "" {
+				parsed, err := uuid.Parse(l.ProductID)
+				if err == nil {
+					prodID = &parsed
+				}
 			}
+			line := &PurchaseOrderLine{
+				ID:          uuid.New(),
+				POID:        po.ID,
+				ProductID:   prodID,
+				Description: l.Description,
+				Quantity:    l.Quantity,
+				Cost:        l.Cost,
+			}
+			if err := s.repo.AddPOLine(txCtx, line); err != nil {
+				return fmt.Errorf("failed to add PO line: %w", err)
+			}
+			po.Lines = append(po.Lines, *line)
 		}
-		line := &PurchaseOrderLine{
-			ID:          uuid.New(),
-			POID:        po.ID,
-			ProductID:   prodID,
-			Description: l.Description,
-			Quantity:    l.Quantity,
-			Cost:        l.Cost,
-		}
-		if err := s.repo.AddPOLine(ctx, line); err != nil {
-			return nil, fmt.Errorf("failed to add PO line: %w", err)
-		}
-		po.Lines = append(po.Lines, *line)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return po, nil
@@ -212,30 +220,36 @@ func (s *Service) CreateManualPOFromHandler(ctx context.Context, vendorID uuid.U
 		Status:   StatusDraft,
 	}
 
-	if err := s.repo.CreatePO(ctx, po); err != nil {
-		return nil, fmt.Errorf("failed to create PO: %w", err)
-	}
+	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.CreatePO(txCtx, po); err != nil {
+			return fmt.Errorf("failed to create PO: %w", err)
+		}
 
-	for _, l := range lines {
-		var prodID *uuid.UUID
-		if l.ProductID != "" {
-			parsed, err := uuid.Parse(l.ProductID)
-			if err == nil {
-				prodID = &parsed
+		for _, l := range lines {
+			var prodID *uuid.UUID
+			if l.ProductID != "" {
+				parsed, err := uuid.Parse(l.ProductID)
+				if err == nil {
+					prodID = &parsed
+				}
 			}
+			line := &PurchaseOrderLine{
+				ID:          uuid.New(),
+				POID:        po.ID,
+				ProductID:   prodID,
+				Description: l.Description,
+				Quantity:    l.Quantity,
+				Cost:        l.Cost,
+			}
+			if err := s.repo.AddPOLine(txCtx, line); err != nil {
+				return fmt.Errorf("failed to add PO line: %w", err)
+			}
+			po.Lines = append(po.Lines, *line)
 		}
-		line := &PurchaseOrderLine{
-			ID:          uuid.New(),
-			POID:        po.ID,
-			ProductID:   prodID,
-			Description: l.Description,
-			Quantity:    l.Quantity,
-			Cost:        l.Cost,
-		}
-		if err := s.repo.AddPOLine(ctx, line); err != nil {
-			return nil, fmt.Errorf("failed to add PO line: %w", err)
-		}
-		po.Lines = append(po.Lines, *line)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return po, nil
@@ -290,6 +304,10 @@ func (s *Service) SubmitPO(ctx context.Context, id uuid.UUID) error {
 	po, err := s.repo.GetPO(ctx, id)
 	if err != nil {
 		return err
+	}
+
+	if po.VendorID == nil {
+		return fmt.Errorf("cannot submit PO without a vendor")
 	}
 
 	if s.edi != nil {
@@ -379,7 +397,14 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 		lineMap[po.Lines[i].ID] = &po.Lines[i]
 	}
 
-	allFullyReceived := true
+	// Pre-parse and validate all input before starting the transaction
+	type parsedLine struct {
+		lineID     uuid.UUID
+		locationID uuid.UUID
+		poLine     *PurchaseOrderLine
+		rl         ReceiveLineInput
+	}
+	var parsed []parsedLine
 	for _, rl := range receivedLines {
 		lineID, err := uuid.Parse(rl.LineID)
 		if err != nil {
@@ -396,145 +421,118 @@ func (s *Service) ReceivePO(ctx context.Context, poID uuid.UUID, receivedLines [
 			return fmt.Errorf("line %s not found on PO %s", rl.LineID, poID)
 		}
 
-		newQtyReceived := poLine.QtyReceived + rl.QtyReceived
-		if err := s.repo.UpdateLineReceived(ctx, lineID, newQtyReceived); err != nil {
-			return fmt.Errorf("failed to update received qty: %w", err)
-		}
+		parsed = append(parsed, parsedLine{lineID: lineID, locationID: locationID, poLine: poLine, rl: rl})
+	}
 
-		// Create inventory if product_id is set
-		if poLine.ProductID != nil && s.inventorySvc != nil {
-			err := s.inventorySvc.AdjustStock(ctx, inventory.StockAdjustmentRequest{
-				ProductID:  *poLine.ProductID,
-				LocationID: &locationID,
-				Quantity:   rl.QtyReceived,
-				IsDelta:    true,
-				Reason:     fmt.Sprintf("PO Receipt: %s", poID),
-			})
-			if err != nil {
-				return fmt.Errorf("failed to create inventory for line %s: %w", rl.LineID, err)
+	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		allFullyReceived := true
+		for _, p := range parsed {
+			newQtyReceived := p.poLine.QtyReceived + p.rl.QtyReceived
+			if err := s.repo.UpdateLineReceived(txCtx, p.lineID, newQtyReceived); err != nil {
+				return fmt.Errorf("failed to update received qty: %w", err)
 			}
 
-			// Recalculate Weighted Average Unit Cost
-			if s.productSvc != nil {
-				prod, err := s.productSvc.GetProduct(ctx, *poLine.ProductID)
-				if err == nil && prod != nil {
-					currentTotalQty := prod.TotalQuantity
-					currentAvgCost := prod.AverageUnitCost
-					receivedQty := rl.QtyReceived
-					poLineCost := poLine.Cost
+			// Create inventory if product_id is set
+			if p.poLine.ProductID != nil && s.inventorySvc != nil {
+				err := s.inventorySvc.AdjustStock(txCtx, inventory.StockAdjustmentRequest{
+					ProductID:  *p.poLine.ProductID,
+					LocationID: &p.locationID,
+					Quantity:   p.rl.QtyReceived,
+					IsDelta:    true,
+					Reason:     fmt.Sprintf("PO Receipt: %s", poID),
+				})
+				if err != nil {
+					return fmt.Errorf("failed to create inventory for line %s: %w", p.rl.LineID, err)
+				}
 
-					var newAvgCost float64
-					if currentTotalQty <= 0 {
-						// If no existing stock, new average is just the PO line cost
-						newAvgCost = poLineCost
-					} else {
-						// Weighted average calculation
-						newAvgCost = ((currentTotalQty * currentAvgCost) + (receivedQty * poLineCost)) / (currentTotalQty + receivedQty)
+				// Recalculate Weighted Average Unit Cost
+				if s.productSvc != nil {
+					prod, err := s.productSvc.GetProduct(txCtx, *p.poLine.ProductID)
+					if err == nil && prod != nil {
+						currentTotalQty := prod.TotalQuantity
+						currentAvgCost := prod.AverageUnitCost
+						receivedQty := p.rl.QtyReceived
+						poLineCost := p.poLine.Cost
+
+						var newAvgCost float64
+						if currentTotalQty <= 0 {
+							newAvgCost = poLineCost
+						} else {
+							newAvgCost = ((currentTotalQty * currentAvgCost) + (receivedQty * poLineCost)) / (currentTotalQty + receivedQty)
+						}
+
+						_ = s.productSvc.UpdateAverageCost(txCtx, *p.poLine.ProductID, newAvgCost)
 					}
-
-					// Update the product with the new average cost
-					_ = s.productSvc.UpdateAverageCost(ctx, *poLine.ProductID, newAvgCost)
 				}
 			}
-		}
 
-		if newQtyReceived < poLine.Quantity {
-			allFullyReceived = false
-		}
-	}
-
-	// Check if any lines not in this receipt are still under-received
-	for _, line := range po.Lines {
-		found := false
-		for _, rl := range receivedLines {
-			if rl.LineID == line.ID.String() {
-				found = true
-				break
+			if newQtyReceived < p.poLine.Quantity {
+				allFullyReceived = false
 			}
 		}
-		if !found && line.QtyReceived < line.Quantity {
-			allFullyReceived = false
-		}
-	}
 
-	if allFullyReceived {
-		po.Status = StatusReceived
-	} else {
-		po.Status = StatusPartialReceive
-	}
-
-	if err := s.repo.UpdatePO(ctx, po); err != nil {
-		return err
-	}
-
-	// Update Vendor Stats
-	if s.vendorSvc != nil && po.VendorID != nil {
-		// Calculate stats
-		// Lead Time: Now - CreatedAt (days)
-		leadTime := time.Since(po.CreatedAt).Hours() / 24.0
-
-		// Fill Rate: Total Received / Total Ordered * 100
-		var totalOrdered, totalReceived float64
-		for _, l := range po.Lines {
-			totalOrdered += l.Quantity
-			totalReceived += l.QtyReceived
-		}
-		fillRate := 0.0
-		if totalOrdered > 0 {
-			fillRate = (totalReceived / totalOrdered) * 100
+		// Check if any lines not in this receipt are still under-received
+		for _, line := range po.Lines {
+			found := false
+			for _, rl := range receivedLines {
+				if rl.LineID == line.ID.String() {
+					found = true
+					break
+				}
+			}
+			if !found && line.QtyReceived < line.Quantity {
+				allFullyReceived = false
+			}
 		}
 
-		// Spend: Increase by what was received * cost?
-		// Or just total PO cost if fully received?
-		// Let's use total cost of received items.
-		spend := 0.0
-		for _, l := range po.Lines {
-			spend += l.QtyReceived * l.Cost
+		if allFullyReceived {
+			po.Status = StatusReceived
+		} else {
+			po.Status = StatusPartialReceive
 		}
 
-		// We need to update the vendor stats.
-		// NOTE: This simple logic overwrites average. In reality we should recalculate moving average.
-		// For MVP/L8 we will just set it for now or rely on repo to avg?
-		// The repo method definition in plan was UpdateStats(id, leadTime, fillRate, spend).
-		// Let's assume repo handles aggregation or we just update the "latest" and maybe the "total spend".
-		// Actually, `vendor` package `UpdateStats` implementation:
-		// "UPDATE vendors SET average_lead_time_days = $1..."
-		// It overwrites. To do moving average we need to read old value.
-		// For Sprint 15 MVP, overwriting or simple weighted avg is fine.
-		// Let's read vendor first to get current avg?
-		// Or just push the new values and let the user understand it's "Last PO Stats" for now?
-		// The plan said "Performance Tracking".
-		// Let's try to do a simple moving average if possible, or just log it.
-		// Better: Just update Total Spend += new spend.
-		// And Lead Time/Fill Rate = (Old * N + New) / (N+1)? We don't track N (count of POs).
-		// Simplified: New Average = (Old + New) / 2.
+		if err := s.repo.UpdatePO(txCtx, po); err != nil {
+			return err
+		}
 
-		v, err := s.vendorSvc.GetVendor(ctx, *po.VendorID)
-		if err == nil && v != nil {
-			newLeadTime := (v.AverageLeadTimeDays + leadTime) / 2
-			if v.AverageLeadTimeDays == 0 {
-				newLeadTime = leadTime
+		// Update Vendor Stats
+		if s.vendorSvc != nil && po.VendorID != nil {
+			leadTime := time.Since(po.CreatedAt).Hours() / 24.0
+
+			var totalOrdered, totalReceived float64
+			for _, l := range po.Lines {
+				totalOrdered += l.Quantity
+				totalReceived += l.QtyReceived
+			}
+			fillRate := 0.0
+			if totalOrdered > 0 {
+				fillRate = (totalReceived / totalOrdered) * 100
 			}
 
-			newFillRate := (v.FillRate + fillRate) / 2
-			if v.FillRate == 0 {
-				newFillRate = fillRate
+			spend := 0.0
+			for _, l := range po.Lines {
+				spend += l.QtyReceived * l.Cost
 			}
 
-			newSpend := v.TotalSpendYTD + spend
+			v, err := s.vendorSvc.GetVendor(txCtx, *po.VendorID)
+			if err == nil && v != nil {
+				newLeadTime := (v.AverageLeadTimeDays + leadTime) / 2
+				if v.AverageLeadTimeDays == 0 {
+					newLeadTime = leadTime
+				}
 
-			// We need a method on vendorSvc to update stats.
-			// Vendor Service didn't have UpdateStats exposed in the interface I wrote (Wait, I did? "UpdateStats" in Repository).
-			// Service needs to expose it or `s.vendorSvc.repo.UpdateStats`.
-			// I need to check vendor/service.go.
-			// I likely didn't add UpdateStats to Service struct.
-			// I'll add it now via this edit? No, I can't edit other files here.
-			// I will assume I'll add `UpdateStats` to vendor service next.
-			_ = s.vendorSvc.UpdatePerformance(ctx, *po.VendorID, newLeadTime, newFillRate, newSpend)
+				newFillRate := (v.FillRate + fillRate) / 2
+				if v.FillRate == 0 {
+					newFillRate = fillRate
+				}
+
+				newSpend := v.TotalSpendYTD + spend
+				_ = s.vendorSvc.UpdatePerformance(txCtx, *po.VendorID, newLeadTime, newFillRate, newSpend)
+			}
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // ReceiveLineInput matches handler request shape

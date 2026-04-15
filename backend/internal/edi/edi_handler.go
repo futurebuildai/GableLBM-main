@@ -2,10 +2,10 @@ package edi
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -22,20 +22,30 @@ func NewEDIHandler(repo *EDIRepository, bgSvc *BuyingGroupService, ediSvc *Servi
 }
 
 // RegisterRoutes registers EDI admin routes.
-func (h *EDIHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/edi/partners", h.ListPartners)
-	mux.HandleFunc("POST /api/v1/edi/partners", h.CreatePartner)
-	mux.HandleFunc("GET /api/v1/edi/partners/{id}", h.GetPartner)
-	mux.HandleFunc("PUT /api/v1/edi/partners/{id}", h.UpdatePartner)
-	mux.HandleFunc("DELETE /api/v1/edi/partners/{id}", h.DeletePartner)
-	mux.HandleFunc("POST /api/v1/edi/partners/{id}/import-catalog", h.ImportCatalog)
-	mux.HandleFunc("GET /api/v1/edi/partners/{id}/catalog", h.ListCatalog)
+// roleGuard protects all endpoints; pass middleware.RequireRole("admin","owner") in production.
+func (h *EDIHandler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /api/v1/edi/partners", guard(h.ListPartners))
+	mux.HandleFunc("POST /api/v1/edi/partners", guard(h.CreatePartner))
+	mux.HandleFunc("GET /api/v1/edi/partners/{id}", guard(h.GetPartner))
+	mux.HandleFunc("PUT /api/v1/edi/partners/{id}", guard(h.UpdatePartner))
+	mux.HandleFunc("DELETE /api/v1/edi/partners/{id}", guard(h.DeletePartner))
+	mux.HandleFunc("POST /api/v1/edi/partners/{id}/import-catalog", guard(h.ImportCatalog))
+	mux.HandleFunc("GET /api/v1/edi/partners/{id}/catalog", guard(h.ListCatalog))
 }
 
 func (h *EDIHandler) ListPartners(w http.ResponseWriter, r *http.Request) {
 	partners, err := h.repo.ListPartners(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list EDI partners", http.StatusInternalServerError, err)
 		return
 	}
 	if partners == nil {
@@ -48,11 +58,11 @@ func (h *EDIHandler) ListPartners(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) CreatePartner(w http.ResponseWriter, r *http.Request) {
 	var p TradingPartner
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	if p.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "name is required", http.StatusBadRequest, nil)
 		return
 	}
 	if p.TransportConfig == "" {
@@ -69,7 +79,7 @@ func (h *EDIHandler) CreatePartner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreatePartner(r.Context(), &p); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create EDI partner", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -80,12 +90,12 @@ func (h *EDIHandler) CreatePartner(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) GetPartner(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid partner ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid partner ID", http.StatusBadRequest, err)
 		return
 	}
 	p, err := h.repo.GetPartner(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Partner not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Partner not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -107,19 +117,19 @@ func (h *EDIHandler) GetPartner(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) UpdatePartner(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid partner ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid partner ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var p TradingPartner
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	p.ID = id
 
 	if err := h.repo.UpdatePartner(r.Context(), &p); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update EDI partner", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -129,11 +139,11 @@ func (h *EDIHandler) UpdatePartner(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) DeletePartner(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid partner ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid partner ID", http.StatusBadRequest, err)
 		return
 	}
 	if err := h.repo.DeletePartner(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete EDI partner", http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -143,7 +153,7 @@ func (h *EDIHandler) DeletePartner(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 	partnerID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid partner ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid partner ID", http.StatusBadRequest, err)
 		return
 	}
 
@@ -151,7 +161,7 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(r.Body, 50<<20)) // 50MB limit
 	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Failed to read request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -165,7 +175,7 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 	if format == "csv" {
 		csvItems, parseErr := h.bgSvc.ParseCSVCatalog(string(data), "import")
 		if parseErr != nil {
-			http.Error(w, fmt.Sprintf("CSV parse error: %v", parseErr), http.StatusUnprocessableEntity)
+			httputil.RespondError(w, r, "CSV parse error", http.StatusUnprocessableEntity, parseErr)
 			return
 		}
 		for _, item := range csvItems {
@@ -181,7 +191,7 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 	} else {
 		x12Items, parseErr := h.bgSvc.Parse832Catalog(string(data))
 		if parseErr != nil {
-			http.Error(w, fmt.Sprintf("X12 parse error: %v", parseErr), http.StatusUnprocessableEntity)
+			httputil.RespondError(w, r, "X12 parse error", http.StatusUnprocessableEntity, parseErr)
 			return
 		}
 		for _, item := range x12Items {
@@ -197,7 +207,7 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 	// Persist to DB
 	count, err := h.repo.SaveCatalogEntries(r.Context(), partnerID, entries)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save catalog: %v", err), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to save catalog", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -213,13 +223,13 @@ func (h *EDIHandler) ImportCatalog(w http.ResponseWriter, r *http.Request) {
 func (h *EDIHandler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 	partnerID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid partner ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid partner ID", http.StatusBadRequest, err)
 		return
 	}
 
 	entries, err := h.repo.ListCatalogEntries(r.Context(), partnerID, 200)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list catalog entries", http.StatusInternalServerError, err)
 		return
 	}
 	if entries == nil {

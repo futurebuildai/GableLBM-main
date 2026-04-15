@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { PricingService } from '../../services/pricing.service';
 import type { EscalationType, MarketIndex, EscalationResult, QuoteLineEscalator } from '../../types/pricing';
 import { TrendingUp, AlertTriangle, Link2, Calendar, Percent, BarChart3 } from 'lucide-react';
+import { useToast } from '../ui/ToastContext';
 
 interface EscalatorToggleProps {
     basePrice: number;
@@ -10,6 +11,7 @@ interface EscalatorToggleProps {
 }
 
 export const EscalatorToggle = ({ basePrice, escalator, onChange }: EscalatorToggleProps) => {
+    const { showToast } = useToast();
     const [indices, setIndices] = useState<MarketIndex[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -19,8 +21,9 @@ export const EscalatorToggle = ({ basePrice, escalator, onChange }: EscalatorTog
             setIndices(data);
         } catch (err) {
             console.error('Failed to load market indices', err);
+            showToast('Failed to load market indices', 'error');
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         if (escalator.enabled) {
@@ -74,6 +77,7 @@ export const EscalatorToggle = ({ basePrice, escalator, onChange }: EscalatorTog
             onChange({ ...escalator, result });
         } catch (err) {
             console.error('Failed to calculate escalation', err);
+            showToast('Failed to calculate escalation', 'error');
         } finally {
             setLoading(false);
         }

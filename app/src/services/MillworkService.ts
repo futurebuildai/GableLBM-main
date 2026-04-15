@@ -1,10 +1,11 @@
 import type { MillworkOption, CreateOptionRequest } from '../types/millwork';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const MillworkService = {
     async getOptionsByCategory(category: string): Promise<MillworkOption[]> {
-        const response = await fetch(`${API_URL}/api/millwork/options?category=${category}`);
+        const response = await fetchWithAuth(`${API_URL}/api/millwork/options?category=${category}`);
         if (!response.ok) {
             throw new Error('Failed to fetch millwork options');
         }
@@ -12,7 +13,7 @@ export const MillworkService = {
     },
 
     async createOption(option: CreateOptionRequest): Promise<MillworkOption> {
-        const response = await fetch(`${API_URL}/api/millwork/options`, {
+        const response = await fetchWithAuth(`${API_URL}/api/millwork/options`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

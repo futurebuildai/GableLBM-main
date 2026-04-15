@@ -9,24 +9,25 @@ import type {
     GenerateCollateralRequest,
     UpdateContentRequest,
 } from '../types/pim';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const PIMService = {
     async getProductDetail(id: string): Promise<ProductDetail> {
-        const res = await fetch(`${API_URL}/products/${id}/detail`);
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/detail`);
         if (!res.ok) throw new Error('Failed to fetch product detail');
         return res.json();
     },
 
     async getContent(id: string): Promise<PIMContent> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/content`);
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/content`);
         if (!res.ok) throw new Error('Failed to fetch PIM content');
         return res.json();
     },
 
     async updateContent(id: string, data: UpdateContentRequest): Promise<PIMContent> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/content`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/content`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -36,7 +37,7 @@ export const PIMService = {
     },
 
     async generateDescriptions(id: string, data: GenerateDescriptionsRequest): Promise<PIMContent> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/generate/descriptions`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/generate/descriptions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -46,7 +47,7 @@ export const PIMService = {
     },
 
     async generateSEO(id: string, data: GenerateSEORequest): Promise<PIMContent> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/generate/seo`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/generate/seo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -56,7 +57,7 @@ export const PIMService = {
     },
 
     async generateImage(id: string, data: GenerateImageRequest): Promise<PIMMedia> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/generate/image`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/generate/image`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -69,7 +70,7 @@ export const PIMService = {
     },
 
     async generateCollateral(id: string, data: GenerateCollateralRequest): Promise<PIMCollateral> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/generate/collateral`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/generate/collateral`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -82,33 +83,33 @@ export const PIMService = {
     },
 
     async listMedia(id: string): Promise<PIMMedia[]> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/media`);
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/media`);
         if (!res.ok) throw new Error('Failed to fetch media');
         return res.json();
     },
 
     async deleteMedia(id: string, mediaId: string): Promise<void> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/media/${mediaId}`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/media/${mediaId}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete media');
     },
 
     async setPrimaryMedia(id: string, mediaId: string): Promise<void> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/media/${mediaId}/primary`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/media/${mediaId}/primary`, {
             method: 'PATCH',
         });
         if (!res.ok) throw new Error('Failed to set primary media');
     },
 
     async listCollateral(id: string): Promise<PIMCollateral[]> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/collateral`);
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/collateral`);
         if (!res.ok) throw new Error('Failed to fetch collateral');
         return res.json();
     },
 
     async deleteCollateral(id: string, collateralId: string): Promise<void> {
-        const res = await fetch(`${API_URL}/products/${id}/pim/collateral/${collateralId}`, {
+        const res = await fetchWithAuth(`${API_URL}/products/${id}/pim/collateral/${collateralId}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete collateral');

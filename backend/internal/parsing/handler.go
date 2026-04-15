@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -25,8 +26,17 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes adds parsing handlers to the mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /parsing/upload", h.HandleUpload)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /parsing/upload", guard(h.HandleUpload))
 }
 
 // HandleUpload processes a material list image upload and returns parsed items.
@@ -36,13 +46,13 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Limit upload to 10MB
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "File too large or invalid form data", http.StatusBadRequest)
+		httputil.RespondError(w, r, "File too large or invalid form data", http.StatusBadRequest, err)
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Missing 'file' field in form data", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Missing 'file' field in form data", http.StatusBadRequest, err)
 		return
 	}
 	defer file.Close()
@@ -53,9 +63,9 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Read uploaded file bytes for the base64 preview
-	imageBytes, err := io.ReadAll(file)
+	imageBytes, err := io.ReadAll(io.LimitReader(file, 10<<20))
 	if err != nil {
-		http.Error(w, "Failed to read uploaded file", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to read uploaded file", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -80,7 +90,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		textContent, convErr := convertSpreadsheetToText(imageBytes)
 		if convErr != nil {
 			slog.Error("Failed to convert spreadsheet", "error", convErr)
-			http.Error(w, "Failed to process spreadsheet", http.StatusBadRequest)
+			httputil.RespondError(w, r, "Failed to process spreadsheet", http.StatusBadRequest, convErr)
 			return
 		}
 		aiBytes = []byte(textContent)
@@ -91,7 +101,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	extracted, extractErr := h.service.ExtractItemsWithAI(r.Context(), aiBytes, aiContentType)
 	if extractErr != nil {
 		slog.Error("Failed to extract items", "error", extractErr)
-		http.Error(w, "Failed to extract items from file", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to extract items from file", http.StatusInternalServerError, extractErr)
 		return
 	}
 
@@ -99,7 +109,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	items, err := h.service.MatchProducts(r.Context(), extracted)
 	if err != nil {
 		slog.Error("Failed to match products", "error", err)
-		http.Error(w, "Failed to process material list", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to process material list", http.StatusInternalServerError, err)
 		return
 	}
 

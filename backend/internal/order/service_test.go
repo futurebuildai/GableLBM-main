@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/pkg/database"
@@ -45,8 +46,10 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 	// We only test CreateOrder -> PO trigger.
 
 	poRepo := purchase_order.NewRepository(db)
-	poSvc := purchase_order.NewService(poRepo, nil, nil, nil, nil) // Mock EDI, Inventory, Product, Vendor
-	orderSvc := order.NewService(orderRepo, nil, nil, nil, poSvc)  // Nil for unused services in CreateOrder
+	poSvc := purchase_order.NewService(poRepo, db, nil, nil, nil, nil)  // Mock EDI, Inventory, Product, Vendor
+	custRepo := customer.NewRepository(db)
+	custSvc := customer.NewService(custRepo)
+	orderSvc := order.NewService(orderRepo, nil, nil, custSvc, poSvc)  // Nil for inventory/invoice (unused in CreateOrder)
 
 	// Test Data
 	vendorID := uuid.New()
@@ -64,10 +67,10 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 			{
 				ProductID:        productID,
 				Quantity:         1,
-				PriceEach:        200,
+				PriceEach:        20000, // $200.00 in cents
 				IsSpecialOrder:   true,
 				VendorID:         &vendorID,
-				SpecialOrderCost: 150,
+				SpecialOrderCost: 15000, // $150.00 in cents
 			},
 		},
 	}

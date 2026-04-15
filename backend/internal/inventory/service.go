@@ -127,7 +127,35 @@ func (s *Service) Allocate(ctx context.Context, productID uuid.UUID, quantity fl
 }
 
 func (s *Service) Release(ctx context.Context, productID uuid.UUID, quantity float64) error {
-	return s.Allocate(ctx, productID, -quantity)
+	if quantity <= 0 {
+		return fmt.Errorf("release quantity must be positive")
+	}
+
+	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	if err != nil {
+		return fmt.Errorf("failed to list inventory: %w", err)
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no inventory found for product %s", productID)
+	}
+
+	// Pick the item with the most allocated stock
+	var best *Inventory
+	var maxAlloc float64 = -1
+
+	for i := range items {
+		if items[i].Allocated > maxAlloc {
+			maxAlloc = items[i].Allocated
+			best = &items[i]
+		}
+	}
+
+	if best == nil || best.Allocated <= 0 {
+		return fmt.Errorf("no allocated stock found for product %s", productID)
+	}
+
+	return s.repo.DeallocateStock(ctx, best.ID, quantity)
 }
 
 func (s *Service) ListByProduct(ctx context.Context, productIDStr string) ([]Inventory, error) {
@@ -179,7 +207,22 @@ func (s *Service) Fulfill(ctx context.Context, productID uuid.UUID, quantity flo
 }
 
 func (s *Service) RevertFulfillment(ctx context.Context, productID uuid.UUID, quantity float64) error {
-	return s.Fulfill(ctx, productID, -quantity)
+	if quantity <= 0 {
+		return fmt.Errorf("revert quantity must be positive")
+	}
+
+	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	if err != nil {
+		return fmt.Errorf("failed to list inventory: %w", err)
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no inventory found for product %s", productID)
+	}
+
+	// Pick the first item to revert fulfillment into
+	// In a more sophisticated system this would track which item was fulfilled from
+	return s.repo.RevertFulfillStock(ctx, items[0].ID, quantity)
 }
 
 func createError(err error) error {

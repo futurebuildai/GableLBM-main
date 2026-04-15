@@ -37,7 +37,7 @@ func (r *PostgresRepository) CreateRFC(ctx context.Context, rfc *RFC) error {
 		rfc.Status = RFCStatusDraft
 	}
 
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		rfc.Title,
 		rfc.Status,
 		rfc.ProblemStatement,
@@ -61,7 +61,7 @@ func (r *PostgresRepository) GetRFC(ctx context.Context, id uuid.UUID) (*RFC, er
 		WHERE id = $1
 	`
 	var rfc RFC
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&rfc.ID,
 		&rfc.Title,
 		&rfc.Status,
@@ -87,7 +87,7 @@ func (r *PostgresRepository) ListRFCs(ctx context.Context) ([]RFC, error) {
 		FROM rfcs
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rfcs: %w", err)
 	}
@@ -121,7 +121,7 @@ func (r *PostgresRepository) UpdateRFC(ctx context.Context, rfc *RFC) error {
 		WHERE id = $7
 	`
 	rfc.UpdatedAt = time.Now()
-	tag, err := r.db.Pool.Exec(ctx, query,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		rfc.Title,
 		rfc.Status,
 		rfc.ProblemStatement,

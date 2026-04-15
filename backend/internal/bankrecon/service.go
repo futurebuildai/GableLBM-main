@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -323,10 +324,15 @@ func (s *Service) CompleteSession(ctx context.Context, sessionID uuid.UUID) (*Re
 	}
 
 	now := time.Now()
-	userID := uuid.New() // In production, from auth context
 	session.Status = SessionStatusCompleted
 	session.CompletedAt = &now
-	session.CompletedBy = &userID
+
+	// Extract user ID from auth context
+	if claims := middleware.ClaimsFromContext(ctx); claims != nil {
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			session.CompletedBy = &parsed
+		}
+	}
 
 	if err := s.repo.UpdateSession(ctx, session); err != nil {
 		return nil, err

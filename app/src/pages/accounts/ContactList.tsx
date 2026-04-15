@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import type { Contact, CreateContactRequest } from '../../types/crm';
 import { crmApi } from '../../services/crmApi';
+import { useToast } from '../../components/ui/ToastContext';
 
 interface ContactListProps {
     customerId: string;
 }
 
 export const ContactList: React.FC<ContactListProps> = ({ customerId }) => {
+    const { showToast } = useToast();
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -28,8 +30,8 @@ export const ContactList: React.FC<ContactListProps> = ({ customerId }) => {
             const data = await crmApi.listContacts(customerId);
             setContacts(data || []);
             setError(null);
-        } catch (err: any) {
-            setError(err.message || 'Failed to load contacts');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to load contacts');
         } finally {
             setLoading(false);
         }
@@ -66,8 +68,8 @@ export const ContactList: React.FC<ContactListProps> = ({ customerId }) => {
                 is_active: true,
             });
             fetchContacts();
-        } catch (err: any) {
-            alert(err.message || 'Failed to create contact');
+        } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : 'Failed to create contact', 'error');
         }
     };
 
@@ -76,8 +78,8 @@ export const ContactList: React.FC<ContactListProps> = ({ customerId }) => {
         try {
             await crmApi.deleteContact(id);
             fetchContacts();
-        } catch (err: any) {
-            alert(err.message || 'Failed to delete contact');
+        } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : 'Failed to delete contact', 'error');
         }
     };
 

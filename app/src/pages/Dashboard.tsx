@@ -90,6 +90,12 @@ const fetchDashboardData = useCallback(async (showSpinner = false) => {
 
     const currentDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
+    const hour = new Date().getHours();
+    const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+    const userRaw = localStorage.getItem('user');
+    const userName = userRaw ? (() => { try { const u = JSON.parse(userRaw); return u.name || u.firstName || ''; } catch { return ''; } })() : '';
+    const greeting = userName ? `${timeGreeting}, ${userName}` : timeGreeting;
+
     return (
         <motion.div
             variants={containerVariants}
@@ -109,7 +115,7 @@ const fetchDashboardData = useCallback(async (showSpinner = false) => {
                         {currentDate}
                     </motion.div>
                     <h1 className="text-display-large text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                        Good Afternoon, Colton
+                        {greeting}
                     </h1>
                     <p className="text-zinc-500 mt-1">
                         Here's what's happening at the yard today.

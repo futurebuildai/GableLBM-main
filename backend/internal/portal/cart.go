@@ -69,7 +69,7 @@ func (s *Service) UpdateCartItem(ctx context.Context, customerID uuid.UUID, item
 		return nil, fmt.Errorf("quantity must be positive")
 	}
 
-	err := s.repo.UpdateCartItemQty(ctx, itemID, req.Quantity)
+	err := s.repo.UpdateCartItemQty(ctx, itemID, req.Quantity, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update cart item: %w", err)
 	}
@@ -79,7 +79,7 @@ func (s *Service) UpdateCartItem(ctx context.Context, customerID uuid.UUID, item
 
 // RemoveCartItem removes an item from the cart.
 func (s *Service) RemoveCartItem(ctx context.Context, customerID uuid.UUID, itemID uuid.UUID) (*CartDTO, error) {
-	err := s.repo.RemoveCartItem(ctx, itemID)
+	err := s.repo.RemoveCartItem(ctx, itemID, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove cart item: %w", err)
 	}
@@ -97,13 +97,13 @@ func (s *Service) Checkout(ctx context.Context, customerID uuid.UUID, req Checko
 		return nil, fmt.Errorf("cart is empty")
 	}
 
-	// Build order request from cart
+	// Build order request from cart — PriceEach is now int64 cents
 	lines := make([]order.OrderLineRequest, 0, len(cart.Items))
 	for _, item := range cart.Items {
 		lines = append(lines, order.OrderLineRequest{
 			ProductID: item.ProductID,
 			Quantity:  item.Quantity,
-			PriceEach: math.Round(item.UnitPrice*100) / 100,
+			PriceEach: int64(math.Round(item.UnitPrice * 100)), // TODO: align with int64 cents — cart UnitPrice is still float64 dollars
 		})
 	}
 

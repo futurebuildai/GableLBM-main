@@ -8,6 +8,7 @@ export default function OrderList() {
     const navigate = useNavigate();
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         loadOrders();
@@ -15,10 +16,12 @@ export default function OrderList() {
 
     async function loadOrders() {
         try {
+            setError(null);
             const data = await OrderService.listOrders();
             setOrders(data);
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to load orders');
         } finally {
             setLoading(false);
         }
@@ -26,6 +29,21 @@ export default function OrderList() {
 
     if (loading) {
         return <div className="text-white">Loading orders...</div>;
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[400px] p-8">
+                <p className="text-rose-400 text-lg font-semibold mb-2">Failed to load</p>
+                <p className="text-gray-400 text-sm mb-4">{error}</p>
+                <button
+                    onClick={() => { setError(null); loadOrders(); }}
+                    className="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                >
+                    Retry
+                </button>
+            </div>
+        );
     }
 
     return (
@@ -42,7 +60,7 @@ export default function OrderList() {
             </div>
 
             <div className="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm" aria-label="Orders list">
                     <thead>
                         <tr className="border-b border-white/10 bg-white/5">
                             <th className="p-4 font-medium text-muted-foreground">Order ID</th>
@@ -75,6 +93,7 @@ export default function OrderList() {
                                     <td className="p-4 text-right">
                                         <button
                                             onClick={() => navigate(`/orders/${order.id}`)}
+                                            aria-label={`View order ${order.id.slice(0, 8)}`}
                                             className="text-white/50 hover:text-white transition-colors"
                                         >
                                             <ArrowRight size={18} />

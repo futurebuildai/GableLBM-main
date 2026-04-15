@@ -6,8 +6,10 @@ import { PageTransition } from '../../components/ui/PageTransition';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Plus, GitPullRequest, FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 export function RFCDashboard() {
+    const { showToast } = useToast();
     const [rfcs, setRfcs] = useState<RFC[]>([]);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
@@ -19,12 +21,15 @@ export function RFCDashboard() {
             .then((data) => {
                 if (!cancelled) setRfcs(data);
             })
-            .catch(console.error)
+            .catch((err) => {
+                console.error(err);
+                showToast('Failed to load RFCs', 'error');
+            })
             .finally(() => {
                 if (!cancelled) setLoading(false);
             });
         return () => { cancelled = true; };
-    }, []);
+    }, [showToast]);
 
     const statusConfig = (status: string) => {
         switch (status.toLowerCase()) {

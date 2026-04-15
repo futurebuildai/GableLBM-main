@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -16,12 +17,21 @@ func NewRebateHandler(s RebateService) *RebateHandler {
 	return &RebateHandler{service: s}
 }
 
-func (h *RebateHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /pricing/rebates/programs", h.HandleCreateProgram)
-	mux.HandleFunc("GET /pricing/rebates/programs", h.HandleListPrograms)
-	mux.HandleFunc("GET /pricing/rebates/programs/{id}", h.HandleGetProgram)
-	mux.HandleFunc("POST /pricing/rebates/programs/{id}/claims/calculate", h.HandleCalculateClaim)
-	mux.HandleFunc("GET /pricing/rebates/programs/{id}/claims", h.HandleListClaims)
+func (h *RebateHandler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /pricing/rebates/programs", guard(h.HandleCreateProgram))
+	mux.HandleFunc("GET /pricing/rebates/programs", guard(h.HandleListPrograms))
+	mux.HandleFunc("GET /pricing/rebates/programs/{id}", guard(h.HandleGetProgram))
+	mux.HandleFunc("POST /pricing/rebates/programs/{id}/claims/calculate", guard(h.HandleCalculateClaim))
+	mux.HandleFunc("GET /pricing/rebates/programs/{id}/claims", guard(h.HandleListClaims))
 }
 
 type createProgramRequest struct {
@@ -32,18 +42,18 @@ type createProgramRequest struct {
 func (h *RebateHandler) HandleCreateProgram(w http.ResponseWriter, r *http.Request) {
 	var req createProgramRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.Program.VendorID == uuid.Nil || req.Program.Name == "" {
-		http.Error(w, "vendor_id and name are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "vendor_id and name are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	prog, err := h.service.CreateProgramWithTiers(r.Context(), &req.Program, req.Tiers)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create rebate program", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -62,7 +72,7 @@ func (h *RebateHandler) HandleListPrograms(w http.ResponseWriter, r *http.Reques
 
 	programs, err := h.service.ListPrograms(r.Context(), vendorID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list rebate programs", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -74,17 +84,17 @@ func (h *RebateHandler) HandleGetProgram(w http.ResponseWriter, r *http.Request)
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID", http.StatusBadRequest, err)
 		return
 	}
 
 	prog, err := h.service.GetProgramWithTiers(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get rebate program", http.StatusInternalServerError, err)
 		return
 	}
 	if prog == nil {
-		http.Error(w, "program not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Program not found", http.StatusNotFound, nil)
 		return
 	}
 
@@ -102,19 +112,19 @@ func (h *RebateHandler) HandleCalculateClaim(w http.ResponseWriter, r *http.Requ
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req calculateClaimRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	claim, err := h.service.CalculateClaim(r.Context(), id, req.PeriodStart, req.PeriodEnd, req.MockVolume)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to calculate rebate claim", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -126,13 +136,13 @@ func (h *RebateHandler) HandleListClaims(w http.ResponseWriter, r *http.Request)
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID", http.StatusBadRequest, err)
 		return
 	}
 
 	claims, err := h.service.ListClaims(r.Context(), &id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list rebate claims", http.StatusInternalServerError, err)
 		return
 	}
 

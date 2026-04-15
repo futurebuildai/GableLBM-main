@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/ai"
-	"github.com/go-chi/chi/v5"
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 type Handler struct {
@@ -28,16 +28,26 @@ func (h *Handler) WithGeminiKeyStore(ks *ai.KeyStore) {
 	h.geminiKeyStore = ks
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/admin/keys", h.CreateKey)
-	mux.HandleFunc("GET /api/admin/keys", h.ListKeys)
-	mux.HandleFunc("DELETE /api/admin/keys/{id}", h.RevokeKey)
-	mux.HandleFunc("GET /api/admin/settings/ai", h.GetAISettings)
-	mux.HandleFunc("PUT /api/admin/settings/ai", h.SaveAISettings)
-	mux.HandleFunc("DELETE /api/admin/settings/ai", h.DeleteAISettings)
-	mux.HandleFunc("GET /api/admin/settings/gemini", h.GetGeminiSettings)
-	mux.HandleFunc("PUT /api/admin/settings/gemini", h.SaveGeminiSettings)
-	mux.HandleFunc("DELETE /api/admin/settings/gemini", h.DeleteGeminiSettings)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	// All admin routes require admin/owner role
+	mux.HandleFunc("POST /api/admin/keys", guard(h.CreateKey))
+	mux.HandleFunc("GET /api/admin/keys", guard(h.ListKeys))
+	mux.HandleFunc("DELETE /api/admin/keys/{id}", guard(h.RevokeKey))
+	mux.HandleFunc("GET /api/admin/settings/ai", guard(h.GetAISettings))
+	mux.HandleFunc("PUT /api/admin/settings/ai", guard(h.SaveAISettings))
+	mux.HandleFunc("DELETE /api/admin/settings/ai", guard(h.DeleteAISettings))
+	mux.HandleFunc("GET /api/admin/settings/gemini", guard(h.GetGeminiSettings))
+	mux.HandleFunc("PUT /api/admin/settings/gemini", guard(h.SaveGeminiSettings))
+	mux.HandleFunc("DELETE /api/admin/settings/gemini", guard(h.DeleteGeminiSettings))
 }
 
 type CreateKeyRequest struct {
@@ -53,13 +63,13 @@ type CreateKeyResponse struct {
 func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	var req CreateKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to decode create key request", http.StatusBadRequest, err)
 		return
 	}
 
 	rawKey, apiKey, err := h.service.GenerateKey(r.Context(), req.Name, req.Scopes)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to generate API key", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -73,7 +83,7 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 	keys, err := h.service.ListKeys(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list API keys", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -82,14 +92,14 @@ func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RevokeKey(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, "missing id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "missing id", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.service.RevokeKey(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to revoke API key", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -141,7 +151,7 @@ func (h *Handler) GetAISettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 	if h.aiKeyStore == nil {
-		http.Error(w, "AI key store not available", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "AI key store not available", http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -149,17 +159,17 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 		APIKey string `json:"api_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if body.APIKey == "" {
-		http.Error(w, "api_key is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.aiKeyStore.Set(r.Context(), body.APIKey); err != nil {
-		http.Error(w, "Failed to save API key: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to save API key", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -169,12 +179,12 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteAISettings(w http.ResponseWriter, r *http.Request) {
 	if h.aiKeyStore == nil {
-		http.Error(w, "AI key store not available", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "AI key store not available", http.StatusInternalServerError, nil)
 		return
 	}
 
 	if err := h.aiKeyStore.Delete(r.Context()); err != nil {
-		http.Error(w, "Failed to delete API key: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete API key", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -219,7 +229,7 @@ func (h *Handler) GetGeminiSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SaveGeminiSettings(w http.ResponseWriter, r *http.Request) {
 	if h.geminiKeyStore == nil {
-		http.Error(w, "Gemini key store not available", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Gemini key store not available", http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -227,17 +237,17 @@ func (h *Handler) SaveGeminiSettings(w http.ResponseWriter, r *http.Request) {
 		APIKey string `json:"api_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if body.APIKey == "" {
-		http.Error(w, "api_key is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.geminiKeyStore.Set(r.Context(), body.APIKey); err != nil {
-		http.Error(w, "Failed to save Gemini API key: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to save Gemini API key", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -247,12 +257,12 @@ func (h *Handler) SaveGeminiSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteGeminiSettings(w http.ResponseWriter, r *http.Request) {
 	if h.geminiKeyStore == nil {
-		http.Error(w, "Gemini key store not available", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Gemini key store not available", http.StatusInternalServerError, nil)
 		return
 	}
 
 	if err := h.geminiKeyStore.Delete(r.Context()); err != nil {
-		http.Error(w, "Failed to delete Gemini API key: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete Gemini API key", http.StatusInternalServerError, err)
 		return
 	}
 

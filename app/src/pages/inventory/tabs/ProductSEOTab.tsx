@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import type { PIMContent } from '../../../types/pim';
 import { PIMService } from '../../../services/PIMService';
 import { Sparkles, Save, Loader2, Search, X, Globe } from 'lucide-react';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface Props {
     productId: string;
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export const ProductSEOTab: React.FC<Props> = ({ productId, content, onContentUpdate }) => {
+    const { showToast } = useToast();
     const [generating, setGenerating] = useState(false);
     const [saving, setSaving] = useState(false);
     const [title, setTitle] = useState(content?.seo_title || '');
@@ -32,10 +34,11 @@ export const ProductSEOTab: React.FC<Props> = ({ productId, content, onContentUp
             onContentUpdate(result);
         } catch (err) {
             console.error('Generate SEO failed:', err);
+            showToast('Failed to generate SEO content', 'error');
         } finally {
             setGenerating(false);
         }
-    }, [productId, keywords, onContentUpdate]);
+    }, [productId, keywords, onContentUpdate, showToast]);
 
     const handleSave = useCallback(async () => {
         setSaving(true);
@@ -49,10 +52,11 @@ export const ProductSEOTab: React.FC<Props> = ({ productId, content, onContentUp
             onContentUpdate(result);
         } catch (err) {
             console.error('Save SEO failed:', err);
+            showToast('Failed to save SEO changes', 'error');
         } finally {
             setSaving(false);
         }
-    }, [productId, title, description, keywords, slug, onContentUpdate]);
+    }, [productId, title, description, keywords, slug, onContentUpdate, showToast]);
 
     const addKeyword = useCallback(() => {
         const kw = keywordInput.trim().toLowerCase();

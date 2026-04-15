@@ -8,6 +8,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -21,6 +22,7 @@ type Service struct {
 	publicKey      string         // Run Payments public key for Runner.js
 	brainNotifier  *BrainNotifier // FB Brain financial engine notifier (or nil)
 	brainOrgID     string         // Brain org_id for this tenant
+	auditLog       *audit.Logger
 	logger         *slog.Logger
 }
 
@@ -49,15 +51,24 @@ func (s *Service) WithBrainNotifier(n *BrainNotifier, orgID string) *Service {
 	return s
 }
 
+// WithAuditLog sets the audit logger for financial operation tracking.
+func (s *Service) WithAuditLog(l *audit.Logger) *Service {
+	s.auditLog = l
+	return s
+}
+
 // GetPublicKey returns the Run Payments public key for frontend Runner.js integration.
 func (s *Service) GetPublicKey() string {
 	return s.publicKey
 }
 
 // ProcessPayment handles cash, check, and account payments (non-gateway).
-func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amount float64, method PaymentMethod, ref, notes string) (*Payment, error) {
+func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amountCents int64, method PaymentMethod, ref, notes string) (*Payment, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("payment amount must be positive")
+	}
+
 	var p *Payment
-	amountCents := int64(amount*100.0 + 0.5)
 
 	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
 		inv, err := s.invoiceRepo.GetInvoice(ctx, invoiceID)
@@ -88,16 +99,33 @@ func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amoun
 	if err != nil {
 		return nil, err
 	}
+
+	// Audit log: payment processed
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "payment.processed",
+			EntityType: "payment",
+			EntityID:   p.ID,
+			Changes: map[string]interface{}{
+				"invoice_id":   invoiceID,
+				"amount_cents": amountCents,
+				"method":       string(method),
+				"reference":    ref,
+			},
+		})
+	}
+
 	return p, nil
 }
 
 // ProcessCardPayment handles card payments through the Run Payments gateway.
-func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, tokenID string, amount float64, notes string) (*Payment, error) {
+func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, tokenID string, amountCents int64, notes string) (*Payment, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("payment amount must be positive")
+	}
 	if s.gateway == nil {
 		return nil, fmt.Errorf("payment gateway not configured — set RUN_PAYMENTS_API_KEY")
 	}
-
-	amountCents := int64(amount*100.0 + 0.5)
 
 	// 1. Charge through Run Payments
 	result, err := s.gateway.Charge(ctx, ChargeRequest{
@@ -167,33 +195,88 @@ func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, t
 }
 
 // RefundPayment issues a full or partial refund on a completed card payment.
-func (s *Service) RefundPayment(ctx context.Context, paymentID uuid.UUID, amount float64, reason string) (*Refund, error) {
+func (s *Service) RefundPayment(ctx context.Context, paymentID uuid.UUID, amountCents int64, reason string) (*Refund, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("refund amount must be positive")
+	}
 	if s.gateway == nil {
 		return nil, fmt.Errorf("payment gateway not configured")
 	}
 
-	amountCents := int64(amount*100.0 + 0.5)
+	// Look up the original payment to get the gateway transaction ID
+	original, err := s.repo.GetPaymentByID(ctx, paymentID)
+	if err != nil {
+		return nil, fmt.Errorf("original payment not found: %w", err)
+	}
 
-	// Get the original payment
-	payments, err := s.repo.GetPaymentsByInvoiceID(ctx, uuid.Nil) // We need GetPaymentByID
-	_ = payments                                                  // TODO: implement GetPaymentByID in repository
-	_ = err
+	if original.GatewayTxID == "" {
+		return nil, fmt.Errorf("payment %s has no gateway transaction — only card payments can be refunded", paymentID)
+	}
 
-	// For now, we need the gateway tx ID — this will be enhanced when we add GetPaymentByID
-	// Placeholder: process refund through gateway
-	result, err := s.gateway.Refund(ctx, "", amountCents) // TODO: pass real gateway_tx_id
+	if amountCents > original.Amount {
+		return nil, fmt.Errorf("refund amount (%d cents) exceeds original payment (%d cents)", amountCents, original.Amount)
+	}
+
+	// Process refund through gateway using the original transaction ID
+	result, err := s.gateway.Refund(ctx, original.GatewayTxID, amountCents)
 	if err != nil {
 		return nil, fmt.Errorf("gateway refund failed: %w", err)
 	}
 
-	refund := &Refund{
-		ID:              uuid.New(),
-		PaymentID:       paymentID,
-		Amount:          amountCents,
-		Reason:          reason,
-		GatewayRefundID: result.TransactionID,
-		Status:          "COMPLETE",
-		CreatedAt:       time.Now(),
+	// Persist the refund record within a transaction
+	var refund *Refund
+	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
+		// Look up invoice to get the customer ID for the ledger entry
+		inv, err := s.invoiceRepo.GetInvoice(ctx, original.InvoiceID)
+		if err != nil {
+			return fmt.Errorf("invoice not found for refund ledger: %w", err)
+		}
+
+		refund = &Refund{
+			PaymentID:       paymentID,
+			Amount:          amountCents,
+			Reason:          reason,
+			GatewayRefundID: result.TransactionID,
+			Status:          "COMPLETE",
+		}
+
+		if err := s.repo.CreateRefund(ctx, refund); err != nil {
+			return fmt.Errorf("failed to persist refund: %w", err)
+		}
+
+		// Post the refund as a credit to the customer's account ledger (positive = credit back)
+		_, err = s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypePayment, amountCents, &refund.ID, "Refund: "+reason)
+		if err != nil {
+			return fmt.Errorf("failed to post refund to account ledger: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		// Gateway refunded but DB failed — log for manual reconciliation
+		s.logger.Error("CRITICAL: Gateway refunded but DB commit failed",
+			"gateway_refund_id", result.TransactionID,
+			"payment_id", paymentID,
+			"amount_cents", amountCents,
+			"error", err,
+		)
+		return nil, fmt.Errorf("refund processed at gateway but failed to save: %w", err)
+	}
+
+	// Audit log: refund processed
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "payment.refunded",
+			EntityType: "refund",
+			EntityID:   refund.ID,
+			Changes: map[string]interface{}{
+				"payment_id":   paymentID,
+				"amount_cents": amountCents,
+				"reason":       reason,
+				"gateway_id":   result.TransactionID,
+			},
+		})
 	}
 
 	return refund, nil

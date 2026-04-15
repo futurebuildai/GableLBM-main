@@ -17,128 +17,85 @@ import type {
     UpdateUserRoleRequest,
     UpdateUserStatusRequest,
 } from '../types/portal';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
-const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_RETRIES = 1;
-const RETRY_DELAY_MS = 2_000;
-const TOKEN_KEY = 'portal_token';
 
 /**
- * Get stored portal JWT token.
+ * Clear portal auth by calling the logout endpoint (clears httpOnly cookie)
+ * and removing client-side user data.
  */
-function getToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-/**
- * Store portal JWT token.
- */
-export function setToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-}
-
-/**
- * Remove stored portal JWT token.
- */
-export function clearToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
+export async function clearToken(): Promise<void> {
+    try {
+        await fetch(`${API_URL}/api/portal/v1/logout`, {
+            method: 'POST',
+            credentials: 'include',
+        });
+    } catch {
+        // Best-effort — continue with local cleanup even if logout call fails
+    }
+    localStorage.removeItem('portal_token'); // Clean up legacy storage if present
 }
 
 /**
  * Check if user is authenticated.
+ * Since the JWT is in an httpOnly cookie (not accessible to JS), we check
+ * for the portal_user object that is stored on login.
  */
 export function isAuthenticated(): boolean {
-    return getToken() !== null;
+    return localStorage.getItem('portal_user') !== null;
 }
 
 /**
- * Fetch with timeout, retry, and auth header injection.
+ * Wrapper around shared fetchWithAuth that handles response parsing.
+ * 401 handling is delegated to fetchWithAuth (centralized interceptor).
  */
-async function fetchWithRetry<T>(
+async function portalFetch<T>(
     url: string,
     options: RequestInit = {},
-    retries = MAX_RETRIES,
 ): Promise<T> {
-    let lastError: Error | null = null;
+    const response = await fetchWithAuth(url, options);
 
-    for (let attempt = 0; attempt <= retries; attempt++) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-        try {
-            const token = getToken();
-            const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-                ...(options.headers as Record<string, string> || {}),
-            };
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
-
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const text = await response.text().catch(() => response.statusText);
-                throw new Error(`API error: ${response.status} ${text}`);
-            }
-
-            return await response.json() as T;
-        } catch (error) {
-            clearTimeout(timeoutId);
-            lastError = error instanceof Error ? error : new Error(String(error));
-
-            if (lastError.name === 'AbortError') {
-                lastError = new Error('Request timed out');
-            }
-
-            if (attempt < retries) {
-                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            }
-        }
+    if (!response.ok) {
+        const text = await response.text().catch(() => response.statusText);
+        throw new Error(`API error: ${response.status} ${text}`);
     }
 
-    throw lastError ?? new Error('Request failed');
+    return await response.json() as T;
 }
 
 export const PortalService = {
     /** Authenticate contractor and return JWT + user + config. */
     async login(email: string, password: string): Promise<PortalLoginResponse> {
-        return fetchWithRetry<PortalLoginResponse>(
+        return portalFetch<PortalLoginResponse>(
             `${API_URL}/api/portal/v1/login`,
             { method: 'POST', body: JSON.stringify({ email, password }) },
-            0,
         );
     },
 
     /** Get portal branding config (public). */
     async getConfig(): Promise<PortalConfig> {
-        return fetchWithRetry<PortalConfig>(`${API_URL}/api/portal/v1/config`);
+        return portalFetch<PortalConfig>(`${API_URL}/api/portal/v1/config`);
     },
 
     /** Get contractor dashboard data. */
     async getDashboard(): Promise<PortalDashboard> {
-        return fetchWithRetry<PortalDashboard>(`${API_URL}/api/portal/v1/dashboard`);
+        return portalFetch<PortalDashboard>(`${API_URL}/api/portal/v1/dashboard`);
     },
 
     /** List order history. */
     async getOrders(): Promise<PortalOrder[]> {
-        return fetchWithRetry<PortalOrder[]>(`${API_URL}/api/portal/v1/orders`);
+        return portalFetch<PortalOrder[]>(`${API_URL}/api/portal/v1/orders`);
     },
 
     /** Get single order with lines. */
     async getOrder(id: string): Promise<PortalOrder> {
-        return fetchWithRetry<PortalOrder>(`${API_URL}/api/portal/v1/orders/${id}`);
+        return portalFetch<PortalOrder>(`${API_URL}/api/portal/v1/orders/${id}`);
     },
 
     /** Create a reorder from historical order. */
     async reorder(orderId: string): Promise<ReorderResponse> {
-        return fetchWithRetry<ReorderResponse>(
+        return portalFetch<ReorderResponse>(
             `${API_URL}/api/portal/v1/orders/reorder`,
             { method: 'POST', body: JSON.stringify({ order_id: orderId }) },
         );
@@ -146,22 +103,22 @@ export const PortalService = {
 
     /** List invoices. */
     async getInvoices(): Promise<PortalInvoice[]> {
-        return fetchWithRetry<PortalInvoice[]>(`${API_URL}/api/portal/v1/invoices`);
+        return portalFetch<PortalInvoice[]>(`${API_URL}/api/portal/v1/invoices`);
     },
 
     /** Get single invoice with lines. */
     async getInvoice(id: string): Promise<PortalInvoice> {
-        return fetchWithRetry<PortalInvoice>(`${API_URL}/api/portal/v1/invoices/${id}`);
+        return portalFetch<PortalInvoice>(`${API_URL}/api/portal/v1/invoices/${id}`);
     },
 
     /** List deliveries with POD info. */
     async getDeliveries(): Promise<PortalDelivery[]> {
-        return fetchWithRetry<PortalDelivery[]>(`${API_URL}/api/portal/v1/deliveries`);
+        return portalFetch<PortalDelivery[]>(`${API_URL}/api/portal/v1/deliveries`);
     },
 
     /** Get single delivery with POD info. */
     async getDelivery(id: string): Promise<PortalDelivery> {
-        return fetchWithRetry<PortalDelivery>(`${API_URL}/api/portal/v1/deliveries/${id}`);
+        return portalFetch<PortalDelivery>(`${API_URL}/api/portal/v1/deliveries/${id}`);
     },
 
     // --- Catalog Methods (Sprint 27) ---
@@ -179,26 +136,26 @@ export const PortalService = {
         if (params?.species) searchParams.set('species', params.species);
         if (params?.grade) searchParams.set('grade', params.grade);
         const qs = searchParams.toString();
-        return fetchWithRetry<CatalogProduct[]>(
+        return portalFetch<CatalogProduct[]>(
             `${API_URL}/api/portal/v1/catalog${qs ? `?${qs}` : ''}`,
         );
     },
 
     /** Get single catalog product detail. */
     async getCatalogProduct(id: string): Promise<CatalogDetail> {
-        return fetchWithRetry<CatalogDetail>(`${API_URL}/api/portal/v1/catalog/${id}`);
+        return portalFetch<CatalogDetail>(`${API_URL}/api/portal/v1/catalog/${id}`);
     },
 
     // --- Cart Methods (Sprint 27) ---
 
     /** Get current shopping cart. */
     async getCart(): Promise<Cart> {
-        return fetchWithRetry<Cart>(`${API_URL}/api/portal/v1/cart`);
+        return portalFetch<Cart>(`${API_URL}/api/portal/v1/cart`);
     },
 
     /** Add item to cart. */
     async addToCart(productId: string, quantity: number): Promise<Cart> {
-        return fetchWithRetry<Cart>(
+        return portalFetch<Cart>(
             `${API_URL}/api/portal/v1/cart/items`,
             { method: 'POST', body: JSON.stringify({ product_id: productId, quantity }) },
         );
@@ -206,7 +163,7 @@ export const PortalService = {
 
     /** Update cart item quantity. */
     async updateCartItem(itemId: string, quantity: number): Promise<Cart> {
-        return fetchWithRetry<Cart>(
+        return portalFetch<Cart>(
             `${API_URL}/api/portal/v1/cart/items/${itemId}`,
             { method: 'PUT', body: JSON.stringify({ quantity }) },
         );
@@ -214,7 +171,7 @@ export const PortalService = {
 
     /** Remove item from cart. */
     async removeCartItem(itemId: string): Promise<Cart> {
-        return fetchWithRetry<Cart>(
+        return portalFetch<Cart>(
             `${API_URL}/api/portal/v1/cart/items/${itemId}`,
             { method: 'DELETE' },
         );
@@ -222,7 +179,7 @@ export const PortalService = {
 
     /** Place order from cart. */
     async checkout(req: CheckoutRequest): Promise<CheckoutResponse> {
-        return fetchWithRetry<CheckoutResponse>(
+        return portalFetch<CheckoutResponse>(
             `${API_URL}/api/portal/v1/checkout`,
             { method: 'POST', body: JSON.stringify(req) },
         );
@@ -232,17 +189,17 @@ export const PortalService = {
 
     /** Get portal users. */
     async getUsers(): Promise<PortalUser[]> {
-        return fetchWithRetry<PortalUser[]>(`${API_URL}/api/portal/v1/users`);
+        return portalFetch<PortalUser[]>(`${API_URL}/api/portal/v1/users`);
     },
 
     /** Get active invites. */
     async getInvites(): Promise<PortalInvite[]> {
-        return fetchWithRetry<PortalInvite[]>(`${API_URL}/api/portal/v1/invites`);
+        return portalFetch<PortalInvite[]>(`${API_URL}/api/portal/v1/invites`);
     },
 
     /** Invite a new user. */
     async inviteUser(req: InviteUserRequest): Promise<PortalInvite> {
-        return fetchWithRetry<PortalInvite>(
+        return portalFetch<PortalInvite>(
             `${API_URL}/api/portal/v1/invites`,
             { method: 'POST', body: JSON.stringify(req) },
         );
@@ -250,7 +207,7 @@ export const PortalService = {
 
     /** Update a user's role. */
     async updateUserRole(id: string, req: UpdateUserRoleRequest): Promise<void> {
-        return fetchWithRetry<void>(
+        return portalFetch<void>(
             `${API_URL}/api/portal/v1/users/${id}/role`,
             { method: 'PUT', body: JSON.stringify(req) },
         );
@@ -258,7 +215,7 @@ export const PortalService = {
 
     /** Update a user's status. */
     async updateUserStatus(id: string, req: UpdateUserStatusRequest): Promise<void> {
-        return fetchWithRetry<void>(
+        return portalFetch<void>(
             `${API_URL}/api/portal/v1/users/${id}/status`,
             { method: 'PUT', body: JSON.stringify(req) },
         );

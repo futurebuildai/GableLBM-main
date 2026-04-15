@@ -25,6 +25,7 @@ type ProjectDashboardDTO struct {
 }
 
 // ProjectItem is a generic summary of an associated entity (Order, Delivery, Invoice).
+// TODO: align with int64 cents — TotalAmount is float64 dollars
 type ProjectItem struct {
 	ID          uuid.UUID `json:"id"`
 	Type        string    `json:"type"` // ORDER, DELIVERY, INVOICE

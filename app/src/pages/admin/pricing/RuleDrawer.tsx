@@ -7,6 +7,7 @@ import { CustomerSelect } from '../../../components/customers/CustomerSelect';
 import type { CategoryPricingRule, CategoryRuleType, CategoryPricingAudit } from '../../../types/category-pricing';
 import type { Customer } from '../../../types/customer';
 import { cn } from '../../../lib/utils';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface RuleDrawerProps {
   rule: Partial<CategoryPricingRule> | null;
@@ -32,6 +33,7 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export const RuleDrawer = ({ rule, categoryName, tierName, targetType, onSave, onDelete, onClose }: RuleDrawerProps) => {
+  const { showToast } = useToast();
   const [ruleType, setRuleType] = useState<CategoryRuleType>(rule?.rule_type || 'MARKDOWN');
   const [ruleValue, setRuleValue] = useState(rule?.rule_value?.toString() || '');
   const [marginFloor, setMarginFloor] = useState(rule?.margin_floor_pct?.toString() || '');
@@ -49,12 +51,16 @@ export const RuleDrawer = ({ rule, categoryName, tierName, targetType, onSave, o
     setShowDelete(false);
     setSelectedCustomerId(rule?.customer_id);
 
+    let active = true;
     if (rule?.id) {
-      categoryPricingService.getRuleAudit(rule.id).then(setAuditEntries).catch(() => {});
+      categoryPricingService.getRuleAudit(rule.id)
+        .then(data => { if (active) setAuditEntries(data); })
+        .catch((err) => { if (active) { console.error('Failed to load audit trail:', err); showToast('Failed to load audit trail', 'error'); } });
     } else {
       setAuditEntries([]);
     }
-  }, [rule]);
+    return () => { active = false; };
+  }, [rule, showToast]);
 
   const handleSave = () => {
     const value = parseFloat(ruleValue);

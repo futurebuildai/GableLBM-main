@@ -3,12 +3,14 @@ import type { Activity, Contact } from '../../types/crm';
 import { crmApi } from '../../services/crmApi';
 import { LogActivityModal } from '../../components/crm/LogActivityModal';
 import { format } from 'date-fns';
+import { useToast } from '../../components/ui/ToastContext';
 
 interface ActivityFeedProps {
     customerId: string;
 }
 
 export const ActivityFeed: React.FC<ActivityFeedProps> = ({ customerId }) => {
+    const { showToast } = useToast();
     const [activities, setActivities] = useState<Activity[]>([]);
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
@@ -23,8 +25,9 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ customerId }) => {
             ]);
             setActivities(acts || []);
             setContacts(conts || []);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Failed to load activity data', err);
+            showToast('Failed to load activity data', 'error');
         } finally {
             setLoading(false);
         }

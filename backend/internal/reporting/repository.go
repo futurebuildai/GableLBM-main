@@ -45,7 +45,7 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 		GROUP BY method
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query, dayStart, dayEnd)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
@@ -85,7 +85,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		FROM invoices
 		WHERE created_at >= $1 AND created_at < $2 AND status != 'VOID'
 	`
-	err := r.db.Pool.QueryRow(ctx, queryInvoiced, start, end).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
@@ -96,7 +96,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		FROM payments
 		WHERE created_at >= $1 AND created_at < $2
 	`
-	err = r.db.Pool.QueryRow(ctx, queryCollected, start, end).Scan(&report.TotalCollected)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
@@ -131,7 +131,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
 	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
 
-	err = r.db.Pool.QueryRow(ctx, queryOutstanding, start, end).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}
@@ -156,7 +156,7 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 		ORDER BY total DESC
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query AR aging: %w", err)
 	}
@@ -186,7 +186,7 @@ func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerI
 	// Get customer name
 	var customerName string
 	nameQuery := `SELECT COALESCE(name, '') FROM customers WHERE id = $1`
-	_ = r.db.Pool.QueryRow(ctx, nameQuery, customerID).Scan(&customerName)
+	_ = r.db.GetExecutor(ctx).QueryRow(ctx, nameQuery, customerID).Scan(&customerName)
 
 	stmt := &CustomerStatement{
 		CustomerID:   customerID,
@@ -206,7 +206,7 @@ func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerI
 		ORDER BY ct.created_at ASC
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query, customerID, start, end)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query statement: %w", err)
 	}
@@ -229,7 +229,7 @@ func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerI
 		WHERE customer_id = $1 AND created_at < $2
 		ORDER BY created_at DESC LIMIT 1
 	`
-	_ = r.db.Pool.QueryRow(ctx, openQuery, customerID, start).Scan(&stmt.OpenBalance)
+	_ = r.db.GetExecutor(ctx).QueryRow(ctx, openQuery, customerID, start).Scan(&stmt.OpenBalance)
 
 	// Close balance: balance_after of last transaction in or before end date
 	closeQuery := `
@@ -238,7 +238,7 @@ func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerI
 		WHERE customer_id = $1 AND created_at < $2
 		ORDER BY created_at DESC LIMIT 1
 	`
-	_ = r.db.Pool.QueryRow(ctx, closeQuery, customerID, end).Scan(&stmt.CloseBalance)
+	_ = r.db.GetExecutor(ctx).QueryRow(ctx, closeQuery, customerID, end).Scan(&stmt.CloseBalance)
 
 	return stmt, nil
 }
@@ -249,7 +249,7 @@ INSERT INTO saved_reports (name, description, entity_type, definition_json, crea
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at, updated_at
 `
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.CreatedBy).
 		Scan(&report.ID, &report.CreatedAt, &report.UpdatedAt)
 	if err != nil {
@@ -265,7 +265,7 @@ FROM saved_reports
 WHERE id = $1
 `
 	report := &SavedReport{}
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&report.ID, &report.Name, &report.Description, &report.EntityType,
 		&report.DefinitionJSON, &report.CreatedBy, &report.CreatedAt, &report.UpdatedAt)
 	if err != nil {
@@ -280,7 +280,7 @@ SELECT id, name, description, entity_type, definition_json, created_by, created_
 FROM saved_reports
 ORDER BY created_at DESC
 `
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list saved reports: %w", err)
 	}
@@ -306,7 +306,7 @@ SET name = $1, description = $2, entity_type = $3, definition_json = $4, updated
 WHERE id = $5
 RETURNING updated_at
 `
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.ID).
 		Scan(&report.UpdatedAt)
 	if err != nil {
@@ -317,7 +317,7 @@ RETURNING updated_at
 
 func (r *PostgresRepository) DeleteSavedReport(ctx context.Context, id string) error {
 	query := `DELETE FROM saved_reports WHERE id = $1`
-	_, err := r.db.Pool.Exec(ctx, query, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, id)
 	return err
 }
 
@@ -327,7 +327,7 @@ INSERT INTO report_schedules (report_id, cron_expression, recipients, status)
 VALUES ($1, $2, $3, $4)
 RETURNING id, created_at, updated_at
 `
-	err := r.db.Pool.QueryRow(ctx, query,
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status).
 		Scan(&schedule.ID, &schedule.CreatedAt, &schedule.UpdatedAt)
 	if err != nil {
@@ -342,7 +342,7 @@ SELECT id, report_id, cron_expression, recipients, status, last_run_at, next_run
 FROM report_schedules
 ORDER BY created_at DESC
 `
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list report schedules: %w", err)
 	}
@@ -368,6 +368,6 @@ UPDATE report_schedules
 SET last_run_at = NOW(), next_run_at = $1, updated_at = NOW()
 WHERE id = $2
 `
-	_, err := r.db.Pool.Exec(ctx, query, nextRun, scheduleID)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, nextRun, scheduleID)
 	return err
 }

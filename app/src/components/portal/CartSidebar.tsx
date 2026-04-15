@@ -3,6 +3,7 @@ import { ShoppingCart, X, Minus, Plus, Trash2, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PortalService } from '../../services/PortalService';
 import type { Cart } from '../../types/portal';
+import { useToast } from '../../components/ui/ToastContext';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -14,6 +15,7 @@ interface CartSidebarProps {
 }
 
 export const CartSidebar = ({ isOpen, onClose, refreshKey }: CartSidebarProps) => {
+    const { showToast } = useToast();
     const [cart, setCart] = useState<Cart | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -30,18 +32,26 @@ export const CartSidebar = ({ isOpen, onClose, refreshKey }: CartSidebarProps) =
     }, [isOpen, fetchCart, refreshKey]);
 
     const handleUpdateQty = async (itemId: string, qty: number) => {
-        if (qty <= 0) {
-            const updated = await PortalService.removeCartItem(itemId);
-            setCart(updated);
-        } else {
-            const updated = await PortalService.updateCartItem(itemId, qty);
-            setCart(updated);
+        try {
+            if (qty <= 0) {
+                const updated = await PortalService.removeCartItem(itemId);
+                setCart(updated);
+            } else {
+                const updated = await PortalService.updateCartItem(itemId, qty);
+                setCart(updated);
+            }
+        } catch {
+            showToast('Failed to update cart quantity', 'error');
         }
     };
 
     const handleRemove = async (itemId: string) => {
-        const updated = await PortalService.removeCartItem(itemId);
-        setCart(updated);
+        try {
+            const updated = await PortalService.removeCartItem(itemId);
+            setCart(updated);
+        } catch {
+            showToast('Failed to remove item from cart', 'error');
+        }
     };
 
     return (

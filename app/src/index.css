@@ -68,6 +68,12 @@
     @apply border-border;
   }
 
+  /* WCAG AA: Visible focus indicator */
+  *:focus-visible {
+    outline: 2px solid #00FFA3;
+    outline-offset: 2px;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased selection:bg-gable-green/30 selection:text-gable-green;
   }

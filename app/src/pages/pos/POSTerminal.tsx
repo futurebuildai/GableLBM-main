@@ -24,6 +24,20 @@ const POSTerminal: React.FC = () => {
     const [success, setSuccess] = useState<string | null>(null);
     const [isScanning, setIsScanning] = useState(false);
     const searchRef = useRef<HTMLInputElement>(null);
+    const newTxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Clear the auto-start timer on unmount to prevent setState on unmounted component
+    useEffect(() => {
+        return () => {
+            if (newTxTimerRef.current) {
+                clearTimeout(newTxTimerRef.current);
+            }
+            if (errorTimerRef.current) {
+                clearTimeout(errorTimerRef.current);
+            }
+        };
+    }, []);
 
     const handleScan = async (barcode: string) => {
         try {
@@ -34,17 +48,12 @@ const POSTerminal: React.FC = () => {
                 await addItem(exactMatch);
             } else {
                 setError(`Product not found for barcode: ${barcode}`);
-                setTimeout(() => setError(null), 3000);
+                errorTimerRef.current = setTimeout(() => setError(null), 3000);
             }
-        } catch (err: any) {
-            setError(err.message || 'Error scanning barcode');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Error scanning barcode');
         }
     };
-
-    // Auto-start a new transaction on mount
-    useEffect(() => {
-        startNewTransaction();
-    }, []);
 
     // Product search with debounce
     useEffect(() => {
@@ -68,16 +77,27 @@ const POSTerminal: React.FC = () => {
             setLoading(true);
             setError(null);
             setSuccess(null);
-            const tx = await posService.startTransaction();
+            // TODO: Replace with real cashier ID from auth context once available
+            const cashierId = localStorage.getItem('user_id') || '';
+            if (!cashierId) {
+                setError('No cashier ID found. Please log in again.');
+                return;
+            }
+            const tx = await posService.startTransaction('REG-01', cashierId);
             setTransaction(tx);
             setShowTender(false);
             searchRef.current?.focus();
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to start transaction');
         } finally {
             setLoading(false);
         }
     }, []);
+
+    // Auto-start a new transaction on mount
+    useEffect(() => {
+        startNewTransaction();
+    }, [startNewTransaction]);
 
     const addItem = useCallback(async (product: QuickSearchResult) => {
         if (!transaction) return;
@@ -91,8 +111,8 @@ const POSTerminal: React.FC = () => {
             setSearchQuery('');
             setSearchResults([]);
             searchRef.current?.focus();
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to add item');
         }
     }, [transaction]);
 
@@ -101,8 +121,8 @@ const POSTerminal: React.FC = () => {
         try {
             const updated = await posService.removeItem(transaction.id, itemId);
             setTransaction(updated);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to remove item');
         }
     }, [transaction]);
 
@@ -133,11 +153,11 @@ const POSTerminal: React.FC = () => {
             setShowTender(false);
 
             // Auto-start new transaction after 2 seconds
-            setTimeout(() => {
+            newTxTimerRef.current = setTimeout(() => {
                 startNewTransaction();
             }, 2000);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to complete sale');
         } finally {
             setLoading(false);
         }
@@ -149,8 +169,8 @@ const POSTerminal: React.FC = () => {
         try {
             await posService.voidTransaction(transaction.id);
             startNewTransaction();
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to void transaction');
         }
     }, [transaction, startNewTransaction]);
 
@@ -182,7 +202,7 @@ const POSTerminal: React.FC = () => {
             {/* Alerts */}
             {error && (
                 <div style={styles.alert}>{error}
-                    <button onClick={() => setError(null)} style={styles.alertClose}>×</button>
+                    <button onClick={() => setError(null)} style={styles.alertClose} aria-label="Dismiss error">×</button>
                 </div>
             )}
             {success && (
@@ -204,6 +224,7 @@ const POSTerminal: React.FC = () => {
                                 onChange={e => setSearchQuery(e.target.value)}
                                 style={{ ...styles.searchInput, flex: 1 }}
                                 autoFocus
+                                aria-label="Search product by SKU or description"
                             />
                             <button
                                 onClick={() => setIsScanning(true)}
@@ -258,7 +279,7 @@ const POSTerminal: React.FC = () => {
                                 <p>Search and add products to start a sale</p>
                             </div>
                         ) : (
-                            <table style={styles.itemsTable}>
+                            <table style={styles.itemsTable} aria-label="Cart items">
                                 <thead>
                                     <tr>
                                         <th style={styles.th}>Item</th>
@@ -286,6 +307,7 @@ const POSTerminal: React.FC = () => {
                                                     onClick={() => removeItem(item.id)}
                                                     style={styles.removeBtn}
                                                     title="Remove"
+                                                    aria-label={`Remove ${item.description}`}
                                                 >×</button>
                                             </td>
                                         </tr>
@@ -344,6 +366,7 @@ const POSTerminal: React.FC = () => {
                                 style={styles.tenderInput}
                                 step="0.01"
                                 autoFocus
+                                aria-label="Tender amount"
                             />
                             <button
                                 onClick={completeSale}
@@ -381,7 +404,7 @@ const styles: Record<string, React.CSSProperties> = {
         height: '100vh',
         background: '#0d1117',
         color: '#e6edf3',
-        fontFamily: "'Inter', -apple-system, sans-serif",
+        fontFamily: "'Outfit', -apple-system, sans-serif",
     },
     header: {
         display: 'flex',

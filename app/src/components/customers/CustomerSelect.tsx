@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Customer } from '../../types/customer';
 import { CustomerService } from '../../services/CustomerService';
 import { Search } from 'lucide-react';
+import { useToast } from '../ui/ToastContext';
 
 interface CustomerSelectProps {
     onSelect: (customer: Customer) => void;
@@ -9,6 +10,7 @@ interface CustomerSelectProps {
 }
 
 export const CustomerSelect = ({ onSelect, selectedCustomerId }: CustomerSelectProps) => {
+    const { showToast } = useToast();
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -21,12 +23,13 @@ export const CustomerSelect = ({ onSelect, selectedCustomerId }: CustomerSelectP
                 setCustomers(data);
             } catch (error) {
                 console.error('Failed to load customers', error);
+                showToast('Failed to load customers', 'error');
             } finally {
                 setLoading(false);
             }
         };
         fetchCustomers();
-    }, []);
+    }, [showToast]);
 
     const filteredCustomers = customers.filter(c =>
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||

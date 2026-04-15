@@ -9,7 +9,7 @@ ALTER TABLE delivery_routes ADD COLUMN IF NOT EXISTS total_distance_miles DECIMA
 ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS estimated_arrival TIMESTAMPTZ;
 
 -- Driver on-site quantity adjustments
-CREATE TABLE delivery_qty_adjustments (
+CREATE TABLE IF NOT EXISTS delivery_qty_adjustments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     delivery_id UUID NOT NULL REFERENCES deliveries(id),
     product_id UUID NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE delivery_qty_adjustments (
 CREATE INDEX idx_delivery_qty_adj_delivery ON delivery_qty_adjustments(delivery_id);
 
 -- Notification audit log
-CREATE TABLE delivery_notifications (
+CREATE TABLE IF NOT EXISTS delivery_notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     delivery_id UUID NOT NULL REFERENCES deliveries(id),
     channel VARCHAR(16) NOT NULL, -- SMS, EMAIL

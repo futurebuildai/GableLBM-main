@@ -36,7 +36,7 @@ func (r *PostgresEscalatorRepository) ListMarketIndices(ctx context.Context) ([]
 		FROM market_indices
 		ORDER BY name ASC`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list market indices: %w", err)
 	}
@@ -63,7 +63,7 @@ func (r *PostgresEscalatorRepository) GetMarketIndex(ctx context.Context, id uui
 		WHERE id = $1`
 
 	var idx MarketIndex
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&idx.ID, &idx.Name, &idx.Source, &idx.CurrentValue,
 		&idx.PreviousValue, &idx.Unit, &idx.LastUpdatedAt, &idx.CreatedAt,
 	)
@@ -87,7 +87,7 @@ func (r *PostgresEscalatorRepository) CreateMarketIndex(ctx context.Context, idx
 		INSERT INTO market_indices (id, name, source, current_value, previous_value, unit, last_updated_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		idx.ID, idx.Name, idx.Source, idx.CurrentValue,
 		idx.PreviousValue, idx.Unit, idx.LastUpdatedAt, idx.CreatedAt,
 	)
@@ -165,7 +165,7 @@ func (r *PostgresEscalatorRepository) GetEscalatorByQuoteLine(ctx context.Contex
 		LIMIT 1`
 
 	var esc PriceEscalator
-	err := r.db.Pool.QueryRow(ctx, query, quoteLineID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, quoteLineID).Scan(
 		&esc.ID, &esc.QuoteLineID, &esc.MarketIndexID, &esc.EscalationType,
 		&esc.EscalationRate, &esc.BasePrice, &esc.BaseIndexValue,
 		&esc.EffectiveDate, &esc.ExpirationDate,

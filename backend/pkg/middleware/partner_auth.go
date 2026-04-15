@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // PartnerContextKey is the key used to store the customer in the context
@@ -31,14 +32,14 @@ func (m *PartnerAuthMiddleware) Handler(next http.Handler) http.Handler {
 		claims, ok := r.Context().Value(UserContextKey).(*UserClaims)
 		if !ok || claims == nil {
 			m.logger.Warn("PartnerAuth: No user claims found (AuthMiddleware missing?)", "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 			return
 		}
 
 		// 2. Check if email is present
 		if claims.Email == "" {
 			m.logger.Warn("PartnerAuth: No email in claims", "path", r.URL.Path)
-			http.Error(w, "Unauthorized: No email provided", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: No email provided", http.StatusUnauthorized, nil)
 			return
 		}
 
@@ -46,14 +47,14 @@ func (m *PartnerAuthMiddleware) Handler(next http.Handler) http.Handler {
 		cust, err := m.repo.GetCustomerByEmail(r.Context(), claims.Email)
 		if err != nil {
 			m.logger.Warn("PartnerAuth: Customer lookup failed", "email", claims.Email, "error", err)
-			http.Error(w, "Forbidden: Not a registered partner", http.StatusForbidden)
+			httputil.RespondError(w, r, "Forbidden: Not a registered partner", http.StatusForbidden, nil)
 			return
 		}
 
 		// 4. Check if Active
 		if !cust.IsActive {
 			m.logger.Warn("PartnerAuth: Customer account inactive", "email", claims.Email)
-			http.Error(w, "Forbidden: Account inactive", http.StatusForbidden)
+			httputil.RespondError(w, r, "Forbidden: Account inactive", http.StatusForbidden, nil)
 			return
 		}
 

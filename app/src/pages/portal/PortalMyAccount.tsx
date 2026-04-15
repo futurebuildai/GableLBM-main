@@ -1,33 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CustomerService } from '../../services/CustomerService';
+import { fetchWithAuth } from '../../services/fetchClient';
 import type { Customer } from '../../types/customer';
 import { Button } from '../../components/ui/Button';
 
+const API_URL = import.meta.env.VITE_API_URL || '';
+
 export function PortalMyAccount() {
+    const navigate = useNavigate();
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
+    const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // TODO: Resolve from auth context
-    const portalCustomerId = '364a0cd6-c7f2-4529-92c7-3639c36f6b8f';
+    const [portalCustomerId] = useState(() => {
+        try {
+            const storedUser = localStorage.getItem('portal_user');
+            const parsed = storedUser ? JSON.parse(storedUser) : null;
+            return parsed?.customer_id || '';
+        } catch {
+            return '';
+        }
+    });
 
     useEffect(() => {
+        return () => {
+            if (successTimerRef.current) clearTimeout(successTimerRef.current);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!portalCustomerId) {
+            setLoading(false);
+            setError('No portal session found. Redirecting to login...');
+            navigate('/portal/login');
+            return;
+        }
         async function loadProfile() {
             try {
                 setLoading(true);
                 const data = await CustomerService.getCustomer(portalCustomerId);
                 setCustomer(data);
                 setError(null);
-            } catch (err: any) {
-                setError(err.message || 'Failed to load profile');
+            } catch (err: unknown) {
+                setError(err instanceof Error ? err.message : 'Failed to load profile');
             } finally {
                 setLoading(false);
             }
         }
         loadProfile();
-    }, []);
+    }, [portalCustomerId, navigate]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!customer) return;
@@ -43,9 +68,8 @@ export function PortalMyAccount() {
             setSuccessMsg('');
             setError(null);
 
-            const API_BASE = '';
-            const res = await fetch(`${API_BASE}/api/v1/customers`, {
-                method: 'POST',
+            const res = await fetchWithAuth(`${API_URL}/api/v1/customers/${portalCustomerId}`, {
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(customer),
             });
@@ -53,9 +77,9 @@ export function PortalMyAccount() {
             if (!res.ok) throw new Error('Failed to update profile');
 
             setSuccessMsg('Profile updated successfully!');
-            setTimeout(() => setSuccessMsg(''), 3000);
-        } catch (err: any) {
-            setError(err.message || 'Error saving profile');
+            successTimerRef.current = setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Error saving profile');
         } finally {
             setSaving(false);
         }

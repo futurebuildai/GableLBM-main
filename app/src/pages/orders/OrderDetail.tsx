@@ -7,7 +7,7 @@ import { type Order, getStatusColor } from '../../types/order';
 import type { SalesPerson } from '../../types/salesteam';
 import { useToast } from '../../components/ui/ToastContext';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function OrderDetail() {
     const { id } = useParams();
@@ -15,6 +15,7 @@ export default function OrderDetail() {
     const [order, setOrder] = useState<Order | null>(null);
     const [salesperson, setSalesperson] = useState<SalesPerson | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const [processing, setProcessing] = useState(false);
 
     useEffect(() => {
@@ -33,8 +34,10 @@ export default function OrderDetail() {
                     // Salesperson lookup failed, not critical
                 }
             }
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(true);
+            showToast('Failed to load order details', 'error');
         } finally {
             setLoading(false);
         }
@@ -70,8 +73,11 @@ export default function OrderDetail() {
         }
     }
 
-    if (loading || !order) {
+    if (loading) {
         return <div className="text-white">Loading order details...</div>;
+    }
+    if (error || !order) {
+        return <div className="text-white">Failed to load order details.</div>;
     }
 
     const marginColor = order.margin_percent >= 20 ? 'text-emerald-400' :
@@ -125,7 +131,7 @@ export default function OrderDetail() {
                         <div className="px-6 py-4 border-b border-white/10">
                             <h2 className="font-semibold text-white">Line Items</h2>
                         </div>
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-sm" aria-label="Order line items">
                             <thead className="bg-white/5">
                                 <tr>
                                     <th className="p-4 text-muted-foreground font-medium">Product</th>

@@ -1,5 +1,5 @@
 -- 032_report_builder_and_bi.up.sql
-CREATE TABLE saved_reports (
+CREATE TABLE IF NOT EXISTS saved_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(128) NOT NULL,
     description TEXT,
@@ -10,7 +10,7 @@ CREATE TABLE saved_reports (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE report_schedules (
+CREATE TABLE IF NOT EXISTS report_schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id UUID NOT NULL REFERENCES saved_reports(id),
     cron_expression VARCHAR(64) NOT NULL,

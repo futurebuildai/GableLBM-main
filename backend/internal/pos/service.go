@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/internal/inventory"
@@ -98,7 +99,7 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 	}
 
 	unitPriceCents := int64(effectivePrice*100.0 + 0.5)
-	lineTotalCents := int64(float64(unitPriceCents) * req.Quantity)
+	lineTotalCents := int64(math.Round(float64(unitPriceCents) * req.Quantity))
 
 	item := &POSLineItem{
 		TransactionID: txID,
@@ -180,12 +181,13 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 				Quantity:   -item.Quantity,
 				IsDelta:    true,
 			}); err != nil {
-				s.logger.Warn("Failed to deduct inventory for POS item",
+				s.logger.Error("Inventory deduction failed for POS item — aborting sale",
 					"product_id", item.ProductID,
 					"quantity", item.Quantity,
+					"transaction_id", txID,
 					"error", err,
 				)
-				// Continue — don't fail the sale over inventory tracking
+				return fmt.Errorf("inventory deduction failed for product %s: %w", item.ProductID, err)
 			}
 		}
 
@@ -218,36 +220,54 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 }
 
 // VoidTransaction voids an open or completed transaction.
+// All DB operations (inventory reversal + status update) run in a single transaction.
 func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	var result *POSTransaction
+
+	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
+		tx, err := s.repo.GetTransaction(ctx, txID)
+		if err != nil {
+			return err
+		}
+
+		if tx.Status == TransactionStatusVoided {
+			result = tx
+			return nil
+		}
+
+		// If completed, we need to reverse inventory
+		if tx.Status == TransactionStatusCompleted {
+			items, err := s.repo.GetLineItems(ctx, txID)
+			if err != nil {
+				return fmt.Errorf("failed to get line items for void: %w", err)
+			}
+			for _, item := range items {
+				if err := s.inventorySvc.AdjustStock(ctx, inventory.StockAdjustmentRequest{
+					ProductID:  item.ProductID,
+					LocationID: nil,
+					Quantity:   item.Quantity, // Positive to restore
+					IsDelta:    true,
+				}); err != nil {
+					return fmt.Errorf("failed to reverse inventory for product %s: %w", item.ProductID, err)
+				}
+			}
+		}
+
+		tx.Status = TransactionStatusVoided
+		if err := s.repo.UpdateTransaction(ctx, tx); err != nil {
+			return err
+		}
+
+		result = tx
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	if tx.Status == TransactionStatusVoided {
-		return tx, nil
-	}
-
-	// If completed, we need to reverse inventory
-	if tx.Status == TransactionStatusCompleted {
-		items, _ := s.repo.GetLineItems(ctx, txID)
-		for _, item := range items {
-			_ = s.inventorySvc.AdjustStock(ctx, inventory.StockAdjustmentRequest{
-				ProductID:  item.ProductID,
-				LocationID: nil,
-				Quantity:   item.Quantity, // Positive to restore
-				IsDelta:    true,
-			})
-		}
-	}
-
-	tx.Status = TransactionStatusVoided
-	if err := s.repo.UpdateTransaction(ctx, tx); err != nil {
-		return nil, err
-	}
-
 	s.logger.Info("POS transaction voided", "id", txID)
-	return tx, nil
+	return result, nil
 }
 
 // GetTransaction returns a full transaction with line items and tenders.

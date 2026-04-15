@@ -53,14 +53,20 @@ import (
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-	// 1. Setup Structured Logging (JSON)
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	startTime := time.Now()
+
+	// 1. Setup Structured Logging (JSON) with configurable level
+	logLevel := new(slog.LevelVar)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
 	// 2. Load Config
@@ -69,10 +75,34 @@ func main() {
 		logger.Error("Configuration error", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("Starting server...", "port", cfg.Port)
+	// Configure log level
+	switch strings.ToUpper(cfg.LogLevel) {
+	case "DEBUG":
+		logLevel.Set(slog.LevelDebug)
+	case "WARN":
+		logLevel.Set(slog.LevelWarn)
+	case "ERROR":
+		logLevel.Set(slog.LevelError)
+	default:
+		logLevel.Set(slog.LevelInfo)
+	}
+
+	// Validate CORS_ORIGINS in production mode (fail-closed like JWKS_URL)
+	if !strings.EqualFold(cfg.AuthMode, "dev") && os.Getenv("CORS_ORIGINS") == "" {
+		logger.Error("CORS_ORIGINS not set and AUTH_MODE != dev; set CORS_ORIGINS for production or AUTH_MODE=dev for development")
+		os.Exit(1)
+	}
+
+	logger.Info("Starting server...", "port", cfg.Port, "auth_mode", cfg.AuthMode, "log_level", cfg.LogLevel)
 
 	// 3. Database Connection
-	db, err := database.Connect(cfg.DatabaseURL)
+	db, err := database.Connect(cfg.DatabaseURL, database.PoolConfig{
+		MaxConns:          cfg.DBMaxConns,
+		MinConns:          cfg.DBMinConns,
+		MaxConnLifetime:   time.Duration(cfg.DBMaxConnLifetime) * time.Minute,
+		MaxConnIdleTime:   30 * time.Minute,
+		HealthCheckPeriod: 1 * time.Minute,
+	})
 	if err != nil {
 		logger.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
@@ -80,24 +110,37 @@ func main() {
 	defer db.Close()
 	logger.Info("Connected to database")
 
+	// 3b. Initialize Prometheus Metrics
+	metrics.Register()
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	metrics.StartDBPoolCollector(metricsCtx, db.Pool, 15*time.Second)
+	logger.Info("Prometheus metrics initialized")
+
+	// 3c. Initialize Audit Logger (financial operation tracking)
+	auditLog := audit.NewLogger(db)
+	logger.Info("Audit logger initialized")
+
 	// 4. Initialize Auth Middleware
-	// If JWKS_URL is not set, we warn but allow startup (partial zero trust or dev mode)
-	// For Strict Mode, we would exit.
+	// Fail-closed: JWKS_URL is required unless AUTH_MODE=dev is explicitly set.
 	var authMw *middleware.AuthMiddleware
 	if cfg.JWKSURL != "" {
 		logger.Info("Initializing Auth Middleware", "jwks_url", cfg.JWKSURL)
 		am, err := middleware.NewAuthMiddleware(context.Background(), middleware.AuthConfig{
 			JWKSURL:     cfg.JWKSURL,
 			Issuer:      cfg.AuthIssuer,
-			PublicPaths: []string{"/health", "/api/portal/v1/login", "/api/portal/v1/config"},
+			PublicPaths: []string{"/health", "/healthz/live", "/healthz/ready", "/metrics", "/api/portal/v1/login", "/api/portal/v1/config", "/api/portal/v1/", "/api/integration/", "/api/v1/a2a/"},
 		}, logger)
 		if err != nil {
 			logger.Error("Failed to initialize Auth Middleware", "error", err)
 			os.Exit(1)
 		}
 		authMw = am
+	} else if strings.EqualFold(cfg.AuthMode, "dev") {
+		logger.Warn("AUTH_MODE=dev: authentication disabled (development only)")
 	} else {
-		logger.Warn("NO JWKS_URL SET: AUTHENTICATION IS DISABLED (Use only for local dev)")
+		logger.Error("JWKS_URL not set and AUTH_MODE != dev; set JWKS_URL for production or AUTH_MODE=dev for development")
+		os.Exit(1)
 	}
 
 	// 5. Setup Router & Modules
@@ -109,7 +152,7 @@ func main() {
 	productRepo := product.NewRepository(db)
 	productSvc := product.NewService(productRepo)
 	productHandler := product.NewHandler(productSvc)
-	productHandler.RegisterRoutes(mux)
+	productHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "warehouse"))
 
 	// AI Key Store — centralized key management (DB-first, env fallback)
 	// Admin users can set the Anthropic key via Tech Admin > AI Settings,
@@ -125,7 +168,7 @@ func main() {
 	// AI Parsing Module (Material List Intake)
 	parsingSvc := parsing.NewService(productRepo, claudeClient)
 	parsingHandler := parsing.NewHandler(parsingSvc)
-	parsingHandler.RegisterRoutes(mux)
+	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// Gemini Key Store — for image generation via Google Gemini
 	geminiKeyStore := ai.NewKeyStore(db.Pool, "gemini_api_key", cfg.GeminiAPIKey)
@@ -156,61 +199,62 @@ func main() {
 	}
 
 	pimHandler := pim.NewHandler(pimSvc)
-	pimHandler.RegisterRoutes(mux)
+	pimHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	locationHandler := location.NewHandler(location.NewService(location.NewRepository(db)))
-	locationHandler.RegisterRoutes(mux)
+	locationHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse"))
 
 	// Inventory Service needs to be shared to Order Service
 	inventoryRepo := inventory.NewRepository(db)
 	inventorySvc := inventory.NewService(inventoryRepo)
 	inventoryHandler := inventory.NewHandler(inventorySvc)
-	inventoryHandler.RegisterRoutes(mux)
+	inventoryHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse"))
 
 	customerRepo := customer.NewRepository(db)
 	customerSvc := customer.NewService(customerRepo)
 	customerHandler := customer.NewHandler(customerSvc)
-	customerHandler.RegisterRoutes(mux)
+	customerHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// Sales Team Module
 	salesTeamRepo := salesteam.NewRepository(db)
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
-	salesTeamHandler.RegisterRoutes(mux)
+	salesTeamHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// CRM Module
 	crmRepo := crm.NewRepository(db)
 	crmHandler := crm.NewHandler(crmRepo)
-	crmHandler.RegisterRoutes(mux)
+	crmHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// Account Module
 	accountRepo := account.NewRepository(db)
 	accountSvc := account.NewService(accountRepo, db, logger)
 	accountHandler := account.NewHandler(accountSvc)
-	accountHandler.RegisterRoutes(mux)
+	accountHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
 	quoteRepo := quote.NewRepository(db)
 	quoteSvc := quote.NewService(quoteRepo)
 	quoteHandler := quote.NewHandler(quoteSvc)
-	quoteHandler.RegisterRoutes(mux)
+	quoteHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
 	glRepo := gl.NewRepository(db)
 	glSvc := gl.NewService(glRepo, glAdapter, logger)
 	glHandler := gl.NewHandler(glSvc)
-	glHandler.RegisterRoutes(mux)
+	glHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Invoice Module
 	invoiceRepo := invoice.NewRepository(db)
-	invoiceSvc := invoice.NewService(invoiceRepo, glSvc, accountSvc)
+	invoiceSvc := invoice.NewService(invoiceRepo, glSvc, accountSvc, db)
+	invoiceSvc.WithAuditLog(auditLog)
 	invoiceHandler := invoice.NewHandler(invoiceSvc)
-	invoiceHandler.RegisterRoutes(mux)
+	invoiceHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
 	pricingSvc := pricing.NewService(pricingRepo)
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux)
+	pricingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -230,32 +274,32 @@ func main() {
 	rebateRepo := pricing.NewRebateRepository(db)
 	rebateSvc := pricing.NewRebateService(rebateRepo)
 	rebateHandler := pricing.NewRebateHandler(rebateSvc)
-	rebateHandler.RegisterRoutes(mux)
+	rebateHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Escalator Pricing Module (Market Indices + Price Escalators)
 	escalatorRepo := pricing.NewEscalatorRepository(db)
 	escalatorSvc := pricing.NewEscalatorService(escalatorRepo)
 	escalatorHandler := pricing.NewEscalatorHandler(escalatorSvc)
-	escalatorHandler.RegisterRoutes(mux)
+	escalatorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Vendor Module
 	vendorRepo := vendor.NewRepository(db)
 	vendorSvc := vendor.NewService(vendorRepo)
 	vendorHandler := vendor.NewHandler(vendorSvc)
-	vendorHandler.RegisterRoutes(mux)
+	vendorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
 
 	// Order Module - injected with InventoryService and InvoiceService
 	orderRepo := order.NewRepository(db)
 	poRepo := purchase_order.NewRepository(db)
 
 	// EDI Module
-	ediSvc := edi.NewService("./edi_out", logger) // Stub output dir
+	ediSvc := edi.NewService("/app/edi_out", logger) // Absolute path for container deployment
 
-	poSvc := purchase_order.NewService(poRepo, ediSvc, inventorySvc, productSvc, vendorSvc)
+	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(claudeClient)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc)
 	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
-	poHandler.RegisterRoutes(mux)
+	poHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
 
 	// Auto-PO: wire quote service to create POs when quotes are accepted
 	quoteSvc.WithAutoPO(&autoPOAdapter{poSvc: poSvc, productSvc: productSvc})
@@ -266,12 +310,12 @@ func main() {
 	// EDI Trading Partner Admin (vendor-agnostic)
 	ediRepo := edi.NewEDIRepository(db)
 	ediHandler := edi.NewEDIHandler(ediRepo, bgSvc, ediSvc)
-	// Auth: EDI routes protected by global JWT middleware (see finalHandler wrapping below)
-	ediHandler.RegisterRoutes(mux)
+	ediHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc)
+	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc, db)
+	orderSvc.WithAuditLog(auditLog)
 	orderHandler := order.NewHandler(orderSvc)
-	orderHandler.RegisterRoutes(mux)
+	orderHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -279,11 +323,12 @@ func main() {
 	// Document Module
 	docSvc := document.NewService(productRepo)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
-	docHandler.RegisterRoutes(mux)
+	docHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
 	paymentSvc := payment.NewService(db, paymentRepo, invoiceRepo, accountSvc)
+	paymentSvc.WithAuditLog(auditLog)
 
 	// Wire Run Payments gateway if API key is configured
 	if cfg.RunPaymentsAPIKey != "" {
@@ -300,38 +345,40 @@ func main() {
 	}
 
 	paymentHandler := payment.NewHandler(paymentSvc)
-	paymentHandler.RegisterRoutes(mux)
+	paymentHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance", "cashier"))
 
 	// POS Module (Retail Counter Sales)
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
 	posHandler := pos.NewHandler(posSvc)
-	posHandler.RegisterRoutes(mux)
+	posHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "cashier"))
 
 	// Accounts Payable Module
 	apRepo := ap.NewRepository(db)
 	apSvc := ap.NewService(db, apRepo, glSvc, logger)
 	apHandler := ap.NewHandler(apSvc)
-	apHandler.RegisterRoutes(mux)
+	apHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)
 	matchingSvc := matching.NewService(db, matchingRepo, poSvc, apSvc, logger)
 	matchingHandler := matching.NewHandler(matchingSvc)
-	matchingHandler.RegisterRoutes(mux)
+	matchingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Bank Reconciliation Module
 	bankreconRepo := bankrecon.NewRepository(db)
 	bankreconSvc := bankrecon.NewService(db, bankreconRepo, glSvc, logger)
 	bankreconHandler := bankrecon.NewHandler(bankreconSvc)
-	bankreconHandler.RegisterRoutes(mux)
+	bankreconHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Reporting Module
 	reportingRepo := reporting.NewRepository(db)
 	reportingSvc := reporting.NewService(reportingRepo)
 	reportingHandler := reporting.NewHandler(reportingSvc)
-	reportingHandler.RegisterRoutes(mux)
+	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	reportingHandler.RegisterBuilderRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Sales Tax Module (Avalara AvaTax)
 	taxExemptionRepo := tax.NewExemptionRepo(db)
@@ -349,7 +396,7 @@ func main() {
 	}
 	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux)
+	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)
@@ -365,7 +412,7 @@ func main() {
 	}
 
 	deliveryHandler := delivery.NewHandler(deliverySvc)
-	deliveryHandler.RegisterRoutes(mux)
+	deliveryHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "driver"))
 
 	// SMS Notification Service
 	var smsSvc notification.SMSService
@@ -392,25 +439,25 @@ func main() {
 	millworkRepo := millwork.NewRepository(db)
 	millworkSvc := millwork.NewService(millworkRepo)
 	millworkHandler := millwork.NewHandler(millworkSvc)
-	millworkHandler.RegisterRoutes(mux)
+	millworkHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// Configurator Module (Sprint 19: Product Configurator)
 	configuratorRepo := configurator.NewRepository(db)
 	configuratorSvc := configurator.NewService(configuratorRepo)
 	configuratorHandler := configurator.NewHandler(configuratorSvc)
-	configuratorHandler.RegisterRoutes(mux)
+	configuratorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// AI Vision Module (Sprint 19: Blueprint Verification Prototype)
 	visionSvc := vision.NewService()
 	visionHandler := vision.NewHandler(visionSvc)
-	visionHandler.RegisterRoutes(mux)
+	visionHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Governance Module
 	governanceRepo := governance.NewRepository(db)
 	aiProvider := governance.NewTemplateAIProvider()
 	governanceSvc := governance.NewService(governanceRepo, aiProvider)
 	governanceHandler := governance.NewHandler(governanceSvc)
-	governanceHandler.RegisterRoutes(mux)
+	governanceHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Partner Module
 	partnerSvc := partner.NewService(customerRepo, quoteRepo, logger)
@@ -422,25 +469,37 @@ func main() {
 	dashboardRepo := dashboard.NewRepository(db)
 	dashboardSvc := dashboard.NewService(dashboardRepo)
 	dashboardHandler := dashboard.NewHandler(dashboardSvc)
-	dashboardHandler.RegisterRoutes(mux)
+	dashboardHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Tech Admin Module
-	techAdminRepo := techadmin.NewRepository(db.Pool)
+	techAdminRepo := techadmin.NewRepository(db)
 	techAdminSvc := techadmin.NewService(techAdminRepo)
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
 	techAdminHandler.WithAIKeyStore(aiKeyStore)
 	techAdminHandler.WithGeminiKeyStore(geminiKeyStore)
-	techAdminHandler.RegisterRoutes(mux)
+	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Portal Module (Sovereign Dealer Portal)
+	// Resolve JWT secret: required in production, uses dev default in dev mode only.
+	portalJWTSecret := os.Getenv("PORTAL_JWT_SECRET")
+	if portalJWTSecret == "" {
+		if strings.EqualFold(cfg.AuthMode, "dev") {
+			portalJWTSecret = "portal-dev-secret-do-not-use-in-production"
+			logger.Warn("PORTAL_JWT_SECRET not set — using dev-only default (AUTH_MODE=dev)")
+		} else {
+			logger.Error("PORTAL_JWT_SECRET not set — required for portal authentication")
+			os.Exit(1)
+		}
+	}
+
 	portalRepo := portal.NewRepository(db)
-	portalSvc := portal.NewService(portalRepo, logger, pricingSvc, customerSvc, inventorySvc, orderSvc, productSvc)
+	portalSvc := portal.NewService(portalRepo, portalJWTSecret, logger, pricingSvc, customerSvc, inventorySvc, orderSvc, productSvc)
 	portalHandler := portal.NewHandler(portalSvc)
 
-	// In dev/demo mode (no JWKS_URL), bypass portal auth and inject demo claims
+	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
-	if cfg.JWKSURL == "" {
-		logger.Warn("DEMO MODE: Portal auth bypassed — injecting demo customer claims")
+	if strings.EqualFold(cfg.AuthMode, "dev") {
+		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting demo customer claims")
 		// Query first customer from DB for demo claims
 		var demoCustomerID uuid.UUID
 		row := db.Pool.QueryRow(context.Background(), "SELECT id FROM customers LIMIT 1")
@@ -460,14 +519,10 @@ func main() {
 			})
 		}
 	} else {
-		portalJWTSecret := os.Getenv("PORTAL_JWT_SECRET")
-		if portalJWTSecret == "" {
-			portalJWTSecret = "portal-dev-secret-change-in-production"
-		}
 		portalAuthMw := middleware.NewPortalAuthMiddleware([]byte(portalJWTSecret), logger)
 		portalMw = portalAuthMw.Handler
 	}
-	portalHandler.RegisterRoutes(mux, portalMw)
+	portalHandler.RegisterRoutes(mux, portalMw, middleware.StrictRateLimit(10))
 
 	// Project Module (Sprint 34: Project Management Dashboard)
 	projectRepo := project.NewRepository(db)
@@ -476,7 +531,15 @@ func main() {
 	projectHandler.RegisterRoutes(mux, portalMw)
 
 	// Integration API (FB-Brain cross-system endpoints)
-	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc)
+	integrationAPIKey := os.Getenv("INTEGRATION_API_KEY")
+	if integrationAPIKey == "" {
+		if strings.EqualFold(cfg.AuthMode, "dev") {
+			integrationAPIKey = "fb-brain-demo-key-2026"
+		} else {
+			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
+		}
+	}
+	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, integrationAPIKey)
 	integrationHandler.RegisterRoutes(mux)
 
 	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch
@@ -508,10 +571,52 @@ func main() {
 		logger.Info("FB Brain integration disabled (FB_BRAIN_ENABLED=false)")
 	}
 
-	// Static file serving for uploaded photos
-	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+	// Static file serving for uploaded photos (auth-protected, no directory listing)
+	uploadFS := noListingFileSystem{fs: http.Dir("uploads")}
+	fileServer := http.FileServer(uploadFS)
+	mux.Handle("/uploads/", middleware.RequireRole("admin", "owner", "user")(http.StripPrefix("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Disposition", "attachment")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		fileServer.ServeHTTP(w, r)
+	}))))
 
-	// Health Check (Public?)
+	// Health Check — liveness (always 200 if process is running)
+	mux.HandleFunc("GET /healthz/live", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// Health Check — readiness (checks dependencies)
+	mux.HandleFunc("GET /healthz/ready", func(w http.ResponseWriter, r *http.Request) {
+		status := "ok"
+		httpStatus := http.StatusOK
+		dbStatus := "connected"
+		if err := db.Pool.Ping(r.Context()); err != nil {
+			status = "degraded"
+			httpStatus = http.StatusServiceUnavailable
+			dbStatus = "disconnected"
+			logger.Error("Readiness check failed", "error", err)
+		}
+
+		poolStat := db.Pool.Stat()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(httpStatus)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": status,
+			"uptime": time.Since(startTime).String(),
+			"checks": map[string]interface{}{
+				"database": map[string]interface{}{
+					"status":       dbStatus,
+					"pool_total":   poolStat.TotalConns(),
+					"pool_idle":    poolStat.IdleConns(),
+					"pool_in_use":  poolStat.AcquiredConns(),
+					"pool_max":     poolStat.MaxConns(),
+				},
+			},
+		})
+	})
+
+	// Legacy /health endpoint (backward compat)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		status := "ok"
 		dbStatus := "connected"
@@ -524,21 +629,53 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": status, "db": dbStatus})
 	})
 
-	// 6. Wrap Middleware
+	// Prometheus metrics endpoint (public — scrape target)
+	mux.Handle("GET /metrics", promhttp.Handler())
+
+	// 6. Wrap Middleware (outermost first)
 	var finalHandler http.Handler = mux
-	finalHandler = middleware.CORSMiddleware(finalHandler)
+
+	// Cache-Control headers (innermost — runs after auth, before response)
+	finalHandler = middleware.CacheControl(finalHandler)
+
+	// Request size limit (10MB default)
+	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
+
+	// Auth (JWT verification)
 	if authMw != nil {
-		// Wrap with Auth
 		finalHandler = authMw.Handler(finalHandler)
 	}
 
-	// Add Logger Middleware (Access Logs)
+	// CORS — must be outside auth so OPTIONS preflight is handled before auth
+	finalHandler = middleware.CORSMiddleware(finalHandler)
+
+	// Idempotency key caching (POST/PUT — after auth, before rate limiting)
+	finalHandler = middleware.Idempotency()(finalHandler)
+
+	// Rate limiting (120 requests/minute per IP)
+	finalHandler = middleware.RateLimit(120)(finalHandler)
+
+	// Panic recovery
+	finalHandler = middleware.Recovery(logger)(finalHandler)
+
+	// Request ID generation
+	finalHandler = middleware.RequestID(finalHandler)
+
+	// Prometheus HTTP metrics
+	finalHandler = metrics.HTTPMetrics(finalHandler)
+
+	// Access logging (outermost — captures full request lifecycle)
 	finalHandler = RequestLogger(logger, finalHandler)
 
 	// 7. Start Server with Graceful Shutdown
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%s", cfg.Port),
-		Handler: finalHandler,
+		Addr:              fmt.Sprintf(":%s", cfg.Port),
+		Handler:           finalHandler,
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Run server in goroutine
@@ -552,19 +689,58 @@ func main() {
 	// Wait for interrupt signal using a buffered channel
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	logger.Info("Shutting down server...")
+	sig := <-quit
+	logger.Info("Shutdown signal received", "signal", sig.String())
 
-	// Create a deadline to wait for
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Create a deadline to wait for in-flight requests
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Step 1: Stop accepting new HTTP connections and drain in-flight requests
+	logger.Info("Shutdown step 1/4: draining HTTP connections...")
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("Server forced to shutdown", "error", err)
+		logger.Error("HTTP server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
+	logger.Info("Shutdown step 1/4: HTTP server stopped")
 
-	logger.Info("Server exiting")
+	// Step 2: Cancel metrics collector goroutine
+	logger.Info("Shutdown step 2/4: stopping metrics collector...")
+	metricsCancel()
+	logger.Info("Shutdown step 2/4: metrics collector stopped")
+
+	// Step 3: Drain audit logger (wait for in-flight audit writes)
+	slog.Info("draining audit logger")
+	auditLog.Drain()
+
+	// Step 4: Close database connection pool
+	logger.Info("Shutdown step 4/4: closing database pool...")
+	db.Close()
+	logger.Info("Shutdown step 4/4: database pool closed")
+
+	logger.Info("Server exiting — clean shutdown complete")
+}
+
+// noListingFileSystem wraps http.Dir to prevent directory listing.
+type noListingFileSystem struct {
+	fs http.FileSystem
+}
+
+func (nfs noListingFileSystem) Open(path string) (http.File, error) {
+	f, err := nfs.fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if stat.IsDir() {
+		f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
 }
 
 // deliveryNotifierAdapter bridges delivery.DeliveryNotifierInterface and notification.DeliveryNotifier.
@@ -585,17 +761,50 @@ func (a *deliveryNotifierAdapter) Notify(ctx context.Context, event delivery.Del
 	})
 }
 
-// RequestLogger logs incoming requests
+// statusResponseWriter wraps http.ResponseWriter to capture the status code and bytes written.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status       int
+	bytesWritten int
+	wroteHeader  bool
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.status = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.status = http.StatusOK
+		w.wroteHeader = true
+	}
+	n, err := w.ResponseWriter.Write(b)
+	w.bytesWritten += n
+	return n, err
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// RequestLogger logs incoming requests with status code, bytes written, and request ID.
 func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		// Wrap writer to capture status if needed (omitted for brevity, assume 200/error handled)
-		next.ServeHTTP(w, r)
-		logger.Info("Request processed",
+		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		logger.Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,
-			"duration", time.Since(start).String(),
+			"status", sw.status,
+			"bytes", sw.bytesWritten,
+			"duration_ms", time.Since(start).Milliseconds(),
 			"remote_addr", r.RemoteAddr,
+			"request_id", middleware.GetRequestID(r.Context()),
 		)
 	})
 }
@@ -612,13 +821,13 @@ func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uui
 		return fmt.Errorf("get order for invoice: %w", err)
 	}
 
-	// Build invoice from order
+	// Build invoice from order — PriceEach is already in cents
 	var lines []invoice.InvoiceLine
 	for _, ol := range ord.Lines {
 		lines = append(lines, invoice.InvoiceLine{
 			ProductID: ol.ProductID,
 			Quantity:  ol.Quantity,
-			PriceEach: int64(ol.PriceEach * 100), // dollars to cents
+			PriceEach: ol.PriceEach,
 		})
 	}
 

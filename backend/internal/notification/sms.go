@@ -61,7 +61,7 @@ func (s *TwilioSMSService) SendSMS(ctx context.Context, to string, body string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		return fmt.Errorf("twilio returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 

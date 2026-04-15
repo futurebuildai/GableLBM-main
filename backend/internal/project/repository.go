@@ -25,7 +25,7 @@ func (r *Repository) CreateProject(ctx context.Context, p Project) error {
 		INSERT INTO projects (id, customer_id, name, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	_, err := r.db.Pool.Exec(ctx, query, p.ID, p.CustomerID, p.Name, p.Status, p.CreatedAt, p.UpdatedAt)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, p.ID, p.CustomerID, p.Name, p.Status, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
 	}
@@ -40,7 +40,7 @@ func (r *Repository) GetProject(ctx context.Context, id, customerID uuid.UUID) (
 		WHERE id = $1 AND customer_id = $2
 	`
 	var p Project
-	err := r.db.Pool.QueryRow(ctx, query, id, customerID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, customerID).Scan(
 		&p.ID, &p.CustomerID, &p.Name, &p.Status, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -60,7 +60,7 @@ func (r *Repository) ListProjects(ctx context.Context, customerID uuid.UUID) ([]
 		WHERE customer_id = $1
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list projects: %w", err)
 	}
@@ -84,7 +84,7 @@ func (r *Repository) UpdateProject(ctx context.Context, p Project) error {
 		SET name = $1, status = $2, updated_at = NOW()
 		WHERE id = $3 AND customer_id = $4
 	`
-	tag, err := r.db.Pool.Exec(ctx, query, p.Name, p.Status, p.ID, p.CustomerID)
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, p.Name, p.Status, p.ID, p.CustomerID)
 	if err != nil {
 		return fmt.Errorf("failed to update project: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *Repository) GetProjectEntities(ctx context.Context, projectID, customer
 		WHERE project_id = $1 AND customer_id = $2
 		ORDER BY created_at DESC
 	`
-	oRows, err := r.db.Pool.Query(ctx, orderQuery, projectID, customerID)
+	oRows, err := r.db.GetExecutor(ctx).Query(ctx, orderQuery, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch orders: %w", err)
 	}
@@ -130,7 +130,7 @@ func (r *Repository) GetProjectEntities(ctx context.Context, projectID, customer
 		WHERE o.project_id = $1 AND o.customer_id = $2
 		ORDER BY d.created_at DESC
 	`
-	dRows, err := r.db.Pool.Query(ctx, deliveryQuery, projectID, customerID)
+	dRows, err := r.db.GetExecutor(ctx).Query(ctx, deliveryQuery, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch deliveries: %w", err)
 	}
@@ -154,7 +154,7 @@ func (r *Repository) GetProjectEntities(ctx context.Context, projectID, customer
 		WHERE o.project_id = $1 AND i.customer_id = $2
 		ORDER BY i.created_at DESC
 	`
-	iRows, err := r.db.Pool.Query(ctx, invoiceQuery, projectID, customerID)
+	iRows, err := r.db.GetExecutor(ctx).Query(ctx, invoiceQuery, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch invoices: %w", err)
 	}

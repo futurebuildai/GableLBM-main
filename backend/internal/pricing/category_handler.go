@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -74,7 +75,7 @@ func (h *CategoryHandler) HandleListCategories(w http.ResponseWriter, r *http.Re
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list categories", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -85,17 +86,17 @@ func (h *CategoryHandler) HandleListCategories(w http.ResponseWriter, r *http.Re
 func (h *CategoryHandler) HandleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	var cat ProductCategory
 	if err := json.NewDecoder(r.Body).Decode(&cat); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if cat.Name == "" || cat.Slug == "" || cat.Path == "" {
-		http.Error(w, "name, slug, and path are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "name, slug, and path are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.service.CreateCategory(r.Context(), &cat); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create category", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -108,19 +109,19 @@ func (h *CategoryHandler) HandleUpdateCategory(w http.ResponseWriter, r *http.Re
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid category id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid category ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var cat ProductCategory
 	if err := json.NewDecoder(r.Body).Decode(&cat); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	cat.ID = id
 
 	if err := h.service.UpdateCategory(r.Context(), &cat); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update category", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -151,7 +152,7 @@ func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http
 
 		rules, total, err := h.service.ListCategoryRulesPaginated(r.Context(), filter, limit, offset)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httputil.RespondError(w, r, "failed to list category rules", http.StatusInternalServerError, err)
 			return
 		}
 		if rules == nil {
@@ -169,7 +170,7 @@ func (h *CategoryHandler) HandleListCategoryRules(w http.ResponseWriter, r *http
 
 	rules, err := h.service.ListCategoryRules(r.Context(), filter)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list category rules", http.StatusInternalServerError, err)
 		return
 	}
 	if rules == nil {
@@ -205,20 +206,20 @@ func parseCategoryRuleFilter(r *http.Request) CategoryRuleFilter {
 func (h *CategoryHandler) HandleCreateCategoryRule(w http.ResponseWriter, r *http.Request) {
 	var rule CategoryPricingRule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := validateCategoryRule(&rule); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "category rule validation failed", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.CreateCategoryRule(r.Context(), &rule); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			http.Error(w, err.Error(), http.StatusConflict)
+			httputil.RespondError(w, r, "category rule already exists", http.StatusConflict, err)
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httputil.RespondError(w, r, "failed to create category rule", http.StatusInternalServerError, err)
 		}
 		return
 	}
@@ -232,19 +233,19 @@ func (h *CategoryHandler) HandleUpdateCategoryRule(w http.ResponseWriter, r *htt
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid rule id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var rule CategoryPricingRule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	rule.ID = id
 
 	if err := h.service.UpdateCategoryRule(r.Context(), &rule); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update category rule", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -256,12 +257,12 @@ func (h *CategoryHandler) HandleDeleteCategoryRule(w http.ResponseWriter, r *htt
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid rule id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.DeleteCategoryRule(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete category rule", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -273,7 +274,7 @@ func (h *CategoryHandler) HandleDeleteCategoryRule(w http.ResponseWriter, r *htt
 func (h *CategoryHandler) HandleGetMatrix(w http.ResponseWriter, r *http.Request) {
 	matrix, err := h.service.GetMatrix(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get pricing matrix", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -289,13 +290,13 @@ func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Re
 	tierStr := r.URL.Query().Get("tier")
 
 	if productIDStr == "" {
-		http.Error(w, "product_id is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "product_id is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	productID, err := uuid.Parse(productIDStr)
 	if err != nil {
-		http.Error(w, "invalid product_id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid product_id", http.StatusBadRequest, err)
 		return
 	}
 
@@ -318,7 +319,7 @@ func (h *CategoryHandler) HandleResolvePreview(w http.ResponseWriter, r *http.Re
 
 	resolved, err := h.service.ResolveEffectivePrice(r.Context(), customerID, tier, productID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to resolve effective price", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -332,13 +333,13 @@ func (h *CategoryHandler) HandleGetRuleAudit(w http.ResponseWriter, r *http.Requ
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid rule id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid rule ID", http.StatusBadRequest, err)
 		return
 	}
 
 	entries, err := h.service.ListAuditEntries(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list audit entries", http.StatusInternalServerError, err)
 		return
 	}
 	if entries == nil {
@@ -354,27 +355,27 @@ func (h *CategoryHandler) HandleGetRuleAudit(w http.ResponseWriter, r *http.Requ
 func (h *CategoryHandler) HandleBulkUpsertRules(w http.ResponseWriter, r *http.Request) {
 	var rules []CategoryPricingRule
 	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	if len(rules) == 0 {
-		http.Error(w, "at least one rule is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "at least one rule is required", http.StatusBadRequest, nil)
 		return
 	}
 	if len(rules) > 500 {
-		http.Error(w, "max 500 rules per batch", http.StatusBadRequest)
+		httputil.RespondError(w, r, "max 500 rules per batch", http.StatusBadRequest, nil)
 		return
 	}
 
 	for i := range rules {
 		if err := validateCategoryRule(&rules[i]); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httputil.RespondError(w, r, "bulk category rule validation failed", http.StatusBadRequest, err)
 			return
 		}
 	}
 
 	if err := h.service.BulkUpsertRules(r.Context(), rules); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to bulk upsert category rules", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -387,16 +388,16 @@ func (h *CategoryHandler) HandleBulkDeleteRules(w http.ResponseWriter, r *http.R
 		IDs []uuid.UUID `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	if len(body.IDs) == 0 {
-		http.Error(w, "at least one id is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "at least one id is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.service.BulkDeleteRules(r.Context(), body.IDs); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to bulk delete category rules", http.StatusInternalServerError, err)
 		return
 	}
 

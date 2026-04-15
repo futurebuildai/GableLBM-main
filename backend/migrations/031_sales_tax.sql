@@ -2,7 +2,7 @@
 -- Sprint 29: Avalara Sales Tax Integration
 -- Tax exemption certificates for customers (contractors often have resale exemptions)
 
-CREATE TABLE tax_exemptions (
+CREATE TABLE IF NOT EXISTS tax_exemptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID NOT NULL REFERENCES customers(id),
     exempt_reason VARCHAR(64) NOT NULL,

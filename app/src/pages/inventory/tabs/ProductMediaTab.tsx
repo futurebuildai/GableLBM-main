@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import type { PIMMedia } from '../../../types/pim';
 import { PIMService } from '../../../services/PIMService';
 import { Sparkles, Trash2, Star, Loader2, ImageIcon, AlertTriangle } from 'lucide-react';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface Props {
     productId: string;
@@ -12,6 +13,7 @@ interface Props {
 const STYLES = ['', 'photographic', 'digital-art', 'cinematic', '3d-model', 'isometric'];
 
 export const ProductMediaTab: React.FC<Props> = ({ productId, media, onMediaUpdate }) => {
+    const { showToast } = useToast();
     const [style, setStyle] = useState('');
     const [prompt, setPrompt] = useState('');
     const [generating, setGenerating] = useState(false);
@@ -23,8 +25,8 @@ export const ProductMediaTab: React.FC<Props> = ({ productId, media, onMediaUpda
         try {
             await PIMService.generateImage(productId, { style, prompt });
             onMediaUpdate();
-        } catch (err: any) {
-            const msg = err?.message || 'Image generation failed';
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Image generation failed';
             setError(msg);
         } finally {
             setGenerating(false);
@@ -37,8 +39,9 @@ export const ProductMediaTab: React.FC<Props> = ({ productId, media, onMediaUpda
             onMediaUpdate();
         } catch (err) {
             console.error('Delete failed:', err);
+            showToast('Failed to delete media', 'error');
         }
-    }, [productId, onMediaUpdate]);
+    }, [productId, onMediaUpdate, showToast]);
 
     const handleSetPrimary = useCallback(async (mediaId: string) => {
         try {
@@ -46,8 +49,9 @@ export const ProductMediaTab: React.FC<Props> = ({ productId, media, onMediaUpda
             onMediaUpdate();
         } catch (err) {
             console.error('Set primary failed:', err);
+            showToast('Failed to set primary media', 'error');
         }
-    }, [productId, onMediaUpdate]);
+    }, [productId, onMediaUpdate, showToast]);
 
     return (
         <div className="space-y-6">

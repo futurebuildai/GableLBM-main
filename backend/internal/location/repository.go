@@ -31,7 +31,7 @@ func (r *PostgresRepository) CreateLocation(ctx context.Context, loc *Location) 
 		RETURNING id, created_at, updated_at
 	`
 
-	err := r.db.Pool.QueryRow(ctx, query, loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, loc.ParentID, loc.Path, loc.Type, loc.Code, loc.Description).Scan(
 		&loc.ID,
 		&loc.CreatedAt,
 		&loc.UpdatedAt,
@@ -52,7 +52,7 @@ func (r *PostgresRepository) GetLocation(ctx context.Context, id uuid.UUID) (*Lo
 	`
 
 	var loc Location
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&loc.ID,
 		&loc.ParentID,
 		&loc.Path,
@@ -80,7 +80,7 @@ func (r *PostgresRepository) ListLocations(ctx context.Context) ([]Location, err
 		ORDER BY path ASC
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list locations: %w", err)
 	}

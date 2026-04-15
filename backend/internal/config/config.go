@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -43,6 +45,17 @@ type Config struct {
 
 	// Google Gemini (PIM Image Generation)
 	GeminiAPIKey string
+
+	// Auth & Security
+	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
+
+	// Logging
+	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
+
+	// Database Pool
+	DBMaxConns        int32 // Max open connections (default: 10)
+	DBMinConns        int32 // Min idle connections (default: 2)
+	DBMaxConnLifetime int   // Max connection lifetime in minutes (default: 60)
 
 	// FutureBuild Brain Integration
 	FBBrainEnabled        bool   // Global kill switch for Brain integration
@@ -91,6 +104,17 @@ func Load() (*Config, error) {
 		// Google Gemini (PIM Image Generation)
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
 
+		// Auth & Security
+		AuthMode: getEnv("AUTH_MODE", ""),
+
+		// Logging
+		LogLevel: getEnv("LOG_LEVEL", "INFO"),
+
+		// Database Pool
+		DBMaxConns:        int32(getEnvInt("DB_MAX_CONNS", 10)),
+		DBMinConns:        int32(getEnvInt("DB_MIN_CONNS", 2)),
+		DBMaxConnLifetime: getEnvInt("DB_MAX_CONN_LIFETIME_MIN", 60),
+
 		// FutureBuild Brain Integration
 		FBBrainEnabled:        strings.EqualFold(getEnv("FB_BRAIN_ENABLED", "false"), "true"),
 		FBBrainBaseURL:        getEnv("FB_BRAIN_BASE_URL", "http://localhost:8081"),
@@ -110,6 +134,18 @@ func Load() (*Config, error) {
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			slog.Warn("Invalid integer env var, using default", "key", key, "value", value, "default", fallback)
+			return fallback
+		}
+		return n
 	}
 	return fallback
 }

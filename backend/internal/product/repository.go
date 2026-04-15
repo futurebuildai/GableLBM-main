@@ -14,6 +14,7 @@ type Repository interface {
 	CreateProduct(ctx context.Context, p *Product) error
 	GetProduct(ctx context.Context, id uuid.UUID) (*Product, error)
 	ListProducts(ctx context.Context) ([]Product, error)
+	ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error)
 	ListBelowReorder(ctx context.Context) ([]ReorderAlert, error)
 	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
@@ -36,7 +37,7 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		VALUES ($1, $2, $3, $4, $5, $6) 
 		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
 
-	err := r.db.Pool.QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.UPC).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.UPC).Scan(
 		&p.ID,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -67,7 +68,7 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		GROUP BY p.id`
 
 	var p Product
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&p.ID,
 		&p.SKU,
 		&p.Description,
@@ -111,7 +112,7 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 		GROUP BY p.id
 		ORDER BY p.sku ASC`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list products: %w", err)
 	}
@@ -151,6 +152,68 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 	return products, nil
 }
 
+// ListProductsPaginated retrieves products with pagination
+func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error) {
+	// Get total count
+	countQuery := `SELECT COUNT(*) FROM products`
+	var total int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count products: %w", err)
+	}
+
+	query := `
+		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.upc,
+		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       p.created_at, p.updated_at,
+		       COALESCE(SUM(i.quantity), 0) as total_quantity,
+		       COALESCE(SUM(i.allocated), 0) as total_allocated,
+		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
+		FROM products p
+		LEFT JOIN inventory i ON p.id = i.product_id
+		GROUP BY p.id
+		ORDER BY p.sku ASC
+		LIMIT $1 OFFSET $2`
+
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list products: %w", err)
+	}
+	defer rows.Close()
+
+	var products []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(
+			&p.ID,
+			&p.SKU,
+			&p.Description,
+			&p.UOMPrimary,
+			&p.BasePrice,
+			&p.Vendor,
+			&p.UPC,
+			&p.WeightLbs,
+			&p.ReorderPoint,
+			&p.ReorderQty,
+			&p.CreatedAt,
+			&p.UpdatedAt,
+			&p.TotalQuantity,
+			&p.TotalAllocated,
+			&p.AverageUnitCost,
+			&p.TargetMargin,
+			&p.CommissionRate,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan product: %w", err)
+		}
+		products = append(products, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("row error: %w", err)
+	}
+
+	return products, total, nil
+}
+
 // ListBelowReorder returns products whose current stock is below their reorder point
 func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) {
 	query := `
@@ -165,7 +228,7 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 		HAVING COALESCE(SUM(i.quantity), 0) < p.reorder_point
 		ORDER BY (p.reorder_point - COALESCE(SUM(i.quantity), 0)) DESC`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reorder alerts: %w", err)
 	}
@@ -194,12 +257,12 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 
 func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {
 	query := `UPDATE products SET average_unit_cost = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Pool.Exec(ctx, query, avgCost, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, avgCost, id)
 	return err
 }
 
 func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
 	query := `UPDATE products SET target_margin = $1, commission_rate = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.Pool.Exec(ctx, query, targetMargin, commissionRate, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, targetMargin, commissionRate, id)
 	return err
 }

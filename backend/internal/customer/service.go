@@ -26,6 +26,10 @@ func (s *Service) ListCustomers(ctx context.Context) ([]Customer, error) {
 	return s.repo.ListCustomers(ctx)
 }
 
+func (s *Service) ListCustomersPaginated(ctx context.Context, limit, offset int) ([]Customer, int, error) {
+	return s.repo.ListCustomersPaginated(ctx, limit, offset)
+}
+
 func (s *Service) ListPriceLevels(ctx context.Context) ([]PriceLevel, error) {
 	return s.repo.ListPriceLevels(ctx)
 }

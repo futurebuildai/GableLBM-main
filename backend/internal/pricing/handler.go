@@ -7,6 +7,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -20,9 +21,18 @@ func NewHandler(s *Service, c *customer.Service, p *product.Service) *Handler {
 	return &Handler{service: s, customerSvc: c, productSvc: p}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
 	mux.HandleFunc("GET /pricing/calculate", h.HandleCalculatePrice)
-	mux.HandleFunc("POST /pricing/rules", h.HandleCreateRule)
+	mux.HandleFunc("POST /pricing/rules", guard(h.HandleCreateRule))
 	mux.HandleFunc("GET /pricing/rules", h.HandleListRules)
 }
 
@@ -31,19 +41,19 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 	productIDStr := r.URL.Query().Get("product_id")
 
 	if customerIDStr == "" || productIDStr == "" {
-		http.Error(w, "customer_id and product_id are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "customer_id and product_id are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	customerID, err := uuid.Parse(customerIDStr)
 	if err != nil {
-		http.Error(w, "invalid customer_id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid customer_id", http.StatusBadRequest, err)
 		return
 	}
 
 	productID, err := uuid.Parse(productIDStr)
 	if err != nil {
-		http.Error(w, "invalid product_id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid product_id", http.StatusBadRequest, err)
 		return
 	}
 
@@ -65,19 +75,19 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 
 	cust, err := h.customerSvc.GetCustomer(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, "failed to get customer", http.StatusNotFound)
+		httputil.RespondError(w, r, "failed to get customer", http.StatusNotFound, err)
 		return
 	}
 
 	prod, err := h.productSvc.GetProduct(r.Context(), productID)
 	if err != nil {
-		http.Error(w, "failed to get product", http.StatusNotFound)
+		httputil.RespondError(w, r, "failed to get product", http.StatusNotFound, err)
 		return
 	}
 
 	priceResult, err := h.service.CalculatePriceWithQty(r.Context(), cust, productID, prod.BasePrice, quantity, jobID)
 	if err != nil {
-		http.Error(w, "failed to calculate price: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to calculate price", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -88,17 +98,17 @@ func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateRule(w http.ResponseWriter, r *http.Request) {
 	var rule PricingRule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if rule.Name == "" || rule.RuleType == "" {
-		http.Error(w, "name and rule_type are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "name and rule_type are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	if err := h.service.CreateRule(r.Context(), &rule); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create pricing rule", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -109,7 +119,7 @@ func (h *Handler) HandleCreateRule(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleListRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := h.service.ListRules(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list pricing rules", http.StatusInternalServerError, err)
 		return
 	}
 

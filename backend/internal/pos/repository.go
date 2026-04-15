@@ -2,6 +2,7 @@ package pos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -102,33 +103,31 @@ func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogPr
 	return products, nil
 }
 
+// syncErrorJSON is used for safe JSON marshalling of sync error details.
+type syncErrorJSON struct {
+	ClientID string `json:"client_id"`
+	Reason   string `json:"reason"`
+}
+
 // LogSyncBatch records a sync batch result for auditing.
 func (r *PostgresRepository) LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error {
 	errJSON := "[]"
 	if len(errorDetails) > 0 {
-		// Simple JSON encode
-		parts := make([]string, len(errorDetails))
+		items := make([]syncErrorJSON, len(errorDetails))
 		for i, e := range errorDetails {
-			parts[i] = fmt.Sprintf(`{"client_id":"%s","reason":"%s"}`, e.ClientID, e.Reason)
+			items[i] = syncErrorJSON{ClientID: e.ClientID, Reason: e.Reason}
 		}
-		errJSON = "[" + joinStrings(parts, ",") + "]"
+		data, err := json.Marshal(items)
+		if err != nil {
+			return fmt.Errorf("failed to marshal sync errors: %w", err)
+		}
+		errJSON = string(data)
 	}
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
 		batchID, registerID, synced, duplicates, errors, errJSON,
 	)
 	return err
-}
-
-func joinStrings(parts []string, sep string) string {
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += sep
-		}
-		result += p
-	}
-	return result
 }
 
 func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error) {

@@ -33,7 +33,7 @@ func (r *PostgresRepository) GetContract(ctx context.Context, customerID, produc
 		WHERE customer_id = $1 AND product_id = $2`
 
 	var c CustomerContract
-	err := r.db.Pool.QueryRow(ctx, query, customerID, productID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID, productID).Scan(
 		&c.ID, &c.CustomerID, &c.ProductID, &c.ContractPrice, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -59,7 +59,7 @@ func (r *PostgresRepository) CreateContract(ctx context.Context, c *CustomerCont
 		ON CONFLICT (customer_id, product_id) DO UPDATE
 		SET contract_price = EXCLUDED.contract_price, updated_at = EXCLUDED.updated_at`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.CustomerID, c.ProductID, c.ContractPrice, c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func (r *PostgresRepository) GetMatchingRules(ctx context.Context, productID uui
 		ORDER BY priority DESC, rule_type ASC
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query, productID, customerID, jobID, quantity)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, customerID, jobID, quantity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get matching rules: %w", err)
 	}
@@ -121,7 +121,7 @@ func (r *PostgresRepository) CreateRule(ctx context.Context, rule *PricingRule) 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		rule.ID, rule.Name, rule.RuleType, rule.ProductID, rule.CustomerID, rule.JobID, rule.Category,
 		rule.FixedPrice, rule.DiscountPct, rule.MarkupPct, rule.MinQuantity, rule.MaxQuantity,
 		rule.MarginFloorPct, rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority, rule.CreatedAt, rule.UpdatedAt,
@@ -141,7 +141,7 @@ func (r *PostgresRepository) ListRules(ctx context.Context) ([]PricingRule, erro
 		ORDER BY priority DESC, created_at DESC
 	`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pricing rules: %w", err)
 	}

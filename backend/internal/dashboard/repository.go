@@ -72,7 +72,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context) (*Dashboar
 	`
 
 	var todayRevenue, yesterdayRevenue int64
-	err := r.db.Pool.QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart).Scan(
 		&todayRevenue,
 		&yesterdayRevenue,
 		&summary.ActiveOrders,
@@ -110,7 +110,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, limit int) 
 		ORDER BY COALESCE(i.quantity, 0) ASC
 		LIMIT $1
 	`
-	rows, err := r.db.Pool.Query(ctx, query, limit)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query inventory alerts: %w", err)
 	}
@@ -147,7 +147,7 @@ func (r *PostgresRepository) GetTopCustomers(ctx context.Context, limit int, day
 		ORDER BY total_revenue DESC
 		LIMIT $2
 	`
-	rows, err := r.db.Pool.Query(ctx, query, cutoff, limit)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query top customers: %w", err)
 	}
@@ -183,7 +183,7 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, limit int) (*
 		ORDER BY o.created_at DESC
 		LIMIT $1
 	`
-	rows, err := r.db.Pool.Query(ctx, queryRecent, limit)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryRecent, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent orders: %w", err)
 	}
@@ -213,7 +213,7 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, limit int) (*
 		WHERE created_at >= NOW() - INTERVAL '30 days'
 		GROUP BY status
 	`
-	statusRows, err := r.db.Pool.Query(ctx, queryStatus)
+	statusRows, err := r.db.GetExecutor(ctx).Query(ctx, queryStatus)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query order status breakdown: %w", err)
 	}
@@ -245,7 +245,7 @@ func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, days int) ([]R
 		GROUP BY DATE(created_at)
 		ORDER BY date ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, days)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query revenue trend: %w", err)
 	}

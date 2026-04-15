@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -15,16 +16,25 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /vendors", h.HandleList)
-	mux.HandleFunc("POST /vendors", h.HandleCreate)
-	mux.HandleFunc("GET /vendors/{id}", h.HandleGet)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /vendors", guard(h.HandleList))
+	mux.HandleFunc("POST /vendors", guard(h.HandleCreate))
+	mux.HandleFunc("GET /vendors/{id}", guard(h.HandleGet))
 }
 
 func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
 	vendors, err := h.service.ListVendors(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list vendors", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -34,13 +44,13 @@ func (h *Handler) HandleList(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req CreateVendorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request", http.StatusBadRequest, err)
 		return
 	}
 
 	v, err := h.service.CreateVendor(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create vendor", http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -51,17 +61,17 @@ func (h *Handler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID", http.StatusBadRequest, err)
 		return
 	}
 
 	v, err := h.service.GetVendor(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get vendor", http.StatusInternalServerError, err)
 		return
 	}
 	if v == nil {
-		http.Error(w, "Vendor not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Vendor not found", http.StatusNotFound, nil)
 		return
 	}
 

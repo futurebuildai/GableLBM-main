@@ -52,7 +52,7 @@ func (r *PostgresRepository) GetContent(ctx context.Context, productID uuid.UUID
 
 	var c PIMContent
 	var attrsJSON []byte
-	err := r.db.Pool.QueryRow(ctx, query, productID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID).Scan(
 		&c.ID, &c.ProductID, &c.ShortDescription, &c.LongDescription, &c.MarketingCopy,
 		&attrsJSON, &c.SEOTitle, &c.SEODescription,
 		&c.SEOKeywords, &c.SEOSlug,
@@ -98,7 +98,7 @@ func (r *PostgresRepository) UpsertContent(ctx context.Context, c *PIMContent) e
 		    updated_at        = NOW()
 		RETURNING id, created_at, updated_at`
 
-	err = r.db.Pool.QueryRow(ctx, query,
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		c.ProductID, c.ShortDescription, c.LongDescription, c.MarketingCopy,
 		attrsJSON, c.SEOTitle, c.SEODescription, c.SEOKeywords, c.SEOSlug,
 		c.LastGenModel, c.LastGenPrompt, c.LastGenAt,
@@ -121,7 +121,7 @@ func (r *PostgresRepository) ListMedia(ctx context.Context, productID uuid.UUID)
 		WHERE product_id = $1
 		ORDER BY sort_order ASC, created_at ASC`
 
-	rows, err := r.db.Pool.Query(ctx, query, productID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID)
 	if err != nil {
 		return nil, fmt.Errorf("list pim media: %w", err)
 	}
@@ -149,37 +149,35 @@ func (r *PostgresRepository) CreateMedia(ctx context.Context, m *PIMMedia) error
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at, updated_at`
 
-	return r.db.Pool.QueryRow(ctx, query,
+	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		m.ProductID, m.MediaType, m.URL, m.AltText, m.SortOrder, m.IsPrimary,
 		m.GenModel, m.GenPrompt, m.GenStyle, m.GeneratedAt,
 	).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
 }
 
 func (r *PostgresRepository) DeleteMedia(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Pool.Exec(ctx, `DELETE FROM pim_media WHERE id = $1`, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM pim_media WHERE id = $1`, id)
 	return err
 }
 
 func (r *PostgresRepository) SetPrimaryMedia(ctx context.Context, productID, mediaID uuid.UUID) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		exec := r.db.GetExecutor(txCtx)
 
-	// Clear existing primary
-	_, err = tx.Exec(ctx, `UPDATE pim_media SET is_primary = FALSE WHERE product_id = $1`, productID)
-	if err != nil {
-		return fmt.Errorf("clear primary: %w", err)
-	}
+		// Clear existing primary
+		_, err := exec.Exec(txCtx, `UPDATE pim_media SET is_primary = FALSE WHERE product_id = $1`, productID)
+		if err != nil {
+			return fmt.Errorf("clear primary: %w", err)
+		}
 
-	// Set new primary
-	_, err = tx.Exec(ctx, `UPDATE pim_media SET is_primary = TRUE WHERE id = $1 AND product_id = $2`, mediaID, productID)
-	if err != nil {
-		return fmt.Errorf("set primary: %w", err)
-	}
+		// Set new primary
+		_, err = exec.Exec(txCtx, `UPDATE pim_media SET is_primary = TRUE WHERE id = $1 AND product_id = $2`, mediaID, productID)
+		if err != nil {
+			return fmt.Errorf("set primary: %w", err)
+		}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 // --- Collateral ---
@@ -192,7 +190,7 @@ func (r *PostgresRepository) ListCollateral(ctx context.Context, productID uuid.
 		WHERE product_id = $1
 		ORDER BY created_at DESC`
 
-	rows, err := r.db.Pool.Query(ctx, query, productID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID)
 	if err != nil {
 		return nil, fmt.Errorf("list pim collateral: %w", err)
 	}
@@ -220,13 +218,13 @@ func (r *PostgresRepository) CreateCollateral(ctx context.Context, c *PIMCollate
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`
 
-	return r.db.Pool.QueryRow(ctx, query,
+	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		c.ProductID, c.CollateralType, c.Title, c.Content, c.Tone, c.Audience,
 		c.GenModel, c.GenPrompt, c.GeneratedAt,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
 
 func (r *PostgresRepository) DeleteCollateral(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Pool.Exec(ctx, `DELETE FROM pim_collateral WHERE id = $1`, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM pim_collateral WHERE id = $1`, id)
 	return err
 }

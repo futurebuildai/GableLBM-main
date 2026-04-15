@@ -4,19 +4,20 @@ import type {
     CreateContactRequest,
     CreateActivityRequest,
 } from '../types/crm';
+import { fetchWithAuth } from './fetchClient';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export const crmApi = {
     // Contacts
     listContacts: async (customerId: string): Promise<Contact[]> => {
-        const res = await fetch(`${API_BASE}/customers/${customerId}/contacts`);
+        const res = await fetchWithAuth(`${API_BASE}/customers/${customerId}/contacts`);
         if (!res.ok) throw new Error('Failed to fetch contacts');
         return res.json();
     },
 
     createContact: async (customerId: string, data: CreateContactRequest): Promise<Contact> => {
-        const res = await fetch(`${API_BASE}/customers/${customerId}/contacts`, {
+        const res = await fetchWithAuth(`${API_BASE}/customers/${customerId}/contacts`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -26,7 +27,7 @@ export const crmApi = {
     },
 
     updateContact: async (contactId: string, data: Partial<Contact>): Promise<Contact> => {
-        const res = await fetch(`${API_BASE}/contacts/${contactId}`, {
+        const res = await fetchWithAuth(`${API_BASE}/contacts/${contactId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
@@ -36,7 +37,7 @@ export const crmApi = {
     },
 
     deleteContact: async (contactId: string): Promise<void> => {
-        const res = await fetch(`${API_BASE}/contacts/${contactId}`, {
+        const res = await fetchWithAuth(`${API_BASE}/contacts/${contactId}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete contact');
@@ -44,13 +45,13 @@ export const crmApi = {
 
     // Activities
     listActivities: async (customerId: string): Promise<Activity[]> => {
-        const res = await fetch(`${API_BASE}/customers/${customerId}/activities`);
+        const res = await fetchWithAuth(`${API_BASE}/customers/${customerId}/activities`);
         if (!res.ok) throw new Error('Failed to fetch activities');
         return res.json();
     },
 
     createActivity: async (customerId: string, data: CreateActivityRequest): Promise<Activity> => {
-        const res = await fetch(`${API_BASE}/customers/${customerId}/activities`, {
+        const res = await fetchWithAuth(`${API_BASE}/customers/${customerId}/activities`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),

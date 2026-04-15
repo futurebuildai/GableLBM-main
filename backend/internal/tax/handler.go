@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -18,22 +19,31 @@ func NewHandler(svc TaxCalculator) *Handler {
 }
 
 // RegisterRoutes registers tax endpoints on the given mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/tax/preview", h.previewTax)
-	mux.HandleFunc("GET /api/tax/exemptions/{customerID}", h.getExemptions)
-	mux.HandleFunc("POST /api/tax/exemptions", h.createExemption)
-	mux.HandleFunc("DELETE /api/tax/exemptions/{id}", h.deleteExemption)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /api/tax/preview", guard(h.previewTax))
+	mux.HandleFunc("GET /api/tax/exemptions/{customerID}", guard(h.getExemptions))
+	mux.HandleFunc("POST /api/tax/exemptions", guard(h.createExemption))
+	mux.HandleFunc("DELETE /api/tax/exemptions/{id}", guard(h.deleteExemption))
 }
 
 func (h *Handler) previewTax(w http.ResponseWriter, r *http.Request) {
 	var req TaxPreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if len(req.Lines) == 0 {
-		http.Error(w, `{"error":"at least one line item is required"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "at least one line item is required", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -43,7 +53,7 @@ func (h *Handler) previewTax(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.PreviewTax(r.Context(), &req)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to preview tax", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -55,13 +65,13 @@ func (h *Handler) getExemptions(w http.ResponseWriter, r *http.Request) {
 	customerIDStr := r.PathValue("customerID")
 	customerID, err := uuid.Parse(customerIDStr)
 	if err != nil {
-		http.Error(w, `{"error":"invalid customer ID"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	exemptions, err := h.svc.GetExemptions(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get tax exemptions", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -76,22 +86,22 @@ func (h *Handler) getExemptions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createExemption(w http.ResponseWriter, r *http.Request) {
 	var req CreateExemptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.CustomerID == uuid.Nil {
-		http.Error(w, `{"error":"customer_id is required"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "customer_id is required", http.StatusBadRequest, nil)
 		return
 	}
 	if req.ExemptReason == "" {
-		http.Error(w, `{"error":"exempt_reason is required"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "exempt_reason is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	exemption, err := h.svc.SaveExemption(r.Context(), &req)
 	if err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to save tax exemption", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -104,12 +114,12 @@ func (h *Handler) deleteExemption(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, `{"error":"invalid exemption ID"}`, http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid exemption ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.svc.DeleteExemption(r.Context(), id); err != nil {
-		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete tax exemption", http.StatusInternalServerError, err)
 		return
 	}
 

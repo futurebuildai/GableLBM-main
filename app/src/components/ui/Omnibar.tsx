@@ -29,6 +29,8 @@ export const Omnibar = () => {
         ]).then(([p, c]) => {
             setProducts(p);
             setCustomers(c);
+        }).catch(err => {
+            console.error('Omnibar prefetch failed:', err);
         });
 
         return () => document.removeEventListener("keydown", down);
@@ -81,9 +83,6 @@ export const Omnibar = () => {
                                     value={c.name}
                                     className="flex items-center justify-between px-3 py-2 rounded-md text-sm text-white hover:bg-white/5 cursor-pointer aria-selected:bg-[#00FFA3] aria-selected:text-black"
                                     onSelect={() => {
-                                        // Navigate to customer or quote with customer pre-selected?
-                                        // For now just log
-                                        console.log("Selected customer", c);
                                         setOpen(false);
                                     }}
                                 >
@@ -107,8 +106,6 @@ export const Omnibar = () => {
                                     value={p.sku + " " + p.description}
                                     className="flex items-center justify-between px-3 py-2 rounded-md text-sm text-white hover:bg-white/5 cursor-pointer aria-selected:bg-[#00FFA3] aria-selected:text-black"
                                     onSelect={() => {
-                                        // Add to cart?
-                                        console.log("Selected product", p);
                                         setOpen(false);
                                     }}
                                 >

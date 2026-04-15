@@ -33,12 +33,29 @@ export function DeliveryDetail() {
     // Canvas Refs
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isDrawing, setIsDrawing] = useState(false);
+    const [loadingDelivery, setLoadingDelivery] = useState(true);
 
     useEffect(() => {
         if (id) {
-            deliveryService.getDelivery(id).then(setDelivery);
+            deliveryService.getDelivery(id)
+                .then(setDelivery)
+                .catch(() => setDelivery(null))
+                .finally(() => setLoadingDelivery(false));
+        } else {
+            setLoadingDelivery(false);
         }
     }, [id]);
+
+    // Keep a ref to current photos so cleanup doesn't capture stale state
+    const podPhotosRef = useRef(podPhotos);
+    useEffect(() => { podPhotosRef.current = podPhotos; }, [podPhotos]);
+
+    // Revoke blob URLs on unmount to prevent memory leaks
+    useEffect(() => {
+        return () => {
+            podPhotosRef.current.forEach(p => URL.revokeObjectURL(p.preview));
+        };
+    }, []);
 
     // Photo handling
     const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,6 +169,7 @@ export function DeliveryDetail() {
             });
 
             setShowPODModal(false);
+            podPhotos.forEach(p => URL.revokeObjectURL(p.preview));
             setPodPhotos([]);
             const updated = await deliveryService.getDelivery(delivery.id);
             setDelivery(updated);
@@ -163,7 +181,8 @@ export function DeliveryDetail() {
         }
     };
 
-    if (!delivery) return <div className="p-8 text-center text-zinc-500">Loading Delivery...</div>;
+    if (loadingDelivery) return <div className="p-8 text-center text-zinc-500">Loading Delivery...</div>;
+    if (!delivery) return <div className="p-8 text-center text-zinc-500">Delivery not found.</div>;
 
     const statusColor = delivery.status === 'DELIVERED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
         delivery.status === 'FAILED' ? 'text-rose-400 bg-rose-500/10 border-rose-500/20' :
@@ -174,7 +193,7 @@ export function DeliveryDetail() {
             <div className="pb-24 pt-4 px-4 space-y-4 max-w-md mx-auto min-h-screen flex flex-col">
                 {/* Header */}
                 <div className="flex items-center gap-4 mb-2">
-                    <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors">
+                    <button onClick={() => navigate(-1)} aria-label="Go back" className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
                     <div className="font-bold text-lg text-white">Delivery Details</div>

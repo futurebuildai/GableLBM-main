@@ -2,9 +2,10 @@ package portal
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
+	"os"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -22,24 +23,31 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// writeJSON encodes data as JSON and writes it to the response.
+// portalWriteError logs the internal error and returns a safe, generic JSON error to the client.
+// It delegates to httputil.RespondError which sends a generic message based on status code,
+// preventing internal details from leaking to clients.
+func portalWriteError(w http.ResponseWriter, r *http.Request, msg string, err error, status int) {
+	httputil.RespondError(w, r, msg, status, err)
+}
+
 func portalWriteJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
 
-// writeError logs the internal error and returns a safe, generic message to the client.
-func portalWriteError(w http.ResponseWriter, msg string, err error, status int) {
-	slog.Error(msg, "error", err)
-	http.Error(w, msg, status)
-}
 
 // RegisterRoutes registers all portal API routes.
 // Public routes (login, config) are registered directly on the mux.
 // Protected routes are wrapped with portal auth middleware.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) http.Handler) {
+// An optional loginLimiter can be provided to apply stricter rate limiting to the login endpoint.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMw func(http.Handler) http.Handler, loginLimiter ...func(http.Handler) http.Handler) {
 	// Public endpoints
-	mux.HandleFunc("POST /api/portal/v1/login", h.HandleLogin)
+	if len(loginLimiter) > 0 && loginLimiter[0] != nil {
+		mux.Handle("POST /api/portal/v1/login", loginLimiter[0](http.HandlerFunc(h.HandleLogin)))
+	} else {
+		mux.HandleFunc("POST /api/portal/v1/login", h.HandleLogin)
+	}
+	mux.HandleFunc("POST /api/portal/v1/logout", h.HandleLogout)
 	mux.HandleFunc("GET /api/portal/v1/config", h.HandleGetConfig)
 
 	// Protected endpoints
@@ -78,30 +86,56 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	if req.Email == "" || req.Password == "" {
-		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Email and password are required", http.StatusBadRequest, nil)
 		return
 	}
 
-	resp, err := h.svc.Login(r.Context(), req)
+	result, err := h.svc.Login(r.Context(), req)
 	if err != nil {
 		// Always return 401 for login failures — don't leak user existence
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		httputil.RespondError(w, r, "Invalid credentials", http.StatusUnauthorized, err)
 		return
 	}
 
-	portalWriteJSON(w, resp)
+	// Set httpOnly cookie with the JWT token — never in the response body
+	secure := os.Getenv("INSECURE_COOKIES") != "true" // Secure=true by default; disable for local dev
+	http.SetCookie(w, &http.Cookie{
+		Name:     "portal_token",
+		Value:    result.Token,
+		Path:     "/api/portal",
+		MaxAge:   86400, // 24 hours
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	portalWriteJSON(w, result.Response)
+}
+
+// HandleLogout clears the portal auth cookie.
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "portal_token",
+		Value:    "",
+		Path:     "/api/portal",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   os.Getenv("INSECURE_COOKIES") != "true",
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.WriteHeader(http.StatusOK)
 }
 
 // HandleGetConfig returns portal branding config (public).
 func (h *Handler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.svc.GetConfig(r.Context())
 	if err != nil {
-		portalWriteError(w, "Failed to load portal configuration", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load portal configuration", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, cfg)
@@ -112,7 +146,7 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	data, err := h.svc.GetDashboard(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load dashboard", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load dashboard", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, data)
@@ -123,7 +157,7 @@ func (h *Handler) HandleListOrders(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	orders, err := h.svc.ListOrders(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load orders", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load orders", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, orders)
@@ -135,13 +169,13 @@ func (h *Handler) HandleGetOrder(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	orderID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid order ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid order ID", http.StatusBadRequest, err)
 		return
 	}
 
 	order, err := h.svc.GetOrder(r.Context(), orderID, customerID)
 	if err != nil {
-		portalWriteError(w, "Order not found", err, http.StatusNotFound)
+		portalWriteError(w, r, "Order not found", err, http.StatusNotFound)
 		return
 	}
 	portalWriteJSON(w, order)
@@ -154,13 +188,13 @@ func (h *Handler) HandleReorder(w http.ResponseWriter, r *http.Request) {
 
 	var req ReorderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	resp, err := h.svc.CreateReorder(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, "Failed to create reorder", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to create reorder", err, http.StatusInternalServerError)
 		return
 	}
 
@@ -173,7 +207,7 @@ func (h *Handler) HandleListInvoices(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	invoices, err := h.svc.ListInvoices(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load invoices", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load invoices", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, invoices)
@@ -185,13 +219,13 @@ func (h *Handler) HandleGetInvoice(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	invoiceID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid invoice ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid invoice ID", http.StatusBadRequest, err)
 		return
 	}
 
 	inv, err := h.svc.GetInvoice(r.Context(), invoiceID, customerID)
 	if err != nil {
-		portalWriteError(w, "Invoice not found", err, http.StatusNotFound)
+		portalWriteError(w, r, "Invoice not found", err, http.StatusNotFound)
 		return
 	}
 	portalWriteJSON(w, inv)
@@ -202,7 +236,7 @@ func (h *Handler) HandleListDeliveries(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	deliveries, err := h.svc.ListDeliveries(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load deliveries", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load deliveries", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, deliveries)
@@ -214,13 +248,13 @@ func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	deliveryID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid delivery ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid delivery ID", http.StatusBadRequest, err)
 		return
 	}
 
 	del, err := h.svc.GetDelivery(r.Context(), deliveryID, customerID)
 	if err != nil {
-		portalWriteError(w, "Delivery not found", err, http.StatusNotFound)
+		portalWriteError(w, r, "Delivery not found", err, http.StatusNotFound)
 		return
 	}
 	portalWriteJSON(w, del)
@@ -234,6 +268,25 @@ func getPortalCustomerID(r *http.Request) uuid.UUID {
 		return uuid.Nil
 	}
 	return claims.CustomerID
+}
+
+// getPortalUserRole extracts the user role from the request context.
+func getPortalUserRole(r *http.Request) string {
+	claims, ok := r.Context().Value(middleware.PortalClaimsKey).(*middleware.PortalClaims)
+	if !ok || claims == nil {
+		return ""
+	}
+	return claims.Role
+}
+
+// requireAdmin checks that the caller has admin role and writes 403 if not.
+// Returns true if the caller is an admin.
+func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if getPortalUserRole(r) != "Admin" {
+		httputil.RespondError(w, r, "Admin access required", http.StatusForbidden, nil)
+		return false
+	}
+	return true
 }
 
 // --- Catalog Handlers (Sprint 27) ---
@@ -250,7 +303,7 @@ func (h *Handler) HandleListCatalog(w http.ResponseWriter, r *http.Request) {
 
 	products, err := h.svc.ListCatalog(r.Context(), customerID, filter)
 	if err != nil {
-		portalWriteError(w, "Failed to load catalog", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load catalog", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, products)
@@ -262,13 +315,13 @@ func (h *Handler) HandleGetCatalogProduct(w http.ResponseWriter, r *http.Request
 	idStr := r.PathValue("id")
 	productID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid product ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid product ID", http.StatusBadRequest, err)
 		return
 	}
 
 	detail, err := h.svc.GetCatalogProduct(r.Context(), customerID, productID)
 	if err != nil {
-		portalWriteError(w, "Product not found", err, http.StatusNotFound)
+		portalWriteError(w, r, "Product not found", err, http.StatusNotFound)
 		return
 	}
 	portalWriteJSON(w, detail)
@@ -281,7 +334,7 @@ func (h *Handler) HandleGetCart(w http.ResponseWriter, r *http.Request) {
 	customerID := getPortalCustomerID(r)
 	cart, err := h.svc.GetCart(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load cart", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load cart", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, cart)
@@ -294,13 +347,13 @@ func (h *Handler) HandleAddToCart(w http.ResponseWriter, r *http.Request) {
 
 	var req AddToCartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	cart, err := h.svc.AddToCart(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, "Failed to add to cart", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to add to cart", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -314,19 +367,19 @@ func (h *Handler) HandleUpdateCartItem(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid item ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req UpdateCartItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	cart, err := h.svc.UpdateCartItem(r.Context(), customerID, itemID, req)
 	if err != nil {
-		portalWriteError(w, "Failed to update cart item", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to update cart item", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, cart)
@@ -338,13 +391,13 @@ func (h *Handler) HandleRemoveCartItem(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	itemID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid item ID", http.StatusBadRequest, err)
 		return
 	}
 
 	cart, err := h.svc.RemoveCartItem(r.Context(), customerID, itemID)
 	if err != nil {
-		portalWriteError(w, "Failed to remove cart item", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to remove cart item", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, cart)
@@ -357,13 +410,13 @@ func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 
 	var req CheckoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	resp, err := h.svc.Checkout(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, "Checkout failed", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Checkout failed", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -373,38 +426,47 @@ func (h *Handler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 // --- User Management Handlers (Sprint 34) ---
 
 func (h *Handler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	users, err := h.svc.ListCustomerUsers(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load users", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load users", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, users)
 }
 
 func (h *Handler) HandleListInvites(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	customerID := getPortalCustomerID(r)
 	invites, err := h.svc.ListPortalInvites(r.Context(), customerID)
 	if err != nil {
-		portalWriteError(w, "Failed to load invites", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to load invites", err, http.StatusInternalServerError)
 		return
 	}
 	portalWriteJSON(w, invites)
 }
 
 func (h *Handler) HandleInviteUser(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 
 	var req InviteUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	invite, err := h.svc.InviteUser(r.Context(), customerID, req)
 	if err != nil {
-		portalWriteError(w, "Failed to invite user", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to invite user", err, http.StatusInternalServerError)
 		return
 	}
 
@@ -413,23 +475,26 @@ func (h *Handler) HandleInviteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 	idStr := r.PathValue("id")
 	userID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid user ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req UpdateUserRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	if err := h.svc.UpdateUserRole(r.Context(), customerID, userID, req.Role); err != nil {
-		portalWriteError(w, "Failed to update role", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to update role", err, http.StatusInternalServerError)
 		return
 	}
 
@@ -437,23 +502,26 @@ func (h *Handler) HandleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleUpdateUserStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	customerID := getPortalCustomerID(r)
 	idStr := r.PathValue("id")
 	userID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid user ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req UpdateUserStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		portalWriteError(w, "Invalid request body", err, http.StatusBadRequest)
+		portalWriteError(w, r, "Invalid request body", err, http.StatusBadRequest)
 		return
 	}
 
 	if err := h.svc.UpdateUserStatus(r.Context(), customerID, userID, req.Status); err != nil {
-		portalWriteError(w, "Failed to update status", err, http.StatusInternalServerError)
+		portalWriteError(w, r, "Failed to update status", err, http.StatusInternalServerError)
 		return
 	}
 

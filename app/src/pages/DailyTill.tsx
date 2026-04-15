@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { ReportingService } from '../services/ReportingService';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide-react';
+import { useToast } from '../components/ui/ToastContext';
 
 export default function DailyTill() {
+    const { showToast } = useToast();
     const [till, setTill] = useState<DailyTillReport | null>(null);
     const [summary, setSummary] = useState<SalesSummaryReport | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [showToast]);
 
     async function loadData() {
         try {
@@ -22,6 +24,7 @@ export default function DailyTill() {
             setSummary(summaryData);
         } catch (error) {
             console.error(error);
+            showToast('Failed to load daily till data', 'error');
         } finally {
             setLoading(false);
         }

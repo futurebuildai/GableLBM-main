@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { reportingApi } from '../../services/reportingApi';
 import type { ReportDefinition, ReportColumn, ReportFilter, ReportGrouping } from '../../services/reportingApi';
+import { useToast } from '../../components/ui/ToastContext';
 
 // Simplified Schema Metadata for the UI (mirrors backend entitySchemas)
 const SCHEMA_METADATA: Record<string, { label: string; fields: { name: string; type: string }[] }> = {
@@ -37,6 +38,7 @@ const SCHEMA_METADATA: Record<string, { label: string; fields: { name: string; t
 };
 
 export default function ReportBuilder() {
+  const { showToast } = useToast();
   const [entityType, setEntityType] = useState('invoices');
   const [reportName, setReportName] = useState('New Custom Report');
 
@@ -44,7 +46,7 @@ export default function ReportBuilder() {
   const [filters, setFilters] = useState<ReportFilter[]>([]);
   const [groupings, setGroupings] = useState<ReportGrouping[]>([]);
 
-  const [previewData, setPreviewData] = useState<any[] | null>(null);
+  const [previewData, setPreviewData] = useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +75,7 @@ export default function ReportBuilder() {
     }
   };
 
-  const handleUpdateFilter = (index: number, key: keyof ReportFilter, value: any) => {
+  const handleUpdateFilter = (index: number, key: keyof ReportFilter, value: string | number | boolean | null) => {
     const newFilters = [...filters];
     newFilters[index] = { ...newFilters[index], [key]: value };
     setFilters(newFilters);
@@ -113,8 +115,8 @@ export default function ReportBuilder() {
     try {
       const data = await reportingApi.previewReport(entityType, buildDefinition());
       setPreviewData(data);
-    } catch (err: any) {
-      setError(err.response?.data || err.message || 'Failed to generate preview');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate preview');
     } finally {
       setLoading(false);
     }
@@ -134,7 +136,8 @@ export default function ReportBuilder() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-    } catch (err: any) {
+      window.URL.revokeObjectURL(url);
+    } catch (err: unknown) {
       setError('Export failed');
     } finally {
       setLoading(false);
@@ -143,7 +146,7 @@ export default function ReportBuilder() {
 
   const handleSave = async () => {
     if (columns.length === 0) {
-      alert('Cannot save report without columns');
+      showToast('Cannot save report without columns', 'error');
       return;
     }
     try {
@@ -153,9 +156,9 @@ export default function ReportBuilder() {
         entity_type: entityType,
         definition_json: buildDefinition()
       });
-      alert('Report saved successfully!');
-    } catch (err: any) {
-      alert('Failed to save report: ' + err.message);
+      showToast('Report saved successfully', 'success');
+    } catch (err: unknown) {
+      showToast('Failed to save report: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     }
   };
 
@@ -266,7 +269,7 @@ export default function ReportBuilder() {
                     </select>
                     <input
                       type="text"
-                      value={filter.value}
+                      value={filter.value != null ? String(filter.value) : ''}
                       onChange={(e) => handleUpdateFilter(idx, 'value', e.target.value)}
                       placeholder="Value..."
                       className="text-sm border-gray-300 rounded w-2/3"

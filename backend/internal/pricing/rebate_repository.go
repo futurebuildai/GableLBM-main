@@ -41,7 +41,7 @@ func (r *postgresRebateRepository) CreateProgram(ctx context.Context, p *RebateP
 		INSERT INTO rebate_programs (id, vendor_id, name, program_type, start_date, end_date, is_active, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		p.ID, p.VendorID, p.Name, p.ProgramType, p.StartDate, p.EndDate, p.IsActive, p.CreatedAt,
 	)
 	if err != nil {
@@ -57,7 +57,7 @@ func (r *postgresRebateRepository) GetProgram(ctx context.Context, id uuid.UUID)
 		WHERE id = $1
 	`
 	var p RebateProgram
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&p.ID, &p.VendorID, &p.Name, &p.ProgramType, &p.StartDate, &p.EndDate, &p.IsActive, &p.CreatedAt,
 	)
 	if err != nil {
@@ -76,7 +76,7 @@ func (r *postgresRebateRepository) ListPrograms(ctx context.Context, vendorID *u
 		WHERE ($1::uuid IS NULL OR vendor_id = $1)
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, vendorID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, vendorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rebate programs: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *postgresRebateRepository) CreateTiers(ctx context.Context, programID uu
 			INSERT INTO rebate_tiers (id, program_id, min_volume, max_volume, rebate_pct)
 			VALUES ($1, $2, $3, $4, $5)
 		`
-		_, err := r.db.Pool.Exec(ctx, query, t.ID, t.ProgramID, t.MinVolume, t.MaxVolume, t.RebatePct)
+		_, err := r.db.GetExecutor(ctx).Exec(ctx, query, t.ID, t.ProgramID, t.MinVolume, t.MaxVolume, t.RebatePct)
 		if err != nil {
 			return fmt.Errorf("failed to create tier: %w", err)
 		}
@@ -122,7 +122,7 @@ func (r *postgresRebateRepository) GetTiersByProgram(ctx context.Context, progra
 		WHERE program_id = $1
 		ORDER BY min_volume ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, programID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, programID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tiers: %w", err)
 	}
@@ -149,7 +149,7 @@ func (r *postgresRebateRepository) CreateClaim(ctx context.Context, c *RebateCla
 		INSERT INTO rebate_claims (id, program_id, period_start, period_end, qualifying_volume, rebate_amount, status, claimed_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.ProgramID, c.PeriodStart, c.PeriodEnd, c.QualifyingVolume, c.RebateAmount, c.Status, c.ClaimedAt, c.CreatedAt,
 	)
 	if err != nil {
@@ -165,7 +165,7 @@ func (r *postgresRebateRepository) ListClaims(ctx context.Context, programID *uu
 		WHERE ($1::uuid IS NULL OR program_id = $1)
 		ORDER BY period_end DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, programID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, programID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rebate claims: %w", err)
 	}

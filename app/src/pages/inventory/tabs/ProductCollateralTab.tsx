@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { PIMCollateral, CollateralType } from '../../../types/pim';
 import { PIMService } from '../../../services/PIMService';
 import { Sparkles, Trash2, Copy, Loader2, FileText, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface Props {
     productId: string;
@@ -21,12 +22,20 @@ const TONES = ['professional', 'casual', 'technical', 'persuasive', 'urgent'];
 const AUDIENCES = ['contractors and builders', 'DIY homeowners', 'architects and designers', 'wholesale buyers', 'general public'];
 
 export const ProductCollateralTab: React.FC<Props> = ({ productId, collateral, onCollateralUpdate }) => {
+    const { showToast } = useToast();
     const [type, setType] = useState<CollateralType>('sell_sheet');
     const [tone, setTone] = useState('professional');
     const [audience, setAudience] = useState('contractors and builders');
     const [generating, setGenerating] = useState(false);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+        };
+    }, []);
 
     const handleGenerate = useCallback(async () => {
         setGenerating(true);
@@ -34,8 +43,8 @@ export const ProductCollateralTab: React.FC<Props> = ({ productId, collateral, o
         try {
             await PIMService.generateCollateral(productId, { type, tone, audience });
             onCollateralUpdate();
-        } catch (err: any) {
-            const msg = err?.message || 'Collateral generation failed';
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Collateral generation failed';
             setError(msg);
         } finally {
             setGenerating(false);
@@ -48,14 +57,15 @@ export const ProductCollateralTab: React.FC<Props> = ({ productId, collateral, o
             onCollateralUpdate();
         } catch (err) {
             console.error('Delete failed:', err);
+            showToast('Failed to delete collateral', 'error');
         }
     }, [productId, onCollateralUpdate]);
 
     const handleCopy = useCallback((id: string, text: string) => {
-        navigator.clipboard.writeText(text);
+        navigator.clipboard.writeText(text).catch(() => showToast('Failed to copy to clipboard', 'error'));
         setCopiedId(id);
-        setTimeout(() => setCopiedId(null), 2000);
-    }, []);
+        copiedTimerRef.current = setTimeout(() => setCopiedId(null), 2000);
+    }, [showToast]);
 
     const typeLabel = (t: string) => TYPES.find(x => x.value === t)?.label || t;
 

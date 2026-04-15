@@ -4,10 +4,11 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { ClipboardCheck, MapPin, ChevronRight, Check, AlertTriangle, Loader2, ScanLine } from "lucide-react";
 import type { Product } from "../../types/product";
 import { InventoryService } from "../../services/InventoryService";
+import { fetchWithAuth } from "../../services/fetchClient";
 import { BarcodeScanner } from "../../components/BarcodeScanner";
 import { useToast } from "../../components/ui/ToastContext";
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 interface CountItem {
     product: Product;
@@ -60,8 +61,8 @@ export function CycleCount() {
         setLoading(true);
         setSubmitted(false);
         // Fetch products to count - in practice would filter by zone, here we sample
-        fetch(`${API_URL}/products`)
-            .then(r => r.json())
+        fetchWithAuth(`${API_URL}/api/v1/products`)
+            .then(r => { if (!r.ok) throw new Error('Failed to fetch products'); return r.json(); })
             .then((data: Product[]) => {
                 // Simulate zone-filtered subset
                 const zoneIndex = ZONES.findIndex(z => z.code === selectedZone);
@@ -87,6 +88,7 @@ export function CycleCount() {
 
     const handleSubmit = async () => {
         setSubmitting(true);
+        let failCount = 0;
         for (const item of items) {
             const counted = parseFloat(item.counted);
             if (isNaN(counted)) continue;
@@ -98,8 +100,15 @@ export function CycleCount() {
                         reason: `Cycle count - Zone ${selectedZone}`,
                         is_delta: false,
                     });
-                } catch { /* continue */ }
+                } catch {
+                    failCount++;
+                    console.error('Failed to adjust stock');
+                }
             }
+        }
+        if (failCount > 0) {
+            console.error(`${failCount} adjustment(s) failed to save`);
+            showToast(`${failCount} adjustment(s) failed to save`, 'error');
         }
         setSubmitting(false);
         setSubmitted(true);
@@ -151,6 +160,7 @@ export function CycleCount() {
                         <div className="flex items-center justify-between">
                             <button
                                 onClick={() => { setSelectedZone(null); setItems([]); }}
+                                aria-label="Change zone"
                                 className="text-xs text-amber-400 hover:underline"
                             >
                                 ← Change Zone
@@ -159,6 +169,7 @@ export function CycleCount() {
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={() => setIsScanning(true)}
+                                    aria-label="Scan item barcode"
                                     className="flex items-center gap-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-400 py-1.5 px-3 rounded-lg border border-white/10 transition-colors"
                                 >
                                     <ScanLine className="w-3.5 h-3.5" />

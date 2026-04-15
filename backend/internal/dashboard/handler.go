@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // Handler provides HTTP handlers for dashboard endpoints.
@@ -17,12 +19,22 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers all dashboard routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/dashboard/summary", h.HandleSummary)
-	mux.HandleFunc("GET /api/v1/dashboard/inventory-alerts", h.HandleInventoryAlerts)
-	mux.HandleFunc("GET /api/v1/dashboard/top-customers", h.HandleTopCustomers)
-	mux.HandleFunc("GET /api/v1/dashboard/order-activity", h.HandleOrderActivity)
-	mux.HandleFunc("GET /api/v1/dashboard/revenue-trend", h.HandleRevenueTrend)
+// roleGuard protects all endpoints; pass middleware.RequireRole("admin","owner","finance") in production.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /api/v1/dashboard/summary", guard(h.HandleSummary))
+	mux.HandleFunc("GET /api/v1/dashboard/inventory-alerts", guard(h.HandleInventoryAlerts))
+	mux.HandleFunc("GET /api/v1/dashboard/top-customers", guard(h.HandleTopCustomers))
+	mux.HandleFunc("GET /api/v1/dashboard/order-activity", guard(h.HandleOrderActivity))
+	mux.HandleFunc("GET /api/v1/dashboard/revenue-trend", guard(h.HandleRevenueTrend))
 }
 
 // writeJSON encodes data as JSON and writes it to the response.
@@ -32,16 +44,16 @@ func writeJSON(w http.ResponseWriter, data interface{}) {
 }
 
 // writeError logs the internal error and returns a safe, generic message to the client.
-func writeError(w http.ResponseWriter, msg string, err error, status int) {
+func writeError(w http.ResponseWriter, r *http.Request, msg string, err error, status int) {
 	slog.Error(msg, "error", err)
-	http.Error(w, msg, status)
+	httputil.RespondError(w, r, msg, status, err)
 }
 
 // HandleSummary returns the dashboard summary KPIs.
 func (h *Handler) HandleSummary(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.GetSummary(r.Context())
 	if err != nil {
-		writeError(w, "Failed to load dashboard summary", err, http.StatusInternalServerError)
+		writeError(w, r, "Failed to load dashboard summary", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, data)
@@ -51,7 +63,7 @@ func (h *Handler) HandleSummary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleInventoryAlerts(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.GetInventoryAlerts(r.Context())
 	if err != nil {
-		writeError(w, "Failed to load inventory alerts", err, http.StatusInternalServerError)
+		writeError(w, r, "Failed to load inventory alerts", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, data)
@@ -61,7 +73,7 @@ func (h *Handler) HandleInventoryAlerts(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) HandleTopCustomers(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.GetTopCustomers(r.Context())
 	if err != nil {
-		writeError(w, "Failed to load top customers", err, http.StatusInternalServerError)
+		writeError(w, r, "Failed to load top customers", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, data)
@@ -71,7 +83,7 @@ func (h *Handler) HandleTopCustomers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleOrderActivity(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.GetOrderActivity(r.Context())
 	if err != nil {
-		writeError(w, "Failed to load order activity", err, http.StatusInternalServerError)
+		writeError(w, r, "Failed to load order activity", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, data)
@@ -81,7 +93,7 @@ func (h *Handler) HandleOrderActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleRevenueTrend(w http.ResponseWriter, r *http.Request) {
 	data, err := h.service.GetRevenueTrend(r.Context())
 	if err != nil {
-		writeError(w, "Failed to load revenue trend", err, http.StatusInternalServerError)
+		writeError(w, r, "Failed to load revenue trend", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, data)

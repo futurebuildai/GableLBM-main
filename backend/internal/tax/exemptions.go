@@ -35,7 +35,7 @@ func (r *PostgresExemptionRepo) GetByCustomer(ctx context.Context, customerID uu
 		WHERE customer_id = $1
 		ORDER BY created_at DESC`
 
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("query exemptions: %w", err)
 	}
@@ -66,7 +66,7 @@ func (r *PostgresExemptionRepo) GetActiveByCustomer(ctx context.Context, custome
 		  AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
 		ORDER BY created_at DESC`
 
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("query active exemptions: %w", err)
 	}
@@ -102,7 +102,7 @@ func (r *PostgresExemptionRepo) Create(ctx context.Context, ex *TaxExemption) er
 		                            issuing_state, effective_date, expiry_date, is_active, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		ex.ID, ex.CustomerID, ex.ExemptReason, ex.CertificateNumber,
 		ex.IssuingState, ex.EffectiveDate, ex.ExpiryDate, ex.IsActive, ex.CreatedAt,
 	)
@@ -113,7 +113,7 @@ func (r *PostgresExemptionRepo) Create(ctx context.Context, ex *TaxExemption) er
 }
 
 func (r *PostgresExemptionRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE id = $1`, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM tax_exemptions WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete exemption: %w", err)
 	}

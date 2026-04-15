@@ -116,26 +116,33 @@ func (s *Service) ApproveInvoice(ctx context.Context, invoiceID uuid.UUID, appro
 		return nil, fmt.Errorf("invoice is not pending (status: %s)", inv.Status)
 	}
 
-	now := time.Now()
-	inv.Status = InvoiceStatusApproved
-	inv.ApprovedBy = &approverID
-	inv.ApprovedAt = &now
+	err = s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		now := time.Now()
+		inv.Status = InvoiceStatusApproved
+		inv.ApprovedBy = &approverID
+		inv.ApprovedAt = &now
 
-	if err := s.repo.UpdateVendorInvoice(ctx, inv); err != nil {
+		if err := s.repo.UpdateVendorInvoice(txCtx, inv); err != nil {
+			return err
+		}
+
+		// Post to GL: DR Expense/Inventory, CR Accounts Payable
+		var glLines []gl.VendorInvoiceLineDetail
+		for _, line := range inv.Lines {
+			glLines = append(glLines, gl.VendorInvoiceLineDetail{
+				Description: line.Description,
+				AmountCents: line.LineTotal,
+				GLAccountID: line.GLAccountID,
+			})
+		}
+		if err := s.glSvc.SyncVendorInvoice(txCtx, inv.ID, inv.Total, glLines); err != nil {
+			return fmt.Errorf("failed to sync vendor invoice to GL: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
 		return nil, err
-	}
-
-	// Post to GL: DR Expense/Inventory, CR Accounts Payable
-	var glLines []gl.VendorInvoiceLineDetail
-	for _, line := range inv.Lines {
-		glLines = append(glLines, gl.VendorInvoiceLineDetail{
-			Description: line.Description,
-			AmountCents: line.LineTotal,
-			GLAccountID: line.GLAccountID,
-		})
-	}
-	if err := s.glSvc.SyncVendorInvoice(ctx, inv.ID, inv.Total, glLines); err != nil {
-		s.logger.Warn("Failed to sync vendor invoice to GL", "error", err, "invoice_id", inv.ID)
 	}
 
 	s.logger.Info("Vendor invoice approved and synced to GL",
@@ -215,7 +222,7 @@ func (s *Service) PayVendor(ctx context.Context, req CreateAPPaymentRequest) (*A
 
 		// Post to GL: DR Accounts Payable, CR Cash
 		if err := s.glSvc.SyncVendorPayment(ctx, pmt.ID, pmt.Amount); err != nil {
-			s.logger.Warn("Failed to sync vendor payment to GL", "error", err, "payment_id", pmt.ID)
+			return fmt.Errorf("failed to sync vendor payment to GL: %w", err)
 		}
 
 		s.logger.Info("Vendor payment created and synced to GL",

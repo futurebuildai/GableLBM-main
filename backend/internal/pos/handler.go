@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -20,22 +21,31 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes registers POS API routes.
 // NOTE: POS routes use /api/pos/* (legacy). Migrate to /api/v1/pos/* in API versioning sprint.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
 	// Transaction lifecycle
-	mux.HandleFunc("POST /api/pos/transactions", h.StartTransaction)
-	mux.HandleFunc("GET /api/pos/transactions/{id}", h.GetTransaction)
-	mux.HandleFunc("POST /api/pos/transactions/{id}/items", h.AddItem)
-	mux.HandleFunc("DELETE /api/pos/transactions/{id}/items/{itemId}", h.RemoveItem)
-	mux.HandleFunc("POST /api/pos/transactions/{id}/complete", h.CompleteTransaction)
-	mux.HandleFunc("POST /api/pos/transactions/{id}/void", h.VoidTransaction)
+	mux.HandleFunc("POST /api/pos/transactions", guard(h.StartTransaction))
+	mux.HandleFunc("GET /api/pos/transactions/{id}", guard(h.GetTransaction))
+	mux.HandleFunc("POST /api/pos/transactions/{id}/items", guard(h.AddItem))
+	mux.HandleFunc("DELETE /api/pos/transactions/{id}/items/{itemId}", guard(h.RemoveItem))
+	mux.HandleFunc("POST /api/pos/transactions/{id}/complete", guard(h.CompleteTransaction))
+	mux.HandleFunc("POST /api/pos/transactions/{id}/void", guard(h.VoidTransaction))
 
 	// History and search
-	mux.HandleFunc("GET /api/pos/transactions", h.ListTransactions)
-	mux.HandleFunc("GET /api/pos/products/search", h.SearchProducts)
+	mux.HandleFunc("GET /api/pos/transactions", guard(h.ListTransactions))
+	mux.HandleFunc("GET /api/pos/products/search", guard(h.SearchProducts))
 
 	// Offline sync
-	mux.HandleFunc("POST /api/pos/sync", h.SyncOffline)
-	mux.HandleFunc("GET /api/pos/catalog", h.GetCatalog)
+	mux.HandleFunc("POST /api/pos/sync", guard(h.SyncOffline))
+	mux.HandleFunc("GET /api/pos/catalog", guard(h.GetCatalog))
 }
 
 // --- Request types ---
@@ -55,7 +65,7 @@ type completeTransactionRequest struct {
 func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
 	var req startTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -68,7 +78,7 @@ func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.StartTransaction(r.Context(), req.RegisterID, req.CashierID, req.CustomerID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to start transaction", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -80,13 +90,13 @@ func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
 		return
 	}
 
 	tx, err := h.service.GetTransaction(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "transaction not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -97,19 +107,19 @@ func (h *Handler) GetTransaction(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	txID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req AddLineItemRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	tx, err := h.service.AddItem(r.Context(), txID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to add item", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -120,19 +130,19 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 	txID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
 		return
 	}
 
 	itemID, err := uuid.Parse(r.PathValue("itemId"))
 	if err != nil {
-		http.Error(w, "Invalid item ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid item ID", http.StatusBadRequest, err)
 		return
 	}
 
 	tx, err := h.service.RemoveItem(r.Context(), txID, itemID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to remove item", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -143,24 +153,24 @@ func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 	txID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req completeTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if len(req.Tenders) == 0 {
-		http.Error(w, "At least one tender is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "At least one tender is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	tx, err := h.service.CompleteTransaction(r.Context(), txID, req.Tenders)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		httputil.RespondError(w, r, "failed to complete transaction", http.StatusUnprocessableEntity, err)
 		return
 	}
 
@@ -171,13 +181,13 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 	txID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
 		return
 	}
 
 	tx, err := h.service.VoidTransaction(r.Context(), txID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to void transaction", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -199,7 +209,7 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 
 	summaries, err := h.service.ListTransactions(r.Context(), registerID, date)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list transactions", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -221,7 +231,7 @@ func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.service.SearchProducts(r.Context(), query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "product search failed", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -237,22 +247,22 @@ func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
 	var req OfflineSyncRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.BatchID == "" {
-		http.Error(w, "batch_id is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "batch_id is required", http.StatusBadRequest, nil)
 		return
 	}
 	if len(req.Items) == 0 {
-		http.Error(w, "items cannot be empty", http.StatusBadRequest)
+		httputil.RespondError(w, r, "items cannot be empty", http.StatusBadRequest, nil)
 		return
 	}
 
 	resp, err := h.service.SyncOfflineTransactions(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "offline sync failed", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -264,7 +274,7 @@ func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	catalog, err := h.service.GetProductCatalog(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get catalog", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -275,4 +285,3 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(catalog)
 }
-

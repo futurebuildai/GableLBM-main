@@ -1,4 +1,4 @@
-CREATE TABLE rebate_programs (
+CREATE TABLE IF NOT EXISTS rebate_programs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     vendor_id UUID NOT NULL REFERENCES vendors(id),
     name VARCHAR(128) NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE rebate_programs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE rebate_tiers (
+CREATE TABLE IF NOT EXISTS rebate_tiers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     program_id UUID NOT NULL REFERENCES rebate_programs(id),
     min_volume BIGINT NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE rebate_tiers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE rebate_claims (
+CREATE TABLE IF NOT EXISTS rebate_claims (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     program_id UUID NOT NULL REFERENCES rebate_programs(id),
     period_start DATE NOT NULL,

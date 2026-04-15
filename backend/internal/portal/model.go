@@ -25,7 +25,7 @@ type PortalInvite struct {
 	CustomerID uuid.UUID `json:"customer_id"`
 	Email      string    `json:"email"`
 	Role       string    `json:"role"`
-	Token      string    `json:"token"`
+	Token      string    `json:"-"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -51,13 +51,14 @@ type LoginRequest struct {
 }
 
 // LoginResponse is returned on successful login.
+// The JWT is delivered via httpOnly cookie only — never in the response body.
 type LoginResponse struct {
-	Token  string       `json:"token"`
 	User   CustomerUser `json:"user"`
 	Config PortalConfig `json:"config"`
 }
 
 // PortalDashboardDTO aggregates AR and activity data for the contractor.
+// TODO: align with int64 cents — BalanceDue, CreditLimit, PastDue are float64 dollars
 type PortalDashboardDTO struct {
 	BalanceDue   float64          `json:"balance_due"`
 	CreditLimit  float64          `json:"credit_limit"`
@@ -66,6 +67,7 @@ type PortalDashboardDTO struct {
 }
 
 // PortalOrderDTO is a customer-facing order summary.
+// TODO: align with int64 cents — TotalAmount is float64 dollars
 type PortalOrderDTO struct {
 	ID          uuid.UUID       `json:"id"`
 	Status      string          `json:"status"`
@@ -75,6 +77,7 @@ type PortalOrderDTO struct {
 }
 
 // PortalLineDTO is a customer-facing order/invoice line item.
+// TODO: align with int64 cents — PriceEach is float64 dollars
 type PortalLineDTO struct {
 	ProductID   uuid.UUID `json:"product_id"`
 	ProductSKU  string    `json:"product_sku"`
@@ -84,6 +87,7 @@ type PortalLineDTO struct {
 }
 
 // PortalInvoiceDTO is a customer-facing invoice summary.
+// TODO: align with int64 cents — TotalAmount, Subtotal, TaxAmount are float64 dollars
 type PortalInvoiceDTO struct {
 	ID           uuid.UUID       `json:"id"`
 	OrderID      uuid.UUID       `json:"order_id"`
@@ -170,6 +174,7 @@ type CatalogDetailDTO struct {
 // --- Cart DTOs ---
 
 // CartDTO represents a customer's shopping cart.
+// TODO: align with int64 cents — Subtotal is float64 dollars
 type CartDTO struct {
 	ID        uuid.UUID     `json:"id"`
 	Items     []CartItemDTO `json:"items"`
@@ -178,6 +183,7 @@ type CartDTO struct {
 }
 
 // CartItemDTO represents a single item in the cart.
+// TODO: align with int64 cents — UnitPrice and LineTotal are float64 dollars
 type CartItemDTO struct {
 	ID          uuid.UUID `json:"id"`
 	ProductID   uuid.UUID `json:"product_id"`

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/pkg/httputil"
+
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -63,8 +65,15 @@ func NewAuthMiddleware(ctx context.Context, cfg AuthConfig, logger *slog.Logger)
 func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 0. Check Public Paths
+		// Paths ending with "/" are treated as prefixes (e.g. "/api/portal/v1/").
+		// All other paths require an exact match.
 		for _, path := range m.publicPaths {
-			if r.URL.Path == path {
+			if strings.HasSuffix(path, "/") {
+				if strings.HasPrefix(r.URL.Path, path) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			} else if r.URL.Path == path {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -74,14 +83,14 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			m.logger.Warn("Missing Authorization header", "path", r.URL.Path)
-			http.Error(w, "Unauthorized: No token provided", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: No token provided", http.StatusUnauthorized, nil)
 			return
 		}
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
 			m.logger.Warn("Invalid Authorization header format", "path", r.URL.Path)
-			http.Error(w, "Unauthorized: Invalid token format", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: Invalid token format", http.StatusUnauthorized, nil)
 			return
 		}
 		tokenString := parts[1]
@@ -90,21 +99,21 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		token, err := jwt.ParseWithClaims(tokenString, &UserClaims{}, m.jwks.Keyfunc)
 		if err != nil {
 			m.logger.Warn("Token validation failed", "error", err, "path", r.URL.Path)
-			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
 			return
 		}
 
 		// 3. Verify Claims (Issuer)
 		if !token.Valid {
 			m.logger.Warn("Token is invalid", "path", r.URL.Path)
-			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: Invalid token", http.StatusUnauthorized, nil)
 			return
 		}
 
 		claims, ok := token.Claims.(*UserClaims)
 		if !ok {
 			m.logger.Error("Failed to cast claims", "path", r.URL.Path)
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, nil)
 			return
 		}
 
@@ -112,7 +121,7 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 		// Note: keyfunc handles signature, but we check business logic claims here
 		if m.issuer != "" && claims.Issuer != m.issuer {
 			m.logger.Warn("Token issuer mismatch", "expected", m.issuer, "got", claims.Issuer)
-			http.Error(w, "Unauthorized: Invalid issuer", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized: Invalid issuer", http.StatusUnauthorized, nil)
 			return
 		}
 
@@ -153,7 +162,7 @@ func RequireRole(allowedRoles ...string) func(http.Handler) http.Handler {
 				}
 			}
 
-			http.Error(w, "Forbidden: insufficient role", http.StatusForbidden)
+			httputil.RespondError(w, r, "Forbidden: insufficient role", http.StatusForbidden, nil)
 		})
 	}
 }

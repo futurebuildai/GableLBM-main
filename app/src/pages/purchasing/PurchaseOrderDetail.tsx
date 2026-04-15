@@ -57,7 +57,7 @@ export function PurchaseOrderDetail() {
         if (id) {
             loadPO(id);
             loadFreightCharges(id);
-            LocationService.listLocations().then(setLocations);
+            LocationService.listLocations().then(setLocations).catch(() => setLocations([]));
         }
     }, [id, loadPO, loadFreightCharges]);
 

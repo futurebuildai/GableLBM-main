@@ -11,7 +11,9 @@ import (
 
 type Repository interface {
 	CreatePayment(ctx context.Context, p *Payment) error
+	GetPaymentByID(ctx context.Context, id uuid.UUID) (*Payment, error)
 	GetPaymentsByInvoiceID(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error)
+	CreateRefund(ctx context.Context, r *Refund) error
 }
 
 type PostgresRepository struct {
@@ -43,6 +45,52 @@ func (r *PostgresRepository) CreatePayment(ctx context.Context, p *Payment) erro
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create payment: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetPaymentByID(ctx context.Context, id uuid.UUID) (*Payment, error) {
+	query := `
+		SELECT id, invoice_id, amount, method, reference, notes, created_at,
+			COALESCE(gateway_tx_id, '') as gateway_tx_id,
+			COALESCE(gateway_status, '') as gateway_status,
+			COALESCE(card_last4, '') as card_last4,
+			COALESCE(card_brand, '') as card_brand,
+			COALESCE(auth_code, '') as auth_code
+		FROM payments
+		WHERE id = $1
+	`
+	row := r.db.GetExecutor(ctx).QueryRow(ctx, query, id)
+	var p Payment
+	var amountFloat float64
+	if err := row.Scan(
+		&p.ID, &p.InvoiceID, &amountFloat, &p.Method, &p.Reference, &p.Notes, &p.CreatedAt,
+		&p.GatewayTxID, &p.GatewayStatus, &p.CardLast4, &p.CardBrand, &p.AuthCode,
+	); err != nil {
+		return nil, fmt.Errorf("failed to get payment by id: %w", err)
+	}
+	p.Amount = int64(amountFloat*100.0 + 0.5)
+	return &p, nil
+}
+
+func (r *PostgresRepository) CreateRefund(ctx context.Context, ref *Refund) error {
+	if ref.ID == uuid.Nil {
+		ref.ID = uuid.New()
+	}
+	ref.CreatedAt = time.Now()
+
+	query := `
+		INSERT INTO refunds (id, payment_id, amount, reason, gateway_refund_id, status, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	amountFloat := float64(ref.Amount) / 100.0
+
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+		ref.ID, ref.PaymentID, amountFloat, ref.Reason,
+		nullIfEmpty(ref.GatewayRefundID), ref.Status, ref.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create refund: %w", err)
 	}
 	return nil
 }

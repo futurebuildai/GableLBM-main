@@ -1,23 +1,24 @@
 import type { PurchaseOrder, CreatePORequest, ReceivePORequest, RecommendationSummary, FreightCharge, FreightUploadResponse } from '../types/purchaseOrder';
 import type { ReorderAlert } from '../types/product';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const PurchaseOrderService = {
     async listPOs(): Promise<PurchaseOrder[]> {
-        const response = await fetch(`${API_URL}/purchase-orders`);
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders`);
         if (!response.ok) throw new Error('Failed to fetch purchase orders');
         return response.json();
     },
 
     async getPO(id: string): Promise<PurchaseOrder> {
-        const response = await fetch(`${API_URL}/purchase-orders/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${id}`);
         if (!response.ok) throw new Error('Failed to fetch purchase order');
         return response.json();
     },
 
     async createPO(request: CreatePORequest): Promise<PurchaseOrder> {
-        const response = await fetch(`${API_URL}/purchase-orders`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -30,14 +31,14 @@ export const PurchaseOrderService = {
     },
 
     async submitPO(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/purchase-orders/${id}/submit`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${id}/submit`, {
             method: 'POST',
         });
         if (!response.ok) throw new Error('Failed to submit purchase order');
     },
 
     async receivePO(id: string, request: ReceivePORequest): Promise<void> {
-        const response = await fetch(`${API_URL}/purchase-orders/${id}/receive`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${id}/receive`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -49,13 +50,13 @@ export const PurchaseOrderService = {
     },
 
     async getReorderAlerts(): Promise<ReorderAlert[]> {
-        const response = await fetch(`${API_URL}/products/reorder-alerts`);
+        const response = await fetchWithAuth(`${API_URL}/products/reorder-alerts`);
         if (!response.ok) throw new Error('Failed to fetch reorder alerts');
         return response.json();
     },
 
     async generateReorders(): Promise<{ count: number }> {
-        const response = await fetch(`${API_URL}/purchase-orders/reorder-check`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/reorder-check`, {
             method: 'POST',
         });
         if (!response.ok) throw new Error('Failed to generate reorder POs');
@@ -63,7 +64,7 @@ export const PurchaseOrderService = {
     },
 
     async getRecommendations(): Promise<RecommendationSummary> {
-        const response = await fetch(`${API_URL}/purchase-orders/recommendations`);
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/recommendations`);
         if (!response.ok) throw new Error('Failed to fetch purchasing recommendations');
         return response.json();
     },
@@ -71,7 +72,7 @@ export const PurchaseOrderService = {
     async uploadFreightInvoice(poId: string, file: File): Promise<FreightUploadResponse> {
         const formData = new FormData();
         formData.append('file', file);
-        const response = await fetch(`${API_URL}/purchase-orders/${poId}/freight`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${poId}/freight`, {
             method: 'POST',
             body: formData,
         });
@@ -83,7 +84,7 @@ export const PurchaseOrderService = {
     },
 
     async applyFreight(poId: string, freightId: string): Promise<void> {
-        const response = await fetch(`${API_URL}/purchase-orders/${poId}/freight/${freightId}/apply`, {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${poId}/freight/${freightId}/apply`, {
             method: 'POST',
         });
         if (!response.ok) {
@@ -93,7 +94,7 @@ export const PurchaseOrderService = {
     },
 
     async getFreightCharges(poId: string): Promise<FreightCharge[]> {
-        const response = await fetch(`${API_URL}/purchase-orders/${poId}/freight`);
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/${poId}/freight`);
         if (!response.ok) throw new Error('Failed to fetch freight charges');
         return response.json();
     },

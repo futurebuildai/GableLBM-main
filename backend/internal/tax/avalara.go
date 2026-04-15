@@ -153,7 +153,7 @@ func (c *AvalaraClient) CalculateTax(ctx context.Context, req *TaxPreviewRequest
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB limit
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		c.logger.Error("Avalara API error", "status", resp.StatusCode, "body", string(respBody))
@@ -220,7 +220,7 @@ func (c *AvalaraClient) CommitTransaction(ctx context.Context, companyCode, docu
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB limit
 		return fmt.Errorf("commit failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -248,7 +248,7 @@ func (c *AvalaraClient) VoidTransaction(ctx context.Context, companyCode, docume
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB limit
 		return fmt.Errorf("void failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 

@@ -15,8 +15,9 @@ export const LocationManager: React.FC = () => {
             setLocations(data);
         } catch (error) {
             console.error(error);
+            showToast('Failed to load locations', 'error');
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         // eslint-disable-next-line

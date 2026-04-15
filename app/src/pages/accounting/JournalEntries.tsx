@@ -4,6 +4,7 @@ import type { JournalEntry, GLAccount, CreateJournalEntryRequest } from '../../t
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { FileText, Plus, X, Check, Ban } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 const STATUS_COLORS: Record<string, string> = {
     DRAFT: 'bg-amber-500/20 text-amber-300',
@@ -27,6 +28,7 @@ interface LineForm {
 }
 
 const JournalEntries: React.FC = () => {
+    const { showToast } = useToast();
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [accounts, setAccounts] = useState<GLAccount[]>([]);
     const [loading, setLoading] = useState(true);
@@ -46,10 +48,11 @@ const JournalEntries: React.FC = () => {
             setAccounts(acctData || []);
         } catch (err) {
             console.error(err);
+            showToast('Failed to load journal entries', 'error');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -108,7 +111,7 @@ const JournalEntries: React.FC = () => {
             await postJournalEntry(id);
             load();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to post');
+            showToast(err instanceof Error ? err.message : 'Failed to post journal entry', 'error');
         }
     };
 
@@ -117,7 +120,7 @@ const JournalEntries: React.FC = () => {
             await voidJournalEntry(id);
             load();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to void');
+            showToast(err instanceof Error ? err.message : 'Failed to void journal entry', 'error');
         }
     };
 

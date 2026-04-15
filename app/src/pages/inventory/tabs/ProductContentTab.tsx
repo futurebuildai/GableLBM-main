@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import type { PIMContent } from '../../../types/pim';
 import { PIMService } from '../../../services/PIMService';
 import { Sparkles, Save, Loader2 } from 'lucide-react';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface Props {
     productId: string;
@@ -13,6 +14,7 @@ const TONES = ['professional', 'casual', 'technical', 'persuasive'];
 const AUDIENCES = ['contractors and builders', 'DIY homeowners', 'architects and designers', 'wholesale buyers'];
 
 export const ProductContentTab: React.FC<Props> = ({ productId, content, onContentUpdate }) => {
+    const { showToast } = useToast();
     const [tone, setTone] = useState('professional');
     const [audience, setAudience] = useState('contractors and builders');
     const [generating, setGenerating] = useState(false);
@@ -36,10 +38,11 @@ export const ProductContentTab: React.FC<Props> = ({ productId, content, onConte
             onContentUpdate(result);
         } catch (err) {
             console.error('Generate failed:', err);
+            showToast('Failed to generate content', 'error');
         } finally {
             setGenerating(false);
         }
-    }, [productId, tone, audience, onContentUpdate]);
+    }, [productId, tone, audience, onContentUpdate, showToast]);
 
     const handleSave = useCallback(async () => {
         setSaving(true);
@@ -53,10 +56,11 @@ export const ProductContentTab: React.FC<Props> = ({ productId, content, onConte
             onContentUpdate(result);
         } catch (err) {
             console.error('Save failed:', err);
+            showToast('Failed to save content changes', 'error');
         } finally {
             setSaving(false);
         }
-    }, [productId, shortDesc, longDesc, marketingCopy, attributes, onContentUpdate]);
+    }, [productId, shortDesc, longDesc, marketingCopy, attributes, onContentUpdate, showToast]);
 
     return (
         <div className="space-y-6">

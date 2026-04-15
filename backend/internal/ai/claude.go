@@ -223,7 +223,7 @@ func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, co
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -400,7 +400,7 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}

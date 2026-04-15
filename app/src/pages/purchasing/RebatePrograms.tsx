@@ -64,7 +64,7 @@ export function RebatePrograms() {
         }]);
     };
 
-    const updateTier = (idx: number, field: keyof RebateTier, value: any) => {
+    const updateTier = (idx: number, field: keyof RebateTier, value: number | string | null) => {
         const tiers = [...newTiers];
         tiers[idx] = { ...tiers[idx], [field]: value };
         setNewTiers(tiers);

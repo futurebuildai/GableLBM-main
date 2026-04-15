@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -15,24 +16,33 @@ func NewHandler(repo *Repository) *Handler {
 	return &Handler{repo: repo}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /customers/{customerId}/activities", h.HandleListActivities)
-	mux.HandleFunc("POST /customers/{customerId}/activities", h.HandleCreateActivity)
-	mux.HandleFunc("GET /activities/{id}", h.HandleGetActivity)
-	mux.HandleFunc("PUT /activities/{id}", h.HandleUpdateActivity)
-	mux.HandleFunc("DELETE /activities/{id}", h.HandleDeleteActivity)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /customers/{customerId}/activities", guard(h.HandleListActivities))
+	mux.HandleFunc("POST /customers/{customerId}/activities", guard(h.HandleCreateActivity))
+	mux.HandleFunc("GET /activities/{id}", guard(h.HandleGetActivity))
+	mux.HandleFunc("PUT /activities/{id}", guard(h.HandleUpdateActivity))
+	mux.HandleFunc("DELETE /activities/{id}", guard(h.HandleDeleteActivity))
 }
 
 func (h *Handler) HandleListActivities(w http.ResponseWriter, r *http.Request) {
 	customerID, err := uuid.Parse(r.PathValue("customerId"))
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	activities, err := h.repo.ListByCustomer(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, "Failed to fetch activities", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch activities", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -43,19 +53,24 @@ func (h *Handler) HandleListActivities(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateActivity(w http.ResponseWriter, r *http.Request) {
 	customerID, err := uuid.Parse(r.PathValue("customerId"))
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var a Activity
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	a.CustomerID = customerID
 
+	if !ValidActivityType(a.ActivityType) {
+		httputil.RespondError(w, r, "Invalid activity_type: must be CALL, MEETING, EMAIL, or NOTE", http.StatusBadRequest, nil)
+		return
+	}
+
 	if err := h.repo.Create(r.Context(), &a); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create activity", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -66,13 +81,13 @@ func (h *Handler) HandleCreateActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleGetActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid activity ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
 		return
 	}
 
 	a, err := h.repo.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Activity not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Activity not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -83,19 +98,24 @@ func (h *Handler) HandleGetActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUpdateActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid activity ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var a Activity
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	a.ID = id
 
+	if !ValidActivityType(a.ActivityType) {
+		httputil.RespondError(w, r, "Invalid activity_type: must be CALL, MEETING, EMAIL, or NOTE", http.StatusBadRequest, nil)
+		return
+	}
+
 	if err := h.repo.Update(r.Context(), &a); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update activity", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -106,12 +126,12 @@ func (h *Handler) HandleUpdateActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid activity ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.repo.Delete(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete activity", http.StatusInternalServerError, err)
 		return
 	}
 

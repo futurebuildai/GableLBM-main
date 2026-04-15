@@ -249,7 +249,7 @@ function DetailsTab({ quote }: { quote: Quote }) {
 
             {/* Line Items */}
             <div className="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm" aria-label="Quote line items">
                     <thead>
                         <tr className="border-b border-white/10 bg-white/5">
                             <th className="p-4 font-medium text-muted-foreground">SKU</th>

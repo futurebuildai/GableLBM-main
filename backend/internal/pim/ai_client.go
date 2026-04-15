@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/ai"
 )
@@ -29,7 +30,7 @@ func NewTextAIClient(apiKey, model string) *TextAIClient {
 	return &TextAIClient{
 		apiKey: apiKey,
 		model:  model,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -41,7 +42,7 @@ func NewTextAIClientWithKeyStore(ks *ai.KeyStore, model string) *TextAIClient {
 	return &TextAIClient{
 		keyStore: ks,
 		model:    model,
-		client:   &http.Client{},
+		client:   &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -114,7 +115,7 @@ func (c *TextAIClient) Generate(systemPrompt, userPrompt string, maxTokens int) 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return "", "", fmt.Errorf("read response: %w", err)
 	}
@@ -159,7 +160,7 @@ type ImageAIClient struct {
 func NewImageAIClient(apiKey string) *ImageAIClient {
 	return &ImageAIClient{
 		apiKey: apiKey,
-		client: &http.Client{},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -189,7 +190,7 @@ func (c *ImageAIClient) Generate(prompt, style string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
@@ -220,7 +221,7 @@ func NewGeminiImageClient(apiKey string) *GeminiImageClient {
 	return &GeminiImageClient{
 		apiKey: apiKey,
 		model:  "gemini-3.1-flash-image-preview",
-		client: &http.Client{},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -296,7 +297,7 @@ func (c *GeminiImageClient) Generate(prompt, style string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return "", fmt.Errorf("read gemini response: %w", err)
 	}

@@ -9,6 +9,7 @@ import { ProductCollateralTab } from './tabs/ProductCollateralTab';
 import { ProductSEOTab } from './tabs/ProductSEOTab';
 import { ProductStockTab } from './tabs/ProductStockTab';
 import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock';
 
@@ -24,6 +25,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
 export const ProductDetail: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { showToast } = useToast();
     const [product, setProduct] = useState<ProductDetailType | null>(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -35,6 +37,7 @@ export const ProductDetail: React.FC = () => {
             setProduct(data);
         } catch (err) {
             console.error('Failed to load product:', err);
+            showToast('Failed to load product', 'error');
         } finally {
             setLoading(false);
         }
@@ -83,6 +86,7 @@ export const ProductDetail: React.FC = () => {
                 <button
                     onClick={() => navigate('/inventory')}
                     className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                    aria-label="Back to inventory"
                 >
                     <ArrowLeft className="w-5 h-5" />
                 </button>

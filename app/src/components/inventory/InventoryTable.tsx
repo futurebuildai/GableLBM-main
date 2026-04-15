@@ -16,7 +16,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ products, onAdju
     return (
         <div className="w-full overflow-hidden">
             <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm" aria-label="Inventory products">
                     <thead>
                         <tr className="border-b border-white/5 text-zinc-400 text-xs uppercase tracking-wider font-medium">
                             <th className="px-6 py-4">SKU / UPC</th>
@@ -92,6 +92,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ products, onAdju
                                                     onClick={(e) => { e.stopPropagation(); onAdjustStock(p); }}
                                                     className="p-1.5 rounded-md hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
                                                     title="Adjust Stock"
+                                                    aria-label={`Adjust stock for ${p.sku}`}
                                                 >
                                                     <Edit2 className="w-4 h-4" />
                                                 </button>
@@ -99,6 +100,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ products, onAdju
                                                     onClick={(e) => { e.stopPropagation(); onTransferStock(p); }}
                                                     className="p-1.5 rounded-md hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
                                                     title="Transfer Stock"
+                                                    aria-label={`Transfer stock for ${p.sku}`}
                                                 >
                                                     <ArrowRightLeft className="w-4 h-4" />
                                                 </button>
@@ -106,6 +108,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ products, onAdju
                                                     onClick={(e) => { e.stopPropagation(); onEditMargins(p); }}
                                                     className="p-1.5 rounded-md hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
                                                     title="Edit Margins and Commissions"
+                                                    aria-label={`Edit margins for ${p.sku}`}
                                                 >
                                                     <span className="text-xs font-bold leading-none px-1 py-0.5 rounded bg-zinc-800 text-gable-green border border-gable-green/30">$</span>
                                                 </button>

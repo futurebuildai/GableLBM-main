@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -30,8 +29,10 @@ type Service struct {
 }
 
 // NewService creates a new portal service.
+// jwtSecret must be provided and non-empty; callers should fail startup if not configured.
 func NewService(
 	repo *Repository,
+	jwtSecret string,
 	logger *slog.Logger,
 	pricingSvc *pricing.Service,
 	customerSvc *customer.Service,
@@ -39,13 +40,9 @@ func NewService(
 	orderSvc *order.Service,
 	productSvc *product.Service,
 ) *Service {
-	secret := os.Getenv("PORTAL_JWT_SECRET")
-	if secret == "" {
-		secret = "portal-dev-secret-change-in-production"
-	}
 	return &Service{
 		repo:         repo,
-		jwtSecret:    []byte(secret),
+		jwtSecret:    []byte(jwtSecret),
 		logger:       logger,
 		pricingSvc:   pricingSvc,
 		customerSvc:  customerSvc,
@@ -62,10 +59,19 @@ type PortalClaims struct {
 	CustomerUserID uuid.UUID `json:"customer_user_id"`
 	Email          string    `json:"email"`
 	Name           string    `json:"name"`
+	Role           string    `json:"role"`
 }
 
-// Login authenticates a customer user and returns a JWT.
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
+// LoginResult holds the login response and the raw JWT token (for cookie delivery).
+type LoginResult struct {
+	Response *LoginResponse
+	Token    string
+}
+
+// Login authenticates a customer user and returns a LoginResult.
+// The token is returned separately so the handler can set it as a cookie
+// without exposing it in the JSON response body.
+func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResult, error) {
 	user, err := s.repo.GetCustomerUserByEmail(ctx, req.Email)
 	if err != nil {
 		s.logger.Warn("Portal login: user not found", "email", req.Email)
@@ -90,6 +96,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 		CustomerUserID: user.ID,
 		Email:          user.Email,
 		Name:           user.Name,
+		Role:           user.Role,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -108,10 +115,12 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*LoginResponse, 
 
 	s.logger.Info("Portal login success", "email", req.Email, "customer_id", user.CustomerID)
 
-	return &LoginResponse{
-		Token:  tokenStr,
-		User:   *user,
-		Config: *cfg,
+	return &LoginResult{
+		Response: &LoginResponse{
+			User:   *user,
+			Config: *cfg,
+		},
+		Token: tokenStr,
 	}, nil
 }
 

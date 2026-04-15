@@ -9,7 +9,7 @@ import { Download, CreditCard, Mail, RotateCcw } from 'lucide-react';
 import { useToast } from '../../components/ui/ToastContext';
 import { ReportingService } from '../../services/ReportingService';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function InvoiceDetail() {
     const { id } = useParams();
@@ -17,6 +17,7 @@ export default function InvoiceDetail() {
     const [invoice, setInvoice] = useState<Invoice | null>(null);
     const [payments, setPayments] = useState<Payment[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [creditMemoReason, setCreditMemoReason] = useState('');
     const [creditMemoAmount, setCreditMemoAmount] = useState('');
@@ -33,8 +34,10 @@ export default function InvoiceDetail() {
         try {
             const data = await InvoiceService.getInvoice(id);
             setInvoice(data);
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(true);
+            showToast('Failed to load invoice', 'error');
         } finally {
             setLoading(false);
         }
@@ -57,7 +60,8 @@ export default function InvoiceDetail() {
         }
     };
 
-    if (loading || !invoice) return <div className="text-white">Loading invoice...</div>;
+    if (loading) return <div className="text-white">Loading invoice...</div>;
+    if (error || !invoice) return <div className="text-white">Failed to load invoice.</div>;
 
     const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
     const amountDue = invoice.total_amount - totalPaid;
@@ -149,7 +153,7 @@ export default function InvoiceDetail() {
                 <div className="px-6 py-4 border-b border-zinc-800">
                     <h3 className="text-zinc-100 font-bold">Line Items</h3>
                 </div>
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm" aria-label="Invoice line items">
                     <thead className="bg-zinc-950 text-zinc-400 uppercase text-xs">
                         <tr>
                             <th className="px-6 py-4">Item</th>
@@ -200,7 +204,7 @@ export default function InvoiceDetail() {
                             <h3 className="text-zinc-100 font-bold">Payment History</h3>
                             <span className="text-zinc-400 text-sm">Paid: <span className="text-green-400 font-mono">${totalPaid.toFixed(2)}</span></span>
                         </div>
-                        <table className="w-full text-left text-sm">
+                        <table className="w-full text-left text-sm" aria-label="Payment history">
                             <thead className="bg-zinc-950 text-zinc-400 uppercase text-xs">
                                 <tr>
                                     <th className="px-6 py-4">Date</th>

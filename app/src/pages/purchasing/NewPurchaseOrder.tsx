@@ -21,8 +21,8 @@ export function NewPurchaseOrder() {
     const isFromRecommendation = searchParams.get('from') === 'recommendation';
 
     useEffect(() => {
-        ProductService.getProducts().then(setProducts).catch(console.error);
-    }, []);
+        ProductService.getProducts().then(setProducts).catch(() => showToast('Failed to load products', 'error'));
+    }, [showToast]);
 
     // Pre-fill from recommendation URL params
     useEffect(() => {

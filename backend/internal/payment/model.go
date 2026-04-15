@@ -70,7 +70,7 @@ type TenderLine struct {
 // CreatePaymentIntentRequest is sent by the frontend to initiate a card payment.
 type CreatePaymentIntentRequest struct {
 	InvoiceID uuid.UUID `json:"invoice_id"`
-	Amount    float64   `json:"amount"` // In dollars (converted to cents server-side)
+	Amount    int64     `json:"amount"` // In cents
 }
 
 // PaymentIntentResponse returns the public key needed by Runner.js on the frontend.
@@ -84,13 +84,13 @@ type PaymentIntentResponse struct {
 type ProcessCardPaymentRequest struct {
 	InvoiceID uuid.UUID `json:"invoice_id"`
 	TokenID   string    `json:"token_id"`
-	Amount    float64   `json:"amount"` // In dollars
+	Amount    int64     `json:"amount"` // In cents
 	Notes     string    `json:"notes"`
 }
 
 // RefundRequest is sent to initiate a refund on a completed payment.
 type RefundRequest struct {
 	PaymentID uuid.UUID `json:"payment_id"`
-	Amount    float64   `json:"amount"` // In dollars (partial or full)
+	Amount    int64     `json:"amount"` // In cents (partial or full)
 	Reason    string    `json:"reason"`
 }

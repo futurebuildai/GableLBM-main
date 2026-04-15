@@ -1,10 +1,11 @@
 import type { Invoice } from '../types/invoice';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const InvoiceService = {
     async listInvoices(): Promise<Invoice[]> {
-        const response = await fetch(`${API_URL}/invoices`);
+        const response = await fetchWithAuth(`${API_URL}/invoices`);
         if (!response.ok) {
             throw new Error('Failed to fetch invoices');
         }
@@ -12,7 +13,7 @@ export const InvoiceService = {
     },
 
     async getInvoice(id: string): Promise<Invoice> {
-        const response = await fetch(`${API_URL}/invoices/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/invoices/${id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch invoice');
         }
@@ -20,7 +21,7 @@ export const InvoiceService = {
     },
 
     async emailInvoice(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/api/invoices/${id}/email`, { // Note: /api/ prefix
+        const response = await fetchWithAuth(`${API_URL}/api/invoices/${id}/email`, {
             method: 'POST'
         });
         if (!response.ok) {

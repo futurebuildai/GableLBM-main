@@ -1,4 +1,5 @@
 import type { ParseResponse } from '../types/parsing';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -11,7 +12,7 @@ export const ParsingService = {
         const formData = new FormData();
         formData.append('file', file);
 
-        const response = await fetch(`${API_URL}/parsing/upload`, {
+        const response = await fetchWithAuth(`${API_URL}/parsing/upload`, {
             method: 'POST',
             body: formData,
         });

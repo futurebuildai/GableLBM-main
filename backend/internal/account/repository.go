@@ -81,7 +81,7 @@ func (r *PostgresRepository) GetTransactionsByCustomerID(ctx context.Context, cu
 
 func (r *PostgresRepository) GetBalance(ctx context.Context, customerID uuid.UUID) (int64, error) {
 	var balanceFloat float64
-	query := `SELECT balance_due FROM customers WHERE id = $1`
+	query := `SELECT balance_due FROM customers WHERE id = $1 FOR UPDATE`
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID).Scan(&balanceFloat)
 	if err != nil {
 		if err == pgx.ErrNoRows {

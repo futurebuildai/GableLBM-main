@@ -8,7 +8,7 @@ ENV VITE_API_URL=$VITE_API_URL
 
 # Copy package files
 COPY app/package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy source code
 COPY app/ .
@@ -17,7 +17,11 @@ COPY app/ .
 RUN npm run build
 
 # Run stage
-FROM nginx:alpine
+FROM nginx:1.27-alpine
+
+ENV BACKEND_URL=http://localhost:8080
+
+RUN apk --no-cache add curl
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
@@ -28,9 +32,20 @@ COPY app/nginx.conf.template /etc/nginx/templates/default.conf.template
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Railway provides PORT env var — default to 80 for local
-ENV PORT=80
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
+    chown -R appuser:appgroup /usr/share/nginx/html && \
+    chown -R appuser:appgroup /var/cache/nginx && \
+    chown -R appuser:appgroup /var/log/nginx && \
+    chown -R appuser:appgroup /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown -R appuser:appgroup /var/run/nginx.pid
 
-EXPOSE ${PORT}
+USER appuser
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

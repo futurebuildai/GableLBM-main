@@ -141,6 +141,9 @@ func (r *EDIRepository) UpdatePartner(ctx context.Context, p *TradingPartner) er
 	return err
 }
 
+// DeletePartner permanently removes a trading partner.
+// TODO(P3): Convert to soft delete (SET deleted_at = NOW()) once a migration adds
+// a deleted_at column to edi_trading_partners and list/get queries filter on it.
 func (r *EDIRepository) DeletePartner(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.GetExecutor(ctx).Exec(ctx,
 		`DELETE FROM edi_trading_partners WHERE id = $1`, id,

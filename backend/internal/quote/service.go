@@ -68,6 +68,10 @@ func (s *Service) ListQuotes(ctx context.Context) ([]Quote, error) {
 	return s.repo.ListQuotes(ctx)
 }
 
+func (s *Service) ListQuotesPaginated(ctx context.Context, limit, offset int) ([]Quote, int, error) {
+	return s.repo.ListQuotesPaginated(ctx, limit, offset)
+}
+
 func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, state QuoteState) error {
 	q, err := s.repo.GetQuote(ctx, id)
 	if err != nil {

@@ -9,8 +9,11 @@ interface BarcodeScannerProps {
 
 export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
     const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+    const onScanRef = useRef(onScan);
     const [error, setError] = useState<string | null>(null);
     const [isScanning, setIsScanning] = useState(false);
+
+    useEffect(() => { onScanRef.current = onScan; }, [onScan]);
 
     useEffect(() => {
         // Prevent multiple initializations in dev strict mode
@@ -38,7 +41,7 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
                             console.error("Failed to clear scanner", e);
                         }
                     }
-                    onScan(decodedText);
+                    onScanRef.current(decodedText);
                 },
                 (_) => {
                     // Error callback (called very frequently on no match, so don't set to UI state unless critical)
@@ -46,9 +49,9 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
                 }
             );
             setIsScanning(true);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Scanner initialization failed", err);
-            setError(err.message || "Failed to access camera. Please check permissions.");
+            setError(err instanceof Error ? err.message : "Failed to access camera. Please check permissions.");
         }
 
         return () => {
@@ -60,7 +63,7 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
                 }
             }
         };
-    }, [onScan]);
+    }, []);
 
     const handleContainerClick = (e: React.MouseEvent) => {
         if (e.target === e.currentTarget) {
@@ -72,15 +75,19 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
         <div
             className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={handleContainerClick}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="barcode-scanner-title"
         >
             <div className="bg-[#12131A] border border-white/10 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col relative animate-scale-up">
 
                 {/* Header */}
                 <div className="px-4 py-3 border-b border-white/10 flex justify-between items-center bg-[#0A0B10]">
-                    <h3 className="text-white font-medium">Scan Barcode</h3>
+                    <h3 id="barcode-scanner-title" className="text-white font-medium">Scan Barcode</h3>
                     <button
                         onClick={onClose}
                         className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                        aria-label="Close barcode scanner"
                     >
                         <X className="w-5 h-5" />
                     </button>

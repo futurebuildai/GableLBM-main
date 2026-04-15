@@ -16,6 +16,7 @@ type Repository interface {
 	UpdateQuote(ctx context.Context, q *Quote) error
 	UpdateQuoteWithLines(ctx context.Context, q *Quote) error
 	ListQuotes(ctx context.Context) ([]Quote, error)
+	ListQuotesPaginated(ctx context.Context, limit, offset int) ([]Quote, int, error)
 	ListQuotesByCustomer(ctx context.Context, customerID uuid.UUID) ([]Quote, error)
 	GetQuoteAnalytics(ctx context.Context) (*QuoteAnalytics, error)
 	GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error)
@@ -40,13 +41,6 @@ func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 	q.CreatedAt = now
 	q.UpdatedAt = now
 
-	// Start transaction
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	// Set source default
 	if q.Source == "" {
 		q.Source = "manual"
@@ -55,54 +49,52 @@ func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 		q.DeliveryType = "PICKUP"
 	}
 
-	// Insert Header
-	queryHeader := `
-		INSERT INTO quotes (
-			id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at,
-			margin_total, source, original_file, original_filename, original_content_type, parse_map,
-			delivery_type, freight_amount, vehicle_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-	`
-	_, err = tx.Exec(ctx, queryHeader,
-		q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.CreatedAt, q.UpdatedAt,
-		q.MarginTotal, q.Source, q.OriginalFile, q.OriginalFilename, q.OriginalContentType, q.ParseMap,
-		q.DeliveryType, q.FreightAmount, q.VehicleID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert quote header: %w", err)
-	}
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		exec := r.db.GetExecutor(txCtx)
 
-	// Insert Lines
-	queryLine := `
-		INSERT INTO quote_lines (
-			id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`
-
-	for i := range q.Lines {
-		line := &q.Lines[i]
-		if line.ID == uuid.Nil {
-			line.ID = uuid.New()
-		}
-		line.QuoteID = q.ID
-		line.CreatedAt = now
-		// Recalculate line total just in case? Or rely on service.
-		// Service should ensure it's correct.
-
-		_, err = tx.Exec(ctx, queryLine,
-			line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
-			line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
+		// Insert Header
+		queryHeader := `
+			INSERT INTO quotes (
+				id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at,
+				margin_total, source, original_file, original_filename, original_content_type, parse_map,
+				delivery_type, freight_amount, vehicle_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		`
+		_, err := exec.Exec(txCtx, queryHeader,
+			q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.CreatedAt, q.UpdatedAt,
+			q.MarginTotal, q.Source, q.OriginalFile, q.OriginalFilename, q.OriginalContentType, q.ParseMap,
+			q.DeliveryType, q.FreightAmount, q.VehicleID,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert quote line: %w", err)
+			return fmt.Errorf("failed to insert quote header: %w", err)
 		}
-	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
+		// Insert Lines
+		queryLine := `
+			INSERT INTO quote_lines (
+				id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`
 
-	return nil
+		for i := range q.Lines {
+			line := &q.Lines[i]
+			if line.ID == uuid.Nil {
+				line.ID = uuid.New()
+			}
+			line.QuoteID = q.ID
+			line.CreatedAt = now
+
+			_, err = exec.Exec(txCtx, queryLine,
+				line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
+				line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert quote line: %w", err)
+			}
+		}
+
+		return nil
+	})
 }
 
 func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
@@ -119,7 +111,7 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
 		WHERE q.id = $1
 	`
-	err := r.db.Pool.QueryRow(ctx, queryHeader, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&q.ID, &q.CustomerID, &q.CustomerName, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
 		&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
 		&q.OriginalFilename, &q.OriginalContentType, &q.ParseMap,
@@ -141,7 +133,7 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		WHERE ql.quote_id = $1
 		ORDER BY ql.created_at ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, queryLines, id)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryLines, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote lines: %w", err)
 	}
@@ -170,7 +162,7 @@ func (r *PostgresRepository) UpdateQuote(ctx context.Context, q *Quote) error {
 			sent_at = $8, accepted_at = $9, rejected_at = $10
 		WHERE id = $1
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.UpdatedAt,
 		q.SentAt, q.AcceptedAt, q.RejectedAt,
 	)
@@ -184,58 +176,56 @@ func (r *PostgresRepository) UpdateQuote(ctx context.Context, q *Quote) error {
 func (r *PostgresRepository) UpdateQuoteWithLines(ctx context.Context, q *Quote) error {
 	q.UpdatedAt = time.Now()
 
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		exec := r.db.GetExecutor(txCtx)
 
-	// Update header
-	headerQuery := `
-		UPDATE quotes
-		SET customer_id = $2, job_id = $3, state = $4, total_amount = $5, expires_at = $6, updated_at = $7,
-			delivery_type = $8, freight_amount = $9, vehicle_id = $10
-		WHERE id = $1
-	`
-	_, err = tx.Exec(ctx, headerQuery,
-		q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.UpdatedAt,
-		q.DeliveryType, q.FreightAmount, q.VehicleID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update quote header: %w", err)
-	}
-
-	// Delete old lines
-	_, err = tx.Exec(ctx, "DELETE FROM quote_lines WHERE quote_id = $1", q.ID)
-	if err != nil {
-		return fmt.Errorf("failed to delete old lines: %w", err)
-	}
-
-	// Insert new lines
-	lineQuery := `
-		INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`
-	now := time.Now()
-	for i := range q.Lines {
-		line := &q.Lines[i]
-		if line.ID == uuid.Nil {
-			line.ID = uuid.New()
-		}
-		line.QuoteID = q.ID
-		if line.CreatedAt.IsZero() {
-			line.CreatedAt = now
-		}
-		_, err = tx.Exec(ctx, lineQuery,
-			line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
-			line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
+		// Update header
+		headerQuery := `
+			UPDATE quotes
+			SET customer_id = $2, job_id = $3, state = $4, total_amount = $5, expires_at = $6, updated_at = $7,
+				delivery_type = $8, freight_amount = $9, vehicle_id = $10
+			WHERE id = $1
+		`
+		_, err := exec.Exec(txCtx, headerQuery,
+			q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.UpdatedAt,
+			q.DeliveryType, q.FreightAmount, q.VehicleID,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert quote line: %w", err)
+			return fmt.Errorf("failed to update quote header: %w", err)
 		}
-	}
 
-	return tx.Commit(ctx)
+		// Delete old lines
+		_, err = exec.Exec(txCtx, "DELETE FROM quote_lines WHERE quote_id = $1", q.ID)
+		if err != nil {
+			return fmt.Errorf("failed to delete old lines: %w", err)
+		}
+
+		// Insert new lines
+		lineQuery := `
+			INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`
+		now := time.Now()
+		for i := range q.Lines {
+			line := &q.Lines[i]
+			if line.ID == uuid.Nil {
+				line.ID = uuid.New()
+			}
+			line.QuoteID = q.ID
+			if line.CreatedAt.IsZero() {
+				line.CreatedAt = now
+			}
+			_, err = exec.Exec(txCtx, lineQuery,
+				line.ID, line.QuoteID, line.ProductID, line.SKU, line.Description,
+				line.Quantity, line.UOM, line.UnitPrice, line.LineTotal, line.CreatedAt,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert quote line: %w", err)
+			}
+		}
+
+		return nil
+	})
 }
 
 func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
@@ -248,7 +238,7 @@ func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
 		ORDER BY q.created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -269,6 +259,45 @@ func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
 	return quotes, nil
 }
 
+func (r *PostgresRepository) ListQuotesPaginated(ctx context.Context, limit, offset int) ([]Quote, int, error) {
+	// Get total count
+	countQuery := `SELECT COUNT(*) FROM quotes`
+	var total int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count quotes: %w", err)
+	}
+
+	query := `
+		SELECT q.id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state, q.total_amount, q.expires_at, q.created_at, q.updated_at,
+			q.sent_at, q.accepted_at, q.rejected_at, COALESCE(q.margin_total, 0), COALESCE(q.source, 'manual'),
+			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, '')
+		FROM quotes q
+		LEFT JOIN customers c ON c.id = q.customer_id
+		LEFT JOIN vehicles v ON v.id = q.vehicle_id
+		ORDER BY q.created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list quotes: %w", err)
+	}
+	defer rows.Close()
+
+	var quotes []Quote
+	for rows.Next() {
+		var q Quote
+		if err := rows.Scan(
+			&q.ID, &q.CustomerID, &q.CustomerName, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
+			&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
+			&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan quote: %w", err)
+		}
+		quotes = append(quotes, q)
+	}
+	return quotes, total, nil
+}
+
 func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerID uuid.UUID) ([]Quote, error) {
 	query := `
 		SELECT id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at
@@ -276,7 +305,7 @@ func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerI
 		WHERE customer_id = $1
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -300,7 +329,7 @@ func (r *PostgresRepository) GetOriginalFile(ctx context.Context, id uuid.UUID) 
 	var data []byte
 	var filename, contentType string
 	query := `SELECT original_file, COALESCE(original_filename, ''), COALESCE(original_content_type, '') FROM quotes WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&data, &filename, &contentType)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(&data, &filename, &contentType)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to get original file: %w", err)
 	}
@@ -332,7 +361,7 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 		WHERE created_at >= NOW() - INTERVAL '90 days'
 	`
 	var aiAccepted, manualAccepted, manualCount int
-	err := r.db.Pool.QueryRow(ctx, countQuery).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(
 		&a.TotalQuotes, &a.DraftCount, &a.SentCount, &a.AcceptedCount, &a.RejectedCount, &a.ExpiredCount,
 		&a.TotalQuoteValue, &a.TotalAcceptedValue,
 		&a.AvgMarginAccepted, &a.AvgMarginRejected,
@@ -361,7 +390,7 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 		WHERE state = 'ACCEPTED' AND accepted_at IS NOT NULL
 		AND created_at >= NOW() - INTERVAL '90 days'
 	`
-	err = r.db.Pool.QueryRow(ctx, daysQuery).Scan(&a.AvgDaysToClose)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, daysQuery).Scan(&a.AvgDaysToClose)
 	if err != nil {
 		a.AvgDaysToClose = 0
 	}
@@ -384,7 +413,7 @@ func (r *PostgresRepository) GetQuoteAnalytics(ctx context.Context) (*QuoteAnaly
 		GROUP BY d::date
 		ORDER BY d::date
 	`
-	rows, err := r.db.Pool.Query(ctx, trendQuery)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, trendQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trend data: %w", err)
 	}

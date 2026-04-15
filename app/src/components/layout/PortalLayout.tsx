@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Bell, Users, FolderGit2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { clearToken } from '../../services/PortalService';
@@ -9,6 +9,7 @@ import { BrandLogo } from '../ui/BrandLogo';
 export const PortalLayout = () => {
     const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
     const location = useLocation();
+    const navigate = useNavigate();
 
 
     // Lazy-init from localStorage (avoids setState-in-effect lint rule)
@@ -26,14 +27,17 @@ export const PortalLayout = () => {
     });
 
     useEffect(() => {
-        // TODO: Replace with real auth — redirect to login if no portal_user
+        const stored = localStorage.getItem('portal_user');
+        if (!stored) {
+            navigate('/portal/login', { replace: true });
+        }
     }, []);
 
-    const handleLogout = () => {
-        clearToken();
+    const handleLogout = async () => {
+        await clearToken();
         localStorage.removeItem('portal_config');
         localStorage.removeItem('portal_user');
-        window.location.href = '/';
+        navigate('/');
     };
 
     const primaryColor = config?.primary_color || '#00FFA3';
@@ -88,7 +92,7 @@ export const PortalLayout = () => {
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 py-6 px-3 space-y-1">
+                <nav aria-label="Portal navigation" className="flex-1 py-6 px-3 space-y-1">
                     {navItems.map((item) => {
                         const isActive = location.pathname === item.path;
                         return (
@@ -131,6 +135,7 @@ export const PortalLayout = () => {
                 <div className="p-4 border-t border-white/5 bg-white/5">
                     <button
                         onClick={() => setSidebarOpen(!sidebarOpen)}
+                        aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
                         className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-white transition-colors"
                     >
                         {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
@@ -156,6 +161,7 @@ export const PortalLayout = () => {
                         {sidebarOpen && (
                             <button
                                 onClick={handleLogout}
+                                aria-label="Sign out"
                                 className="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-red-400 transition-colors"
                                 title="Sign Out"
                             >
@@ -179,6 +185,7 @@ export const PortalLayout = () => {
                     <div className="flex items-center gap-4">
                         {/* Mobile hamburger */}
                         <button
+                            aria-label="Toggle navigation menu"
                             className="md:hidden p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
                             onClick={() => setSidebarOpen(!sidebarOpen)}
                         >
@@ -196,7 +203,7 @@ export const PortalLayout = () => {
                                 Support: {config.support_email}
                             </span>
                         )}
-                        <button className="relative p-2 text-zinc-400 hover:text-white transition-colors rounded-full hover:bg-white/5">
+                        <button aria-label="Notifications" className="relative p-2 text-zinc-400 hover:text-white transition-colors rounded-full hover:bg-white/5">
                             <Bell size={20} />
                         </button>
                     </div>

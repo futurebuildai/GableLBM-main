@@ -21,7 +21,7 @@ func (r *Repository) CreateOption(ctx context.Context, opt *MillworkOption) erro
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING created_at, updated_at
 	`
-	return r.db.Pool.QueryRow(ctx, query,
+	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		opt.ID,
 		opt.Category,
 		opt.Name,
@@ -37,7 +37,7 @@ func (r *Repository) GetOptionsByCategory(ctx context.Context, category string) 
 		WHERE category = $1
 		ORDER BY name ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, category)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, category)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query options: %w", err)
 	}

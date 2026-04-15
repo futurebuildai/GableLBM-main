@@ -72,7 +72,7 @@ func (r *PostgresCategoryRepository) ListCategories(ctx context.Context) ([]Prod
 		WHERE is_active = true
 		ORDER BY path ASC, sort_order ASC`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list categories: %w", err)
 	}
@@ -96,7 +96,7 @@ func (r *PostgresCategoryRepository) GetCategory(ctx context.Context, id uuid.UU
 		WHERE id = $1`
 
 	var c ProductCategory
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&c.ID, &c.Name, &c.Slug, &c.Path, &c.ParentID, &c.SortOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -120,7 +120,7 @@ func (r *PostgresCategoryRepository) CreateCategory(ctx context.Context, c *Prod
 		INSERT INTO product_categories (id, name, slug, path, parent_id, sort_order, is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4::ltree, $5, $6, $7, $8, $9)`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.Name, c.Slug, c.Path, c.ParentID, c.SortOrder, c.IsActive, c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
@@ -137,7 +137,7 @@ func (r *PostgresCategoryRepository) UpdateCategory(ctx context.Context, c *Prod
 		SET name = $2, slug = $3, sort_order = $4, is_active = $5, updated_at = $6
 		WHERE id = $1`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.Name, c.Slug, c.SortOrder, c.IsActive, c.UpdatedAt,
 	)
 	if err != nil {
@@ -162,7 +162,7 @@ func (r *PostgresCategoryRepository) CreateCategoryRule(ctx context.Context, rul
 			 margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		rule.ID, rule.TargetType, rule.CustomerID, nilIfEmpty(rule.Tier), rule.CategoryID,
 		rule.RuleType, rule.RuleValue, rule.MarginFloorPct,
 		rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority,
@@ -187,7 +187,7 @@ func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rul
 		    starts_at = $5, expires_at = $6, is_active = $7, priority = $8, updated_at = $9
 		WHERE id = $1`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		rule.ID, rule.RuleType, rule.RuleValue, rule.MarginFloorPct,
 		rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority, rule.UpdatedAt,
 	)
@@ -199,7 +199,7 @@ func (r *PostgresCategoryRepository) UpdateCategoryRule(ctx context.Context, rul
 
 func (r *PostgresCategoryRepository) DeleteCategoryRule(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM category_pricing_rules WHERE id = $1`
-	_, err := r.db.Pool.Exec(ctx, query, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete category rule: %w", err)
 	}
@@ -219,7 +219,7 @@ func (r *PostgresCategoryRepository) GetCategoryRule(ctx context.Context, id uui
 
 	var rule CategoryPricingRule
 	var tier *string
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&rule.ID, &rule.TargetType, &rule.CustomerID, &tier, &rule.CategoryID,
 		&rule.RuleType, &rule.RuleValue, &rule.MarginFloorPct,
 		&rule.StartsAt, &rule.ExpiresAt, &rule.IsActive, &rule.Priority,
@@ -280,7 +280,7 @@ func (r *PostgresCategoryRepository) ListCategoryRules(ctx context.Context, filt
 
 	query += " ORDER BY cpr.target_type ASC, cpr.tier ASC, pc.path ASC, cpr.priority DESC"
 
-	rows, err := r.db.Pool.Query(ctx, query, args...)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list category rules: %w", err)
 	}
@@ -392,7 +392,7 @@ func (r *PostgresCategoryRepository) GetMatrixRules(ctx context.Context) ([]Cate
 		  AND (cpr.expires_at IS NULL OR cpr.expires_at > NOW())
 		ORDER BY pc.path ASC, cpr.tier ASC`
 
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get matrix rules: %w", err)
 	}
@@ -413,7 +413,7 @@ func (r *PostgresCategoryRepository) GetProductCategoryPath(ctx context.Context,
 	var categoryID uuid.UUID
 	var path string
 	var costPrice float64
-	err := r.db.Pool.QueryRow(ctx, query, productID).Scan(&categoryID, &path, &costPrice)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID).Scan(&categoryID, &path, &costPrice)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return uuid.Nil, "", 0, fmt.Errorf("product %s has no category", productID)
@@ -428,7 +428,7 @@ func (r *PostgresCategoryRepository) GetProductCategoryPath(ctx context.Context,
 func (r *PostgresCategoryRepository) scanSingleRule(ctx context.Context, query string, args ...any) (*CategoryPricingRule, error) {
 	var rule CategoryPricingRule
 	var tier *string
-	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, args...).Scan(
 		&rule.ID, &rule.TargetType, &rule.CustomerID, &tier, &rule.CategoryID,
 		&rule.RuleType, &rule.RuleValue, &rule.MarginFloorPct,
 		&rule.StartsAt, &rule.ExpiresAt, &rule.IsActive, &rule.Priority,
@@ -496,7 +496,7 @@ func (r *PostgresCategoryRepository) CreateAuditEntry(ctx context.Context, entry
 			 category_id, target_type, tier, customer_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		entry.ID, entry.RuleID, entry.Action,
 		oldJSON, newJSON,
 		entry.PerformedBy, entry.PerformedAt,
@@ -517,7 +517,7 @@ func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleI
 		ORDER BY performed_at DESC
 		LIMIT 50`
 
-	rows, err := r.db.Pool.Query(ctx, query, ruleID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, ruleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audit entries: %w", err)
 	}
@@ -604,7 +604,7 @@ func (r *PostgresCategoryRepository) BulkUpsertRules(ctx context.Context, rules 
 
 func (r *PostgresCategoryRepository) BulkDeleteRules(ctx context.Context, ids []uuid.UUID) error {
 	query := `DELETE FROM category_pricing_rules WHERE id = ANY($1)`
-	_, err := r.db.Pool.Exec(ctx, query, ids)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, ids)
 	if err != nil {
 		return fmt.Errorf("bulk delete rules: %w", err)
 	}
@@ -647,7 +647,7 @@ func (r *PostgresCategoryRepository) ListCategoryRulesPaginated(ctx context.Cont
 	// Count query
 	countQuery := `SELECT COUNT(*) FROM category_pricing_rules cpr` + baseWhere
 	var total int
-	if err := r.db.Pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count category rules: %w", err)
 	}
 
@@ -665,7 +665,7 @@ func (r *PostgresCategoryRepository) ListCategoryRulesPaginated(ctx context.Cont
 		fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 
 	dataArgs := append(args, limit, offset)
-	rows, err := r.db.Pool.Query(ctx, dataQuery, dataArgs...)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, dataQuery, dataArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list paginated category rules: %w", err)
 	}

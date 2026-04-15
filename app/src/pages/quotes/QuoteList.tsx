@@ -39,6 +39,7 @@ export default function QuoteList() {
     const { showToast } = useToast();
     const [quotes, setQuotes] = useState<Quote[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [converting, setConverting] = useState<string | null>(null);
     const [updatingState, setUpdatingState] = useState<string | null>(null);
 
@@ -48,10 +49,12 @@ export default function QuoteList() {
 
     async function loadQuotes() {
         try {
+            setError(null);
             const data = await QuoteService.listQuotes();
             setQuotes(data || []);
-        } catch (error) {
-            console.error('Failed to load quotes:', error);
+        } catch (err) {
+            console.error('Failed to load quotes:', err);
+            setError(err instanceof Error ? err.message : 'Failed to load quotes');
         } finally {
             setLoading(false);
         }
@@ -92,6 +95,24 @@ export default function QuoteList() {
         EXPIRED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     };
 
+    if (error) {
+        return (
+            <div className="space-y-6">
+                <QuoteViewTabs active="list" />
+                <div className="flex flex-col items-center justify-center min-h-[400px] p-8">
+                    <p className="text-rose-400 text-lg font-semibold mb-2">Failed to load</p>
+                    <p className="text-gray-400 text-sm mb-4">{error}</p>
+                    <button
+                        onClick={() => { setError(null); loadQuotes(); }}
+                        className="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <QuoteViewTabs active="list" />
@@ -112,7 +133,7 @@ export default function QuoteList() {
             </div>
 
             <div className="bg-slate-steel border border-white/10 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm" aria-label="Quotes list">
                     <thead>
                         <tr className="border-b border-white/10 bg-white/5">
                             <th className="p-4 font-medium text-muted-foreground">Quote ID</th>
@@ -176,24 +197,24 @@ export default function QuoteList() {
                                             <div className="flex items-center justify-end gap-1.5">
                                                 {quote.state === 'DRAFT' && (
                                                     <button onClick={() => navigate(`/quotes/${quote.id}/edit`)} disabled={isBusy}
-                                                        className="text-amber-400 hover:text-amber-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Edit Draft">
+                                                        className="text-amber-400 hover:text-amber-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Edit Draft" aria-label="Edit draft">
                                                         <Pencil size={14} />
                                                     </button>
                                                 )}
                                                 {quote.state === 'DRAFT' && (
                                                     <button onClick={() => handleStateChange(quote.id, 'SENT')} disabled={isBusy}
-                                                        className="text-blue-400 hover:text-blue-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Mark Sent">
+                                                        className="text-blue-400 hover:text-blue-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Mark Sent" aria-label="Mark sent">
                                                         <Send size={14} />
                                                     </button>
                                                 )}
                                                 {(quote.state === 'DRAFT' || quote.state === 'SENT') && (
                                                     <>
                                                         <button onClick={() => handleStateChange(quote.id, 'ACCEPTED')} disabled={isBusy}
-                                                            className="text-emerald-400 hover:text-emerald-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Accept">
+                                                            className="text-emerald-400 hover:text-emerald-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Accept" aria-label="Accept quote">
                                                             <Check size={14} />
                                                         </button>
                                                         <button onClick={() => handleStateChange(quote.id, 'REJECTED')} disabled={isBusy}
-                                                            className="text-red-400 hover:text-red-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Reject">
+                                                            className="text-red-400 hover:text-red-300 transition-colors p-1 rounded hover:bg-white/5 disabled:opacity-50" title="Reject" aria-label="Reject quote">
                                                             <X size={14} />
                                                         </button>
                                                     </>
@@ -201,12 +222,12 @@ export default function QuoteList() {
                                                 {(quote.state === 'DRAFT' || quote.state === 'SENT' || quote.state === 'ACCEPTED') && (
                                                     <button onClick={() => handleConvert(quote.id)} disabled={isBusy}
                                                         className="text-gable-green hover:text-gable-green/80 transition-colors flex items-center gap-1 text-xs font-medium disabled:opacity-50 p-1 rounded hover:bg-white/5"
-                                                        title="Convert to Order">
+                                                        title="Convert to Order" aria-label="Convert to order">
                                                         <ShoppingCart size={14} />
                                                     </button>
                                                 )}
                                                 <button onClick={() => navigate(`/quotes/${quote.id}`)}
-                                                    className="text-white/50 hover:text-white transition-colors p-1 rounded hover:bg-white/5">
+                                                    className="text-white/50 hover:text-white transition-colors p-1 rounded hover:bg-white/5" aria-label="View quote details">
                                                     <ArrowRight size={14} />
                                                 </button>
                                             </div>

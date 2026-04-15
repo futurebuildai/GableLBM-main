@@ -19,6 +19,16 @@ const (
 	ActivityNote    ActivityType = "NOTE"
 )
 
+// ValidActivityType returns true if the given ActivityType is one of the known values.
+func ValidActivityType(t ActivityType) bool {
+	switch t {
+	case ActivityCall, ActivityMeeting, ActivityEmail, ActivityNote:
+		return true
+	default:
+		return false
+	}
+}
+
 type Activity struct {
 	ID           uuid.UUID    `json:"id"`
 	CustomerID   uuid.UUID    `json:"customer_id"`
@@ -56,7 +66,7 @@ func (r *Repository) Create(ctx context.Context, a *Activity) error {
 		INSERT INTO crm_activities (id, customer_id, contact_id, activity_type, description, logged_by, activity_date, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		a.ID, a.CustomerID, a.ContactID, a.ActivityType, a.Description, a.LoggedBy, a.ActivityDate, a.CreatedAt, a.UpdatedAt,
 	)
 	if err != nil {
@@ -71,7 +81,7 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 		FROM crm_activities WHERE id = $1
 	`
 	var a Activity
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&a.ID, &a.CustomerID, &a.ContactID, &a.ActivityType, &a.Description, &a.LoggedBy, &a.ActivityDate, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
@@ -90,7 +100,7 @@ func (r *Repository) ListByCustomer(ctx context.Context, customerID uuid.UUID) (
 		WHERE customer_id = $1
 		ORDER BY activity_date DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list activities: %w", err)
 	}
@@ -116,7 +126,7 @@ func (r *Repository) Update(ctx context.Context, a *Activity) error {
 		SET contact_id = $1, activity_type = $2, description = $3, logged_by = $4, activity_date = $5, updated_at = $6
 		WHERE id = $7
 	`
-	tag, err := r.db.Pool.Exec(ctx, query,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		a.ContactID, a.ActivityType, a.Description, a.LoggedBy, a.ActivityDate, a.UpdatedAt, a.ID,
 	)
 	if err != nil {
@@ -129,7 +139,7 @@ func (r *Repository) Update(ctx context.Context, a *Activity) error {
 }
 
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.db.Pool.Exec(ctx, `DELETE FROM crm_activities WHERE id = $1`, id)
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `DELETE FROM crm_activities WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete activity: %w", err)
 	}

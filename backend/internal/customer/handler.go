@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
 
@@ -15,32 +17,41 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /customers", h.HandleListCustomers)
-	mux.HandleFunc("GET /customers/{id}", h.HandleGetCustomer)
-	mux.HandleFunc("POST /customers", h.HandleCreateCustomer)
-	mux.HandleFunc("PATCH /customers/{id}/salesperson", h.HandleUpdateSalesperson)
-	mux.HandleFunc("GET /price_levels", h.HandleListPriceLevels)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /customers", guard(h.HandleListCustomers))
+	mux.HandleFunc("GET /customers/{id}", guard(h.HandleGetCustomer))
+	mux.HandleFunc("POST /customers", guard(h.HandleCreateCustomer))
+	mux.HandleFunc("PATCH /customers/{id}/salesperson", guard(h.HandleUpdateSalesperson))
+	mux.HandleFunc("GET /price_levels", guard(h.HandleListPriceLevels))
 
 	// Contact routes
-	mux.HandleFunc("GET /customers/{customerId}/contacts", h.HandleListContacts)
-	mux.HandleFunc("POST /customers/{customerId}/contacts", h.HandleCreateContact)
-	mux.HandleFunc("GET /contacts/{id}", h.HandleGetContact)
-	mux.HandleFunc("PUT /contacts/{id}", h.HandleUpdateContact)
-	mux.HandleFunc("DELETE /contacts/{id}", h.HandleDeleteContact)
+	mux.HandleFunc("GET /customers/{customerId}/contacts", guard(h.HandleListContacts))
+	mux.HandleFunc("POST /customers/{customerId}/contacts", guard(h.HandleCreateContact))
+	mux.HandleFunc("GET /contacts/{id}", guard(h.HandleGetContact))
+	mux.HandleFunc("PUT /contacts/{id}", guard(h.HandleUpdateContact))
+	mux.HandleFunc("DELETE /contacts/{id}", guard(h.HandleDeleteContact))
 }
 
 func (h *Handler) HandleGetCustomer(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	c, err := h.service.GetCustomer(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Customer not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Customer not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -51,12 +62,12 @@ func (h *Handler) HandleGetCustomer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateCustomer(w http.ResponseWriter, r *http.Request) {
 	var c Customer
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.CreateCustomer(r.Context(), &c); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create customer", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -65,21 +76,31 @@ func (h *Handler) HandleCreateCustomer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleListCustomers(w http.ResponseWriter, r *http.Request) {
-	// Simple list for now, no query params
-	customers, err := h.service.ListCustomers(r.Context())
+	page := pagination.FromRequest(r)
+	customers, total, err := h.service.ListCustomersPaginated(r.Context(), page.Limit, page.Offset)
 	if err != nil {
-		http.Error(w, "Failed to fetch customers", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch customers", http.StatusInternalServerError, err)
 		return
 	}
 
+	resp := pagination.PagedResponse[Customer]{
+		Data:   customers,
+		Total:  total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	}
+	if resp.Data == nil {
+		resp.Data = []Customer{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(customers)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) HandleListPriceLevels(w http.ResponseWriter, r *http.Request) {
 	levels, err := h.service.ListPriceLevels(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to fetch price levels", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch price levels", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -90,7 +111,7 @@ func (h *Handler) HandleListPriceLevels(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) HandleUpdateSalesperson(w http.ResponseWriter, r *http.Request) {
 	customerID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
@@ -98,19 +119,19 @@ func (h *Handler) HandleUpdateSalesperson(w http.ResponseWriter, r *http.Request
 		SalespersonID *uuid.UUID `json:"salesperson_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.UpdateSalesperson(r.Context(), customerID, body.SalespersonID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update salesperson", http.StatusInternalServerError, err)
 		return
 	}
 
 	// Return updated customer
 	c, err := h.service.GetCustomer(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get updated customer", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -123,13 +144,13 @@ func (h *Handler) HandleUpdateSalesperson(w http.ResponseWriter, r *http.Request
 func (h *Handler) HandleListContacts(w http.ResponseWriter, r *http.Request) {
 	customerID, err := uuid.Parse(r.PathValue("customerId"))
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	contacts, err := h.service.ListContactsByCustomer(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, "Failed to fetch contacts", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch contacts", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -140,19 +161,19 @@ func (h *Handler) HandleListContacts(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateContact(w http.ResponseWriter, r *http.Request) {
 	customerID, err := uuid.Parse(r.PathValue("customerId"))
 	if err != nil {
-		http.Error(w, "Invalid customer ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var c Contact
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	c.CustomerID = customerID
 
 	if err := h.service.CreateContact(r.Context(), &c); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create contact", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -163,13 +184,13 @@ func (h *Handler) HandleCreateContact(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleGetContact(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid contact ID", http.StatusBadRequest, err)
 		return
 	}
 
 	c, err := h.service.GetContact(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Contact not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Contact not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -180,19 +201,19 @@ func (h *Handler) HandleGetContact(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUpdateContact(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid contact ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var c Contact
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 	c.ID = id
 
 	if err := h.service.UpdateContact(r.Context(), &c); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update contact", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -203,12 +224,12 @@ func (h *Handler) HandleUpdateContact(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid contact ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.DeleteContact(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to delete contact", http.StatusInternalServerError, err)
 		return
 	}
 

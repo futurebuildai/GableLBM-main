@@ -4,6 +4,7 @@ import type { AvailableOption, ValidateConfigResponse, BuildSKUResponse } from '
 import { ConfiguratorService } from '../../services/ConfiguratorService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, ChevronLeft, Check, AlertTriangle, Package, TreePine, Gauge, Ruler, Eye, Sparkles, X } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 const STEP_ICONS = [Package, TreePine, Gauge, Ruler, Eye];
 
@@ -15,6 +16,7 @@ const DIMENSION_OPTIONS = [
 const LENGTH_OPTIONS = ['8', '10', '12', '14', '16', '20'];
 
 export const ProductConfigurator = () => {
+    const { showToast } = useToast();
     const [currentStep, setCurrentStep] = useState(0);
     const [selections, setSelections] = useState<Record<string, string>>({
         ProductType: '',
@@ -78,9 +80,11 @@ export const ProductConfigurator = () => {
         if (currentStep === 4) {
             ConfiguratorService.validateConfig(selections)
                 .then(setValidation)
-                .catch(console.error);
+                .catch(() => {
+                    showToast('Failed to validate configuration', 'error');
+                });
         }
-    }, [currentStep, selections]);
+    }, [currentStep, selections, showToast]);
 
     const selectOption = (key: string, value: string) => {
         setSelections(prev => ({ ...prev, [key]: value }));

@@ -4,6 +4,7 @@ import type {
     TaxExemption,
     CreateExemptionRequest,
 } from '../types/tax';
+import { fetchWithAuth } from './fetchClient';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -12,7 +13,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
  * Does not commit the tax document — use for real-time UI display.
  */
 export async function previewTax(request: TaxPreviewRequest): Promise<TaxResult> {
-    const res = await fetch(`${API_BASE}/api/tax/preview`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tax/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
@@ -28,7 +29,7 @@ export async function previewTax(request: TaxPreviewRequest): Promise<TaxResult>
  * Get all tax exemptions for a customer.
  */
 export async function getExemptions(customerID: string): Promise<TaxExemption[]> {
-    const res = await fetch(`${API_BASE}/api/tax/exemptions/${customerID}`);
+    const res = await fetchWithAuth(`${API_BASE}/api/tax/exemptions/${customerID}`);
     if (!res.ok) {
         throw new Error('Failed to fetch tax exemptions');
     }
@@ -39,7 +40,7 @@ export async function getExemptions(customerID: string): Promise<TaxExemption[]>
  * Create a new tax exemption certificate.
  */
 export async function createExemption(data: CreateExemptionRequest): Promise<TaxExemption> {
-    const res = await fetch(`${API_BASE}/api/tax/exemptions`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tax/exemptions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -55,7 +56,7 @@ export async function createExemption(data: CreateExemptionRequest): Promise<Tax
  * Delete a tax exemption certificate.
  */
 export async function deleteExemption(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/api/tax/exemptions/${id}`, {
+    const res = await fetchWithAuth(`${API_BASE}/api/tax/exemptions/${id}`, {
         method: 'DELETE',
     });
     if (!res.ok) {

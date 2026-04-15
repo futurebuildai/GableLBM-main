@@ -3,15 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, Target, Clock, Sparkles, BarChart3, Percent } from 'lucide-react';
 import { QuoteService } from '../../services/QuoteService';
 import type { QuoteAnalytics as QuoteAnalyticsType } from '../../types/quote';
+import { useToast } from '../../components/ui/ToastContext';
 
 export default function QuoteAnalytics() {
     const navigate = useNavigate();
+    const { showToast } = useToast();
     const [analytics, setAnalytics] = useState<QuoteAnalyticsType | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         loadAnalytics();
-    }, []);
+    }, [showToast]);
 
     async function loadAnalytics() {
         try {
@@ -19,6 +21,7 @@ export default function QuoteAnalytics() {
             setAnalytics(data);
         } catch (error) {
             console.error('Failed to load analytics:', error);
+            showToast('Failed to load quote analytics', 'error');
         } finally {
             setLoading(false);
         }

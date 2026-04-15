@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import type { MatchResult, MatchException, MatchConfig } from '../../types/matching';
 import { runMatch, listExceptions, getMatchConfig, updateMatchConfig, getMatchResult } from '../../services/MatchingService';
+import { useToast } from '../../components/ui/ToastContext';
 
 const POMatching: React.FC = () => {
+    const { showToast } = useToast();
     const [exceptions, setExceptions] = useState<MatchException[]>([]);
     const [config, setConfig] = useState<MatchConfig | null>(null);
     const [selectedResult, setSelectedResult] = useState<MatchResult | null>(null);
@@ -22,6 +24,7 @@ const POMatching: React.FC = () => {
             setConfig(cfg);
         } catch (err) {
             console.error('Failed to load matching data:', err);
+            showToast('Failed to load PO matching data', 'error');
         } finally {
             setLoading(false);
         }
@@ -46,6 +49,7 @@ const POMatching: React.FC = () => {
             setSelectedResult(result);
         } catch (err) {
             console.error('Failed to load result:', err);
+            showToast('Failed to load match result', 'error');
         }
     };
 
@@ -175,7 +179,7 @@ const POMatching: React.FC = () => {
                                 type="number"
                                 step="1"
                                 value={(config.dollar_tolerance / 100).toFixed(2)}
-                                onChange={e => handleUpdateConfig('dollar_tolerance', parseFloat(e.target.value))}
+                                onChange={e => handleUpdateConfig('dollar_tolerance', Math.round(parseFloat(e.target.value) * 100))}
                                 style={{
                                     width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #475569',
                                     background: '#0f172a', color: '#e2e8f0', fontSize: 14,

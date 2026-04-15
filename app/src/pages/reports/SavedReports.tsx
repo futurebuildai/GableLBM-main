@@ -1,37 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { reportingApi } from '../../services/reportingApi';
 import type { SavedReport } from '../../services/reportingApi';
 import { Link } from 'react-router-dom';
+import { useToast } from '../../components/ui/ToastContext';
 
 export default function SavedReports() {
+    const { showToast } = useToast();
     const [reports, setReports] = useState<SavedReport[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadReports();
-    }, []);
-
-    const loadReports = async () => {
+    const loadReports = useCallback(async () => {
         try {
             setLoading(true);
             const data = await reportingApi.listSavedReports();
             setReports(data || []);
             setError(null);
-        } catch (err: any) {
-            setError(err.message || 'Failed to load saved reports');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to load saved reports');
         } finally {
             setLoading(false);
         }
-    };
+    }, [showToast]);
+
+    useEffect(() => {
+        loadReports();
+    }, [loadReports]);
 
     const handleDelete = async (id: string) => {
         if (!window.confirm('Are you sure you want to delete this report?')) return;
         try {
             await reportingApi.deleteSavedReport(id);
             loadReports();
-        } catch (err: any) {
-            alert('Failed to delete report: ' + err.message);
+        } catch (err: unknown) {
+            showToast('Failed to delete report: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
         }
     };
 
@@ -63,7 +65,7 @@ export default function SavedReports() {
                     </Link>
                 </div>
             ) : (
-                <div className="bg-white shadow rounded overlow-hidden">
+                <div className="bg-white shadow rounded overflow-hidden">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
@@ -82,7 +84,7 @@ export default function SavedReports() {
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <button
                                             className="text-indigo-600 hover:text-indigo-900 mr-4"
-                                            onClick={() => alert('Run functionality coming soon')}
+                                            onClick={() => showToast('Run functionality coming soon', 'info')}
                                         >
                                             Run
                                         </button>

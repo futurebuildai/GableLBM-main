@@ -1,4 +1,5 @@
 import type { BlueprintScanResponse } from '../types/configurator';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -7,7 +8,7 @@ export const VisionService = {
         blueprintText: string,
         configSelections: Record<string, string>
     ): Promise<BlueprintScanResponse> {
-        const response = await fetch(`${API_URL}/api/vision/scan`, {
+        const response = await fetchWithAuth(`${API_URL}/api/vision/scan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

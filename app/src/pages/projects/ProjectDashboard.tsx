@@ -80,7 +80,7 @@ export const ProjectDashboard = () => {
     const totalOrdersAmount = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
     const totalInvoicesAmount = invoices.reduce((sum, i) => sum + (i.total_amount || 0), 0);
 
-    const ItemRow = ({ item, icon: Icon, colorClass, linkPrefix }: { item: ProjectItem, icon: any, colorClass: string, linkPrefix: string }) => (
+    const ItemRow = ({ item, icon: Icon, colorClass, linkPrefix }: { item: ProjectItem, icon: React.ComponentType<{ size?: number; className?: string }>, colorClass: string, linkPrefix: string }) => (
         <div
             onClick={() => navigate(`/portal/${linkPrefix}/${item.id}`)}
             className="p-4 flex items-center justify-between hover:bg-white/5 border-b border-white/5 last:border-0 cursor-pointer transition-colors"

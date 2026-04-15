@@ -13,6 +13,7 @@ import { BrandLogo } from '../ui/BrandLogo';
 export function AppShell({ children }: { children: React.ReactNode }) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [isOffline, setIsOffline] = useState(!navigator.onLine);
     const location = useLocation();
 
     useEffect(() => {
@@ -27,8 +28,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    useEffect(() => {
+        const handleOnline = () => setIsOffline(false);
+        const handleOffline = () => setIsOffline(true);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
     return (
         <div className="min-h-screen bg-deep-space text-foreground flex overflow-hidden font-sans selection:bg-gable-green/30">
+            {/* Skip Navigation */}
+            <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:bg-[#00FFA3] focus:text-[#0A0B10] focus:rounded">
+                Skip to main content
+            </a>
+
             {/* Sidebar */}
             <motion.aside
                 initial={false}
@@ -52,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 p-3 space-y-1 overflow-y-auto no-scrollbar">
+                <nav aria-label="Main navigation" className="flex-1 p-3 space-y-1 overflow-y-auto no-scrollbar">
                     <div className="mb-6">
                         <NavItem to="/" icon={<LayoutDashboard size={20} />} label="Dashboard" isOpen={sidebarOpen} active={location.pathname === '/'} />
                         <NavItem to="/inventory" icon={<Package size={20} />} label="Inventory" isOpen={sidebarOpen} active={location.pathname.startsWith('/inventory')} />
@@ -91,6 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {/* Collapse Toggle */}
                 <button
                     onClick={() => setSidebarOpen(!sidebarOpen)}
+                    aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
                     className="absolute -right-3 top-20 bg-slate-steel border border-white/10 rounded-full p-1 text-zinc-400 hover:text-white shadow-elevation-1 hover:shadow-glow transition-all duration-200 z-50 text-xs flex items-center justify-center w-6 h-6"
                 >
                     {sidebarOpen ? <ChevronLeft size={12} /> : <ChevronRight size={12} />}
@@ -105,9 +123,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
                 {/* Header */}
                 <header className="h-16 border-b border-white/5 bg-deep-space/80 backdrop-blur-xl px-6 flex items-center justify-between sticky top-0 z-40 shadow-sm">
-                    {/* Search Trigger */}
+                    {/* Mobile Menu Toggle */}
                     <button
-                        onClick={() => setSidebarOpen(!sidebarOpen)} // Mobile toggle only? 
+                        onClick={() => setSidebarOpen(!sidebarOpen)}
+                        aria-label="Toggle navigation menu"
                         className="lg:hidden p-2 mr-4 hover:bg-white/5 rounded-md text-muted-foreground"
                     >
                         <Menu size={20} />
@@ -119,6 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             <input
                                 type="text"
                                 placeholder="Search everything... (Cmd+K)"
+                                aria-label="Search everything"
                                 className="w-full bg-slate-steel/50 border border-white/5 rounded-full py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
                             />
                         </div>
@@ -134,8 +154,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </div>
                 </header>
 
+                {/* Offline Banner */}
+                {isOffline && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm px-4 py-2 text-center">
+                        You are offline. Some features may not be available.
+                    </div>
+                )}
+
                 {/* Page Content with Transition */}
-                <div className="p-6 md:p-8 max-w-[1600px] w-full">
+                <div id="main-content" className="p-6 md:p-8 max-w-[1600px] w-full">
                     <PageTransition key={location.pathname}>
                         {children}
                     </PageTransition>

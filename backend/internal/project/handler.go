@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
@@ -43,7 +44,7 @@ func (h *Handler) HandleListProjects(w http.ResponseWriter, r *http.Request) {
 	customerID := getCustomerID(r)
 	projects, err := h.svc.ListProjects(r.Context(), customerID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list projects", http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, projects)
@@ -54,13 +55,13 @@ func (h *Handler) HandleGetProject(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	projectID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid project id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid project id", http.StatusBadRequest, err)
 		return
 	}
 
 	dashboard, err := h.svc.GetProjectDashboard(r.Context(), projectID, customerID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "failed to get project dashboard", http.StatusNotFound, err)
 		return
 	}
 	writeJSON(w, dashboard)
@@ -72,13 +73,13 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 
 	var req CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	p, err := h.svc.CreateProject(r.Context(), customerID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create project", http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -91,19 +92,19 @@ func (h *Handler) HandleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	projectID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid project id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid project id", http.StatusBadRequest, err)
 		return
 	}
 
 	var req UpdateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	p, err := h.svc.UpdateProject(r.Context(), projectID, customerID, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update project", http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, p)

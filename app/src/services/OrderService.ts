@@ -1,10 +1,11 @@
 import type { Order, CreateOrderRequest } from '../types/order';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const OrderService = {
     async createOrder(request: CreateOrderRequest): Promise<Order> {
-        const response = await fetch(`${API_URL}/orders`, {
+        const response = await fetchWithAuth(`${API_URL}/orders`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -21,7 +22,7 @@ export const OrderService = {
     },
 
     async listOrders(): Promise<Order[]> {
-        const response = await fetch(`${API_URL}/orders`);
+        const response = await fetchWithAuth(`${API_URL}/orders`);
         if (!response.ok) {
             throw new Error('Failed to fetch orders');
         }
@@ -29,7 +30,7 @@ export const OrderService = {
     },
 
     async getOrder(id: string): Promise<Order> {
-        const response = await fetch(`${API_URL}/orders/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/orders/${id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch order');
         }
@@ -37,7 +38,7 @@ export const OrderService = {
     },
 
     async confirmOrder(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/orders/${id}/confirm`, {
+        const response = await fetchWithAuth(`${API_URL}/orders/${id}/confirm`, {
             method: 'POST',
         });
 
@@ -48,7 +49,7 @@ export const OrderService = {
     },
 
     async fulfillOrder(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/orders/${id}/fulfill`, {
+        const response = await fetchWithAuth(`${API_URL}/orders/${id}/fulfill`, {
             method: 'POST',
         });
 

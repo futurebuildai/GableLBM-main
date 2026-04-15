@@ -2,10 +2,12 @@ package integrations
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"math"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -27,11 +29,7 @@ type Handler struct {
 	apiKey      string
 }
 
-func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service) *Handler {
-	apiKey := os.Getenv("INTEGRATION_API_KEY")
-	if apiKey == "" {
-		apiKey = "fb-brain-demo-key-2026"
-	}
+func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, apiKey string) *Handler {
 	return &Handler{
 		db:          db,
 		pricingSvc:  pricingSvc,
@@ -52,8 +50,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if h.apiKey == "" {
+			writeError(w, http.StatusServiceUnavailable, "Integration endpoints not configured")
+			return
+		}
 		key := r.Header.Get("X-Integration-Key")
-		if key != h.apiKey {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(h.apiKey)) != 1 {
 			writeError(w, http.StatusUnauthorized, "invalid integration key")
 			return
 		}
@@ -100,7 +102,8 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 
 	rows, err := h.db.Pool.Query(r.Context(), sqlQuery, args...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to query products", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to query products")
 		return
 	}
 	defer rows.Close()
@@ -110,7 +113,8 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 		var p ProductResponse
 		var priceFloat float64
 		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			slog.Error("failed to scan product row", "error", err, "method", r.Method, "path", r.URL.Path)
+			writeError(w, http.StatusInternalServerError, "failed to read product data")
 			return
 		}
 		p.Price = int64(priceFloat * 100)
@@ -157,7 +161,8 @@ func (h *Handler) BulkCalculatePrice(w http.ResponseWriter, r *http.Request) {
 
 	cust, err := h.customerSvc.GetCustomer(r.Context(), customerID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("customer not found: %v", err))
+		slog.Error("customer not found", "error", err, "customer_id", req.CustomerID, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusNotFound, "customer not found")
 		return
 	}
 
@@ -265,7 +270,8 @@ func (h *Handler) CreateQuote(w http.ResponseWriter, r *http.Request) {
 	_ = demoCreatedBy
 
 	if err := h.quoteSvc.CreateQuote(r.Context(), q); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create quote: %v", err))
+		slog.Error("failed to create quote", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to create quote")
 		return
 	}
 
@@ -298,24 +304,27 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 
 	// 1. Accept the quote
 	if err := h.quoteSvc.UpdateState(ctx, quoteID, quote.QuoteStateAccepted); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("accept quote: %v", err))
+		slog.Error("failed to accept quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to accept quote")
 		return
 	}
 
 	// 2. Get the quote to build order
 	q, err := h.quoteSvc.GetQuote(ctx, quoteID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("get quote: %v", err))
+		slog.Error("failed to get quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to get quote")
 		return
 	}
 
-	// 3. Convert to order
+	// 3. Convert to order — PriceEach is now int64 cents
+	// TODO: align with int64 cents — quote.UnitPrice is still float64 dollars
 	var orderLines []order.OrderLineRequest
 	for _, ql := range q.Lines {
 		orderLines = append(orderLines, order.OrderLineRequest{
 			ProductID: ql.ProductID,
 			Quantity:  ql.Quantity,
-			PriceEach: ql.UnitPrice,
+			PriceEach: int64(math.Round(ql.UnitPrice * 100)),
 		})
 	}
 
@@ -325,14 +334,15 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		Lines:      orderLines,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("create order: %v", err))
+		slog.Error("failed to create order from quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to create order")
 		return
 	}
 
 	// 4. Confirm the order
 	if err := h.confirmOrder(ctx, o.ID); err != nil {
 		// Order created but not confirmed - still return success
-		fmt.Printf("WARNING: order created but not confirmed: %v\n", err)
+		slog.Warn("order created but not confirmed", "order_id", o.ID, "error", err)
 	}
 
 	writeJSON(w, http.StatusOK, OrderResponse{

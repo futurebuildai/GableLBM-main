@@ -16,24 +16,29 @@ export const DoorConfigurator = () => {
     });
 
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const fetchOptions = async () => {
+        setError(null);
+        setLoading(true);
+        try {
+            const [doors, mats, glass] = await Promise.all([
+                MillworkService.getOptionsByCategory('door_type'),
+                MillworkService.getOptionsByCategory('material'),
+                MillworkService.getOptionsByCategory('glass'),
+            ]);
+            setDoorTypes(doors);
+            setMaterials(mats);
+            setGlassOptions(glass);
+        } catch (err) {
+            console.error("Failed to load millwork options", err);
+            setError(err instanceof Error ? err.message : 'Failed to load configurator options');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchOptions = async () => {
-            try {
-                const [doors, mats, glass] = await Promise.all([
-                    MillworkService.getOptionsByCategory('door_type'),
-                    MillworkService.getOptionsByCategory('material'),
-                    MillworkService.getOptionsByCategory('glass'),
-                ]);
-                setDoorTypes(doors);
-                setMaterials(mats);
-                setGlassOptions(glass);
-            } catch (error) {
-                console.error("Failed to load millwork options", error);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchOptions();
     }, []);
 
@@ -41,6 +46,20 @@ export const DoorConfigurator = () => {
     const basePrice = 250.00; // Keep for display reference if needed, or fetch from config
 
     if (loading) return <div className="p-8 text-white">Loading Configurator...</div>;
+
+    if (error) return (
+        <div className="flex h-full items-center justify-center bg-[#0A0B10] text-[#E0E0E0]">
+            <div className="text-center space-y-4">
+                <p className="text-red-400">{error}</p>
+                <button
+                    onClick={fetchOptions}
+                    className="px-4 py-2 rounded-lg bg-[#00FFA3]/10 text-[#00FFA3] border border-[#00FFA3]/20 hover:bg-[#00FFA3]/20 transition-colors text-sm font-medium"
+                >
+                    Retry
+                </button>
+            </div>
+        </div>
+    );
 
     return (
         <div className="flex h-full bg-[#0A0B10] text-[#E0E0E0]">

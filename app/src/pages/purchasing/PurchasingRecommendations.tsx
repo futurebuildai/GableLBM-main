@@ -6,6 +6,7 @@ import { PageTransition } from '../../components/ui/PageTransition';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { ArrowLeft, TrendingUp, AlertTriangle, ShoppingCart, RefreshCw, Package } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 const urgencyConfig: Record<UrgencyLevel, { label: string; color: string; bg: string; border: string }> = {
     CRITICAL: { label: 'Critical', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30' },
@@ -16,6 +17,7 @@ const urgencyConfig: Record<UrgencyLevel, { label: string; color: string; bg: st
 
 export function PurchasingRecommendations() {
     const navigate = useNavigate();
+    const { showToast } = useToast();
     const [summary, setSummary] = useState<RecommendationSummary | null>(null);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<UrgencyLevel | 'ALL'>('ALL');
@@ -27,6 +29,7 @@ export function PurchasingRecommendations() {
             setSummary(data);
         } catch (err) {
             console.error('Failed to load recommendations:', err);
+            showToast('Failed to load purchasing recommendations', 'error');
         } finally {
             setLoading(false);
         }
@@ -34,7 +37,7 @@ export function PurchasingRecommendations() {
 
     useEffect(() => {
         fetchRecommendations();
-    }, []);
+    }, [showToast]);
 
     const filteredItems = summary?.items.filter(
         (item) => filter === 'ALL' || item.urgency === filter

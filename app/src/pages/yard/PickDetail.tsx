@@ -5,10 +5,12 @@ import type { Order, OrderLine } from "../../types/order";
 import { PageTransition } from "../../components/ui/PageTransition";
 import { Card, CardContent } from "../../components/ui/Card";
 import { ArrowLeft, CheckCircle, Circle, Package, Loader2 } from "lucide-react";
+import { useToast } from "../../components/ui/ToastContext";
 
 export function PickDetail() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { showToast } = useToast();
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
     const [pickedItems, setPickedItems] = useState<Set<string>>(new Set());
@@ -18,10 +20,10 @@ export function PickDetail() {
         if (id) {
             OrderService.getOrder(id)
                 .then(setOrder)
-                .catch(() => setOrder(null))
+                .catch(() => { setOrder(null); showToast('Failed to load order details', 'error'); })
                 .finally(() => setLoading(false));
         }
-    }, [id]);
+    }, [id, showToast]);
 
     const togglePicked = (lineId: string) => {
         setPickedItems(prev => {
@@ -46,6 +48,7 @@ export function PickDetail() {
             await OrderService.fulfillOrder(id);
             navigate("/yard", { replace: true });
         } catch {
+            showToast('Failed to fulfill order', 'error');
             setFulfilling(false);
         }
     };
@@ -75,6 +78,7 @@ export function PickDetail() {
                     <button
                         onClick={() => navigate("/yard")}
                         className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors"
+                        aria-label="Go back"
                     >
                         <ArrowLeft className="w-5 h-5" />
                     </button>

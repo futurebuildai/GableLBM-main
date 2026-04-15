@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -18,23 +19,32 @@ func NewHandler(service *Service, recSvc *RecommendationService) *Handler {
 	return &Handler{service: service, recSvc: recSvc}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /purchase-orders", h.HandleListPOs)
-	mux.HandleFunc("POST /purchase-orders", h.HandleCreatePO)
-	mux.HandleFunc("GET /purchase-orders/recommendations", h.HandleGetRecommendations)
-	mux.HandleFunc("GET /purchase-orders/{id}", h.HandleGetPO)
-	mux.HandleFunc("POST /purchase-orders/{id}/submit", h.HandleSubmitPO)
-	mux.HandleFunc("POST /purchase-orders/{id}/receive", h.HandleReceivePO)
-	mux.HandleFunc("POST /purchase-orders/reorder-check", h.HandleCreateReorders)
-	mux.HandleFunc("POST /purchase-orders/{id}/freight", h.HandleUploadFreight)
-	mux.HandleFunc("POST /purchase-orders/{id}/freight/{freightId}/apply", h.HandleApplyFreight)
-	mux.HandleFunc("GET /purchase-orders/{id}/freight", h.HandleListFreight)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /purchase-orders", guard(h.HandleListPOs))
+	mux.HandleFunc("POST /purchase-orders", guard(h.HandleCreatePO))
+	mux.HandleFunc("GET /purchase-orders/recommendations", guard(h.HandleGetRecommendations))
+	mux.HandleFunc("GET /purchase-orders/{id}", guard(h.HandleGetPO))
+	mux.HandleFunc("POST /purchase-orders/{id}/submit", guard(h.HandleSubmitPO))
+	mux.HandleFunc("POST /purchase-orders/{id}/receive", guard(h.HandleReceivePO))
+	mux.HandleFunc("POST /purchase-orders/reorder-check", guard(h.HandleCreateReorders))
+	mux.HandleFunc("POST /purchase-orders/{id}/freight", guard(h.HandleUploadFreight))
+	mux.HandleFunc("POST /purchase-orders/{id}/freight/{freightId}/apply", guard(h.HandleApplyFreight))
+	mux.HandleFunc("GET /purchase-orders/{id}/freight", guard(h.HandleListFreight))
 }
 
 func (h *Handler) HandleListPOs(w http.ResponseWriter, r *http.Request) {
 	pos, err := h.service.ListPOs(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list purchase orders", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -56,13 +66,13 @@ type CreatePOLine struct {
 func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 	var req CreatePORequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	vendorID, err := uuid.Parse(req.VendorID)
 	if err != nil {
-		http.Error(w, "Invalid vendor_id", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid vendor_id", http.StatusBadRequest, err)
 		return
 	}
 
@@ -78,7 +88,7 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 
 	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create purchase order", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -91,13 +101,13 @@ func (h *Handler) HandleGetPO(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	po, err := h.service.GetPO(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "failed to get purchase order", http.StatusNotFound, err)
 		return
 	}
 
@@ -109,12 +119,12 @@ func (h *Handler) HandleSubmitPO(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.SubmitPO(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to submit purchase order", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -136,13 +146,13 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	var req ReceivePORequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -156,7 +166,7 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ReceivePO(r.Context(), id, lines); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to receive purchase order", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -167,7 +177,7 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 	count, err := h.service.CreateReorders(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create reorder purchase orders", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -182,13 +192,13 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // based on sales velocity, stock levels, and lead times.
 func (h *Handler) HandleGetRecommendations(w http.ResponseWriter, r *http.Request) {
 	if h.recSvc == nil {
-		http.Error(w, "Recommendation service not configured", http.StatusServiceUnavailable)
+		httputil.RespondError(w, r, "Recommendation service not configured", http.StatusServiceUnavailable, nil)
 		return
 	}
 
 	summary, err := h.recSvc.GenerateRecommendations(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to generate purchase recommendations", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -201,25 +211,25 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	poID, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid PO ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "File too large or invalid form data", http.StatusBadRequest)
+		httputil.RespondError(w, r, "File too large or invalid form data", http.StatusBadRequest, err)
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Missing 'file' field in form data", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Missing 'file' field in form data", http.StatusBadRequest, err)
 		return
 	}
 	defer file.Close()
 
-	fileBytes, err := io.ReadAll(file)
+	fileBytes, err := io.ReadAll(io.LimitReader(file, 10<<20))
 	if err != nil {
-		http.Error(w, "Failed to read uploaded file", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to read uploaded file", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -234,8 +244,7 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.UploadFreightInvoice(r.Context(), poID, fileBytes, contentType, header.Filename)
 	if err != nil {
-		slog.Error("UploadFreightInvoice failed", "error", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to upload freight invoice", http.StatusBadRequest, err)
 		return
 	}
 
@@ -247,19 +256,18 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
 	poID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid PO ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
 		return
 	}
 
 	freightID, err := uuid.Parse(r.PathValue("freightId"))
 	if err != nil {
-		http.Error(w, "Invalid freight charge ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid freight charge ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.ApplyFreightCharge(r.Context(), poID, freightID); err != nil {
-		slog.Error("ApplyFreightCharge failed", "error", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to apply freight charge", http.StatusBadRequest, err)
 		return
 	}
 
@@ -271,13 +279,13 @@ func (h *Handler) HandleApplyFreight(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleListFreight(w http.ResponseWriter, r *http.Request) {
 	poID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid PO ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid PO ID", http.StatusBadRequest, err)
 		return
 	}
 
 	charges, err := h.service.GetFreightCharges(r.Context(), poID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list freight charges", http.StatusInternalServerError, err)
 		return
 	}
 

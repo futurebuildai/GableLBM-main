@@ -14,6 +14,7 @@ export const ShortcutsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
                         </Dialog.Title>
                         <button
                             onClick={onClose}
+                            aria-label="Close shortcuts"
                             className="text-zinc-400 hover:text-white transition-colors"
                         >
                             <X size={24} />

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -18,35 +19,45 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes registers bank reconciliation API routes.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+// roleGuard protects all endpoints; pass middleware.RequireRole("admin","owner","finance") in production.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
 	// Bank Accounts
-	mux.HandleFunc("POST /api/bankrecon/accounts", h.CreateBankAccount)
-	mux.HandleFunc("GET /api/bankrecon/accounts", h.ListBankAccounts)
+	mux.HandleFunc("POST /api/bankrecon/accounts", guard(h.CreateBankAccount))
+	mux.HandleFunc("GET /api/bankrecon/accounts", guard(h.ListBankAccounts))
 
 	// CSV Import
-	mux.HandleFunc("POST /api/bankrecon/import", h.ImportCSV)
+	mux.HandleFunc("POST /api/bankrecon/import", guard(h.ImportCSV))
 
 	// Reconciliation Sessions
-	mux.HandleFunc("POST /api/bankrecon/sessions", h.CreateSession)
-	mux.HandleFunc("GET /api/bankrecon/sessions", h.ListSessions)
-	mux.HandleFunc("GET /api/bankrecon/sessions/{id}", h.GetSession)
-	mux.HandleFunc("POST /api/bankrecon/sessions/{id}/complete", h.CompleteSession)
+	mux.HandleFunc("POST /api/bankrecon/sessions", guard(h.CreateSession))
+	mux.HandleFunc("GET /api/bankrecon/sessions", guard(h.ListSessions))
+	mux.HandleFunc("GET /api/bankrecon/sessions/{id}", guard(h.GetSession))
+	mux.HandleFunc("POST /api/bankrecon/sessions/{id}/complete", guard(h.CompleteSession))
 
 	// Manual Match/Unmatch
-	mux.HandleFunc("POST /api/bankrecon/match", h.ManualMatch)
-	mux.HandleFunc("POST /api/bankrecon/unmatch", h.ManualUnmatch)
+	mux.HandleFunc("POST /api/bankrecon/match", guard(h.ManualMatch))
+	mux.HandleFunc("POST /api/bankrecon/unmatch", guard(h.ManualUnmatch))
 }
 
 func (h *Handler) CreateBankAccount(w http.ResponseWriter, r *http.Request) {
 	var req CreateBankAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	acct, err := h.service.CreateBankAccount(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create bank account", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -58,7 +69,7 @@ func (h *Handler) CreateBankAccount(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
 	accounts, err := h.service.ListBankAccounts(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list bank accounts", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -73,13 +84,13 @@ func (h *Handler) ListBankAccounts(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 	var req ImportCSVRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	result, err := h.service.ImportCSV(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to import CSV", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -90,13 +101,13 @@ func (h *Handler) ImportCSV(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	session, err := h.service.CreateSession(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create reconciliation session", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -108,13 +119,13 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid session ID", http.StatusBadRequest, err)
 		return
 	}
 
 	session, err := h.service.GetSession(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "reconciliation session not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -133,7 +144,7 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := h.service.ListSessions(r.Context(), bankAccountID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list reconciliation sessions", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -148,13 +159,13 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CompleteSession(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid session ID", http.StatusBadRequest, err)
 		return
 	}
 
 	session, err := h.service.CompleteSession(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		httputil.RespondError(w, r, "failed to complete reconciliation session", http.StatusUnprocessableEntity, err)
 		return
 	}
 
@@ -165,12 +176,12 @@ func (h *Handler) CompleteSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ManualMatch(w http.ResponseWriter, r *http.Request) {
 	var req ManualMatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.ManualMatch(r.Context(), req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to manually match transaction", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -183,12 +194,12 @@ func (h *Handler) ManualUnmatch(w http.ResponseWriter, r *http.Request) {
 		BankTransactionID uuid.UUID `json:"bank_transaction_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.ManualUnmatch(r.Context(), req.BankTransactionID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to unmatch transaction", http.StatusInternalServerError, err)
 		return
 	}
 

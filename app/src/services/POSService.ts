@@ -5,17 +5,18 @@ import type {
     AddTenderRequest,
     TransactionSummary
 } from '../types/pos';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const posService = {
-    startTransaction: async (registerID = 'REG-01', cashierID?: string, customerID?: string): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions`, {
+    startTransaction: async (registerID: string, cashierID: string, customerID?: string): Promise<POSTransaction> => {
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 register_id: registerID,
-                cashier_id: cashierID || '00000000-0000-0000-0000-000000000000',
+                cashier_id: cashierID,
                 customer_id: customerID || undefined,
             }),
         });
@@ -24,13 +25,13 @@ export const posService = {
     },
 
     getTransaction: async (id: string): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions/${id}`);
         if (!response.ok) throw new Error('Failed to get transaction');
         return response.json();
     },
 
     addItem: async (txId: string, item: AddLineItemRequest): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions/${txId}/items`, {
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions/${txId}/items`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item),
@@ -40,7 +41,7 @@ export const posService = {
     },
 
     removeItem: async (txId: string, itemId: string): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions/${txId}/items/${itemId}`, {
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions/${txId}/items/${itemId}`, {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to remove item');
@@ -48,7 +49,7 @@ export const posService = {
     },
 
     completeTransaction: async (txId: string, tenders: AddTenderRequest[]): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions/${txId}/complete`, {
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions/${txId}/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tenders }),
@@ -61,7 +62,7 @@ export const posService = {
     },
 
     voidTransaction: async (txId: string): Promise<POSTransaction> => {
-        const response = await fetch(`${API_URL}/api/pos/transactions/${txId}/void`, {
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions/${txId}/void`, {
             method: 'POST',
         });
         if (!response.ok) throw new Error('Failed to void transaction');
@@ -72,14 +73,14 @@ export const posService = {
         const params = new URLSearchParams();
         if (registerID) params.append('register_id', registerID);
         if (date) params.append('date', date);
-        const response = await fetch(`${API_URL}/api/pos/transactions?${params.toString()}`);
+        const response = await fetchWithAuth(`${API_URL}/api/pos/transactions?${params.toString()}`);
         if (!response.ok) throw new Error('Failed to list transactions');
         return response.json();
     },
 
     searchProducts: async (query: string): Promise<QuickSearchResult[]> => {
         if (query.length < 2) return [];
-        const response = await fetch(`${API_URL}/api/pos/products/search?q=${encodeURIComponent(query)}`);
+        const response = await fetchWithAuth(`${API_URL}/api/pos/products/search?q=${encodeURIComponent(query)}`);
         if (!response.ok) throw new Error('Failed to search products');
         return response.json();
     },

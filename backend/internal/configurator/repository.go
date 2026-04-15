@@ -23,7 +23,7 @@ func (r *Repository) GetAllRules(ctx context.Context) ([]ConfiguratorRule, error
 		FROM configurator_rules
 		ORDER BY depends_on_type, depends_on_value, attribute_type, attribute_value
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query rules: %w", err)
 	}
@@ -57,7 +57,7 @@ func (r *Repository) GetRulesByDependency(ctx context.Context, dependsOnType, de
 		WHERE depends_on_type = $1 AND depends_on_value = $2
 		ORDER BY attribute_type, attribute_value
 	`
-	rows, err := r.db.Pool.Query(ctx, query, dependsOnType, dependsOnValue)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dependsOnType, dependsOnValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query rules by dependency: %w", err)
 	}
@@ -94,7 +94,7 @@ func (r *Repository) GetAllowedValues(ctx context.Context, attributeType, depend
 		  AND depends_on_value = $3
 		ORDER BY attribute_value
 	`
-	rows, err := r.db.Pool.Query(ctx, query, attributeType, dependsOnType, dependsOnValue)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, attributeType, dependsOnType, dependsOnValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allowed values: %w", err)
 	}
@@ -141,7 +141,7 @@ func (r *Repository) GetPresets(ctx context.Context, productType string) ([]Conf
 		`
 	}
 
-	rows, err := r.db.Pool.Query(ctx, query, args...)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query presets: %w", err)
 	}

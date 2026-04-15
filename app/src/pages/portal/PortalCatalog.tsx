@@ -4,8 +4,10 @@ import { PortalService } from '../../services/PortalService';
 import { ProductCard } from '../../components/portal/ProductCard';
 import { CartSidebar } from '../../components/portal/CartSidebar';
 import type { CatalogProduct } from '../../types/portal';
+import { useToast } from '../../components/ui/ToastContext';
 
 export const PortalCatalog = () => {
+    const { showToast } = useToast();
     const [products, setProducts] = useState<CatalogProduct[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -48,6 +50,7 @@ export const PortalCatalog = () => {
             setCartOpen(true);
         } catch (err) {
             console.error('Add to cart failed:', err);
+            showToast('Failed to add item to cart', 'error');
         } finally {
             setAddingId(null);
         }

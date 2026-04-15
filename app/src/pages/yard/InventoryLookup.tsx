@@ -4,11 +4,14 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { Search, Package, MapPin, Minus, Plus, ArrowRightLeft, X, Loader2, ScanLine } from "lucide-react";
 import type { Product, Inventory } from "../../types/product";
 import { InventoryService } from "../../services/InventoryService";
+import { fetchWithAuth } from "../../services/fetchClient";
 import { BarcodeScanner } from "../../components/BarcodeScanner";
+import { useToast } from "../../components/ui/ToastContext";
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export function InventoryLookup() {
+    const { showToast } = useToast();
     const [query, setQuery] = useState("");
     const [isScanning, setIsScanning] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
@@ -25,17 +28,18 @@ export function InventoryLookup() {
         }
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/products?q=${encodeURIComponent(query)}`);
+            const res = await fetchWithAuth(`${API_URL}/api/v1/products?q=${encodeURIComponent(query)}`);
             if (res.ok) {
                 const data = await res.json();
                 setProducts(Array.isArray(data) ? data : []);
             }
         } catch {
             setProducts([]);
+            showToast('Failed to search products', 'error');
         } finally {
             setLoading(false);
         }
-    }, [query]);
+    }, [query, showToast]);
 
     useEffect(() => {
         const timer = setTimeout(search, 300);
@@ -54,6 +58,7 @@ export function InventoryLookup() {
             setInventory(inv);
         } catch {
             setInventory([]);
+            showToast('Failed to load inventory details', 'error');
         }
     };
 
@@ -70,7 +75,10 @@ export function InventoryLookup() {
             const inv = await InventoryService.getInventoryByProduct(productId);
             setInventory(inv);
             setAdjustQty(0);
-        } catch { /* noop */ }
+        } catch (err) {
+            console.error('Failed to adjust inventory:', err);
+            showToast('Failed to adjust inventory', 'error');
+        }
         setAdjusting(false);
     };
 
@@ -94,7 +102,7 @@ export function InventoryLookup() {
                             className="w-full bg-white/5 border border-white/10 text-white rounded-xl pl-10 pr-10 py-3 text-sm focus:outline-none focus:border-amber-400/50 transition-colors placeholder:text-zinc-600"
                         />
                         {query && (
-                            <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                            <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300" aria-label="Clear search">
                                 <X className="w-4 h-4" />
                             </button>
                         )}
@@ -103,6 +111,7 @@ export function InventoryLookup() {
                         onClick={() => setIsScanning(true)}
                         className="bg-zinc-800 hover:bg-zinc-700 text-amber-400 p-3 rounded-xl border border-white/10 transition-colors flex items-center justify-center isolate"
                         title="Scan Barcode"
+                        aria-label="Scan barcode"
                     >
                         <ScanLine className="w-5 h-5" />
                     </button>
@@ -176,6 +185,7 @@ export function InventoryLookup() {
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setAdjustQty(q => q - 1); }}
                                             className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-zinc-400 hover:bg-white/10 active:scale-90 transition-all"
+                                            aria-label="Decrease adjustment quantity"
                                         >
                                             <Minus className="w-4 h-4" />
                                         </button>
@@ -186,6 +196,7 @@ export function InventoryLookup() {
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setAdjustQty(q => q + 1); }}
                                             className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-zinc-400 hover:bg-white/10 active:scale-90 transition-all"
+                                            aria-label="Increase adjustment quantity"
                                         >
                                             <Plus className="w-4 h-4" />
                                         </button>

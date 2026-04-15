@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CreateActivityRequest, Contact, ActivityType } from '../../types/crm';
 import { crmApi } from '../../services/crmApi';
+import { useToast } from '../ui/ToastContext';
 
 interface LogActivityModalProps {
     customerId: string;
@@ -15,6 +16,7 @@ export const LogActivityModal: React.FC<LogActivityModalProps> = ({
     onClose,
     onSuccess,
 }) => {
+    const { showToast } = useToast();
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState<CreateActivityRequest>({
         activity_type: 'CALL',
@@ -25,7 +27,7 @@ export const LogActivityModal: React.FC<LogActivityModalProps> = ({
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
-        setFormData((prev: any) => ({ ...prev, [name]: value }));
+        setFormData((prev) => ({ ...prev, [name]: value }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -40,8 +42,8 @@ export const LogActivityModal: React.FC<LogActivityModalProps> = ({
             };
             await crmApi.createActivity(customerId, payload);
             onSuccess();
-        } catch (err: any) {
-            alert(err.message || 'Failed to log activity');
+        } catch (err: unknown) {
+            showToast(err instanceof Error ? err.message : 'Failed to log activity', 'error');
         } finally {
             setLoading(false);
         }
@@ -65,7 +67,7 @@ export const LogActivityModal: React.FC<LogActivityModalProps> = ({
                                 <button
                                     key={type}
                                     type="button"
-                                    onClick={() => setFormData((prev: any) => ({ ...prev, activity_type: type }))}
+                                    onClick={() => setFormData((prev) => ({ ...prev, activity_type: type }))}
                                     className={`px-3 py-2 text-sm font-medium rounded-md border ${formData.activity_type === type
                                         ? 'bg-blue-50 border-blue-500 text-blue-700'
                                         : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'

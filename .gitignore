@@ -1,0 +1,29 @@
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build artifacts
+backend/server_bin
+*.log
+
+# Agent/AI directories
+.agent/
+.agents/
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# OS
+.DS_Store
+Thumbs.db

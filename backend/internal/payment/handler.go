@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -15,28 +16,37 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
 	// Existing routes
-	mux.HandleFunc("POST /api/payments", h.CreatePayment)
-	mux.HandleFunc("GET /api/invoices/{id}/payments", h.GetPaymentHistory)
+	mux.HandleFunc("POST /api/payments", guard(h.CreatePayment))
+	mux.HandleFunc("GET /api/invoices/{id}/payments", guard(h.GetPaymentHistory))
 
 	// Run Payments gateway routes
-	mux.HandleFunc("POST /api/payments/intent", h.CreatePaymentIntent)
-	mux.HandleFunc("POST /api/payments/card", h.ProcessCardPayment)
-	mux.HandleFunc("POST /api/payments/refund", h.ProcessRefund)
+	mux.HandleFunc("POST /api/payments/intent", guard(h.CreatePaymentIntent))
+	mux.HandleFunc("POST /api/payments/card", guard(h.ProcessCardPayment))
+	mux.HandleFunc("POST /api/payments/refund", guard(h.ProcessRefund))
 }
 
 // CreatePayment handles non-card payments (cash, check, account).
 func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	var req CreatePaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	payment, err := h.service.ProcessPayment(r.Context(), req.InvoiceID, req.Amount, req.Method, req.Reference, req.Notes)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "payment processing failed", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -49,23 +59,21 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
 	var req CreatePaymentIntentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	publicKey := h.service.GetPublicKey()
 	if publicKey == "" {
-		http.Error(w, "Payment gateway not configured", http.StatusServiceUnavailable)
+		httputil.RespondError(w, r, "Payment gateway not configured", http.StatusServiceUnavailable, nil)
 		return
 	}
-
-	amountCents := int64(req.Amount*100.0 + 0.5)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(PaymentIntentResponse{
 		PublicKey: publicKey,
 		InvoiceID: req.InvoiceID.String(),
-		Amount:    amountCents,
+		Amount:    req.Amount,
 	})
 }
 
@@ -74,19 +82,18 @@ func (h *Handler) CreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ProcessCardPayment(w http.ResponseWriter, r *http.Request) {
 	var req ProcessCardPaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.TokenID == "" {
-		http.Error(w, "token_id is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "token_id is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	payment, err := h.service.ProcessCardPayment(r.Context(), req.InvoiceID, req.TokenID, req.Amount, req.Notes)
 	if err != nil {
-		// Check if it's a decline vs. system error
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		httputil.RespondError(w, r, "card payment failed", http.StatusPaymentRequired, err)
 		return
 	}
 
@@ -98,13 +105,13 @@ func (h *Handler) ProcessCardPayment(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ProcessRefund(w http.ResponseWriter, r *http.Request) {
 	var req RefundRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	refund, err := h.service.RefundPayment(r.Context(), req.PaymentID, req.Amount, req.Reason)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "refund processing failed", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -117,13 +124,13 @@ func (h *Handler) GetPaymentHistory(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid Invoice ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid Invoice ID", http.StatusBadRequest, err)
 		return
 	}
 
 	history, err := h.service.GetHistory(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get payment history", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -134,7 +141,7 @@ func (h *Handler) GetPaymentHistory(w http.ResponseWriter, r *http.Request) {
 // CreatePaymentRequest is the existing request struct for non-card payments.
 type CreatePaymentRequest struct {
 	InvoiceID uuid.UUID     `json:"invoice_id"`
-	Amount    float64       `json:"amount"`
+	Amount    int64         `json:"amount"` // In cents
 	Method    PaymentMethod `json:"method"`
 	Reference string        `json:"reference"`
 	Notes     string        `json:"notes"`

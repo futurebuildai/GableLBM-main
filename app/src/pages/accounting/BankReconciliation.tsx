@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { BankAccount, BankTransaction, ReconciliationSession } from '../../types/bankrecon';
 import {
     listBankAccounts,
@@ -11,8 +11,11 @@ import {
     unmatchTransaction,
     completeSession,
 } from '../../services/BankReconService';
+import { useToast } from '../../components/ui/ToastContext';
 
 const BankReconciliation: React.FC = () => {
+    const { showToast } = useToast();
+    const jeMatchInputRef = useRef<HTMLInputElement>(null);
     const [accounts, setAccounts] = useState<BankAccount[]>([]);
     const [sessions, setSessions] = useState<ReconciliationSession[]>([]);
     const [activeSession, setActiveSession] = useState<ReconciliationSession | null>(null);
@@ -49,6 +52,7 @@ const BankReconciliation: React.FC = () => {
             setSessions(sess);
         } catch (err) {
             console.error('Failed to load bank recon data:', err);
+            showToast('Failed to load bank reconciliation data', 'error');
         } finally {
             setLoading(false);
         }
@@ -358,7 +362,7 @@ const BankReconciliation: React.FC = () => {
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <input
                                         type="text"
-                                        id="je-match-input"
+                                        ref={jeMatchInputRef}
                                         placeholder="Journal Entry UUID"
                                         style={{
                                             flex: 1, padding: '6px 10px', borderRadius: 6,
@@ -368,9 +372,9 @@ const BankReconciliation: React.FC = () => {
                                     />
                                     <button
                                         onClick={() => {
-                                            const input = document.getElementById('je-match-input') as HTMLInputElement;
-                                            if (input?.value && selectedBankTxn) {
-                                                handleMatch(selectedBankTxn, input.value);
+                                            const value = jeMatchInputRef.current?.value;
+                                            if (value && selectedBankTxn) {
+                                                handleMatch(selectedBankTxn, value);
                                             }
                                         }}
                                         style={{

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Product } from '../../types/product';
 import { ProductService } from '../../services/product.service';
 import { Search } from 'lucide-react';
+import { useToast } from '../ui/ToastContext';
 
 interface ProductSelectProps {
     onSelect: (product: Product) => void;
@@ -9,6 +10,7 @@ interface ProductSelectProps {
 }
 
 export const ProductSelect = ({ onSelect, selectedProductId }: ProductSelectProps) => {
+    const { showToast } = useToast();
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -21,12 +23,13 @@ export const ProductSelect = ({ onSelect, selectedProductId }: ProductSelectProp
                 setProducts(data);
             } catch (error) {
                 console.error('Failed to load products', error);
+                showToast('Failed to load products', 'error');
             } finally {
                 setLoading(false);
             }
         };
         fetchProducts();
-    }, []);
+    }, [showToast]);
 
     const filteredProducts = products.filter(p =>
         p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||

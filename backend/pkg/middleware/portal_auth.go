@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -22,6 +23,7 @@ type PortalClaims struct {
 	CustomerUserID uuid.UUID `json:"customer_user_id"`
 	Email          string    `json:"email"`
 	Name           string    `json:"name"`
+	Role           string    `json:"role"`
 }
 
 // PortalAuthMiddleware validates portal JWTs and injects customer context.
@@ -41,23 +43,28 @@ func NewPortalAuthMiddleware(jwtSecret []byte, logger *slog.Logger) *PortalAuthM
 // Handler returns the middleware handler function.
 func (m *PortalAuthMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. Extract Bearer token
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			m.logger.Warn("PortalAuth: Missing Authorization header", "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		// 1. Extract token — prefer httpOnly cookie, fall back to Authorization header
+		var rawToken string
+
+		if cookie, err := r.Cookie("portal_token"); err == nil && cookie.Value != "" {
+			rawToken = cookie.Value
+		} else {
+			authHeader := r.Header.Get("Authorization")
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				rawToken = parts[1]
+			}
+		}
+
+		if rawToken == "" {
+			m.logger.Warn("PortalAuth: No token found in cookie or Authorization header", "path", r.URL.Path)
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 			return
 		}
 
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			m.logger.Warn("PortalAuth: Invalid token format", "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		// 2. Parse and validate JWT
-		token, err := jwt.ParseWithClaims(parts[1], &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
+		// 2. Parse and validate JWT (jwt/v5 validates exp claim by default —
+		//    expired tokens are rejected automatically with ErrTokenExpired)
+		token, err := jwt.ParseWithClaims(rawToken, &PortalClaims{}, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
@@ -65,21 +72,21 @@ func (m *PortalAuthMiddleware) Handler(next http.Handler) http.Handler {
 		})
 		if err != nil {
 			m.logger.Warn("PortalAuth: Token validation failed", "error", err, "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 			return
 		}
 
 		claims, ok := token.Claims.(*PortalClaims)
 		if !ok || !token.Valid {
 			m.logger.Warn("PortalAuth: Invalid token claims", "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 			return
 		}
 
 		// 3. Verify essential claims
 		if claims.CustomerID == uuid.Nil {
 			m.logger.Warn("PortalAuth: Missing customer_id in claims", "path", r.URL.Path)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			httputil.RespondError(w, r, "Unauthorized", http.StatusUnauthorized, nil)
 			return
 		}
 

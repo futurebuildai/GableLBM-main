@@ -21,15 +21,41 @@ type DB struct {
 	Pool *pgxpool.Pool
 }
 
-func Connect(connString string) (*DB, error) {
+// PoolConfig holds configurable pool parameters.
+type PoolConfig struct {
+	MaxConns          int32
+	MinConns          int32
+	MaxConnLifetime   time.Duration
+	MaxConnIdleTime   time.Duration
+	HealthCheckPeriod time.Duration
+}
+
+// DefaultPoolConfig returns sensible defaults for the connection pool.
+func DefaultPoolConfig() PoolConfig {
+	return PoolConfig{
+		MaxConns:          10,
+		MinConns:          2,
+		MaxConnLifetime:   time.Hour,
+		MaxConnIdleTime:   30 * time.Minute,
+		HealthCheckPeriod: 1 * time.Minute,
+	}
+}
+
+func Connect(connString string, opts ...PoolConfig) (*DB, error) {
 	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse connection string: %w", err)
 	}
 
-	config.MaxConns = 10
-	config.MinConns = 2
-	config.MaxConnLifetime = time.Hour
+	pc := DefaultPoolConfig()
+	if len(opts) > 0 {
+		pc = opts[0]
+	}
+	config.MaxConns = pc.MaxConns
+	config.MinConns = pc.MinConns
+	config.MaxConnLifetime = pc.MaxConnLifetime
+	config.MaxConnIdleTime = pc.MaxConnIdleTime
+	config.HealthCheckPeriod = pc.HealthCheckPeriod
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -2,9 +2,11 @@ package gl
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
 
@@ -19,25 +21,35 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // RegisterRoutes registers all GL routes on the mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+// roleGuard protects write endpoints; pass middleware.RequireRole("admin","owner") in production.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
 	// Accounts
-	mux.HandleFunc("GET /gl/accounts", h.HandleListAccounts)
-	mux.HandleFunc("POST /gl/accounts", h.HandleCreateAccount)
-	mux.HandleFunc("PUT /gl/accounts/{id}", h.HandleUpdateAccount)
+	mux.HandleFunc("GET /gl/accounts", guard(h.HandleListAccounts))
+	mux.HandleFunc("POST /gl/accounts", guard(h.HandleCreateAccount))
+	mux.HandleFunc("PUT /gl/accounts/{id}", guard(h.HandleUpdateAccount))
 
 	// Journal Entries
-	mux.HandleFunc("GET /gl/journal-entries", h.HandleListJournalEntries)
-	mux.HandleFunc("GET /gl/journal-entries/{id}", h.HandleGetJournalEntry)
-	mux.HandleFunc("POST /gl/journal-entries", h.HandleCreateJournalEntry)
-	mux.HandleFunc("POST /gl/journal-entries/{id}/post", h.HandlePostJournalEntry)
-	mux.HandleFunc("POST /gl/journal-entries/{id}/void", h.HandleVoidJournalEntry)
+	mux.HandleFunc("GET /gl/journal-entries", guard(h.HandleListJournalEntries))
+	mux.HandleFunc("GET /gl/journal-entries/{id}", guard(h.HandleGetJournalEntry))
+	mux.HandleFunc("POST /gl/journal-entries", guard(h.HandleCreateJournalEntry))
+	mux.HandleFunc("POST /gl/journal-entries/{id}/post", guard(h.HandlePostJournalEntry))
+	mux.HandleFunc("POST /gl/journal-entries/{id}/void", guard(h.HandleVoidJournalEntry))
 
 	// Trial Balance
-	mux.HandleFunc("GET /gl/trial-balance", h.HandleTrialBalance)
+	mux.HandleFunc("GET /gl/trial-balance", guard(h.HandleTrialBalance))
 
 	// Fiscal Periods
-	mux.HandleFunc("GET /gl/fiscal-periods", h.HandleListFiscalPeriods)
-	mux.HandleFunc("POST /gl/fiscal-periods/{id}/close", h.HandleCloseFiscalPeriod)
+	mux.HandleFunc("GET /gl/fiscal-periods", guard(h.HandleListFiscalPeriods))
+	mux.HandleFunc("POST /gl/fiscal-periods/{id}/close", guard(h.HandleCloseFiscalPeriod))
 }
 
 // --- Account Handlers ---
@@ -45,7 +57,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) HandleListAccounts(w http.ResponseWriter, r *http.Request) {
 	accounts, err := h.svc.ListAccounts(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list GL accounts", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -65,7 +77,7 @@ type createAccountRequest struct {
 func (h *Handler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -80,7 +92,7 @@ func (h *Handler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.CreateAccount(r.Context(), acct); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to create GL account", http.StatusBadRequest, err)
 		return
 	}
 
@@ -93,13 +105,13 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid account ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid account ID", http.StatusBadRequest, err)
 		return
 	}
 
 	var req createAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -116,7 +128,7 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.UpdateAccount(r.Context(), acct); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update GL account", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -129,7 +141,7 @@ func (h *Handler) HandleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleListJournalEntries(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.svc.ListJournalEntries(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list journal entries", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -140,13 +152,13 @@ func (h *Handler) HandleGetJournalEntry(w http.ResponseWriter, r *http.Request) 
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid journal entry ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
 		return
 	}
 
 	entry, err := h.svc.GetJournalEntry(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "journal entry not found", http.StatusNotFound, err)
 		return
 	}
 
@@ -170,7 +182,7 @@ type journalLineReq struct {
 func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Request) {
 	var req createJournalEntryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -178,7 +190,7 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 	if req.EntryDate != "" {
 		parsed, err := time.Parse("2006-01-02", req.EntryDate)
 		if err != nil {
-			http.Error(w, "invalid entry_date format (expected YYYY-MM-DD)", http.StatusBadRequest)
+			httputil.RespondError(w, r, "invalid entry_date format (expected YYYY-MM-DD)", http.StatusBadRequest, err)
 			return
 		}
 		entryDate = parsed
@@ -186,16 +198,20 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 
 	var lines []JournalLine
 	for _, lr := range req.Lines {
+		if lr.Debit < 0 || lr.Credit < 0 {
+			httputil.RespondError(w, r, "debit and credit amounts must be >= 0", http.StatusBadRequest, nil)
+			return
+		}
 		accountID, err := uuid.Parse(lr.AccountID)
 		if err != nil {
-			http.Error(w, "invalid account_id: "+lr.AccountID, http.StatusBadRequest)
+			httputil.RespondError(w, r, "invalid account_id: "+lr.AccountID, http.StatusBadRequest, err)
 			return
 		}
 		lines = append(lines, JournalLine{
 			AccountID:   accountID,
 			Description: lr.Description,
-			Debit:       int64(lr.Debit*100 + 0.5),
-			Credit:      int64(lr.Credit*100 + 0.5),
+			Debit:       int64(math.Round(lr.Debit * 100)),
+			Credit:      int64(math.Round(lr.Credit * 100)),
 		})
 	}
 
@@ -208,7 +224,7 @@ func (h *Handler) HandleCreateJournalEntry(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.svc.CreateJournalEntry(r.Context(), entry); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to create journal entry", http.StatusBadRequest, err)
 		return
 	}
 
@@ -221,12 +237,12 @@ func (h *Handler) HandlePostJournalEntry(w http.ResponseWriter, r *http.Request)
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid journal entry ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.svc.PostJournalEntry(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to post journal entry", http.StatusBadRequest, err)
 		return
 	}
 
@@ -238,12 +254,12 @@ func (h *Handler) HandleVoidJournalEntry(w http.ResponseWriter, r *http.Request)
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid journal entry ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.svc.VoidJournalEntry(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to void journal entry", http.StatusBadRequest, err)
 		return
 	}
 
@@ -259,7 +275,7 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 	if asOfStr != "" {
 		parsed, err := time.Parse("2006-01-02", asOfStr)
 		if err != nil {
-			http.Error(w, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest)
+			httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
 			return
 		}
 		asOf = parsed
@@ -267,7 +283,7 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.svc.GetTrialBalance(r.Context(), asOf)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get trial balance", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -280,7 +296,7 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleListFiscalPeriods(w http.ResponseWriter, r *http.Request) {
 	periods, err := h.svc.ListFiscalPeriods(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list fiscal periods", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -291,12 +307,12 @@ func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid fiscal period ID", http.StatusBadRequest)
+		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.svc.CloseFiscalPeriod(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to close fiscal period", http.StatusBadRequest, err)
 		return
 	}
 

@@ -7,8 +7,10 @@ import { Link } from 'react-router-dom';
 import { Search, DollarSign, Building2, User } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { motion } from 'framer-motion';
+import { useToast } from '../../components/ui/ToastContext';
 
 export function AccountsPage() {
+    const { showToast } = useToast();
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<'all' | 'credit' | 'cash'>('all');
@@ -24,7 +26,7 @@ export function AccountsPage() {
             setCustomers(data);
         } catch (error) {
             console.error('Failed to load customers:', error);
-            // Ideally use toast here
+            showToast('Failed to load customers', 'error');
         } finally {
             setLoading(false);
         }

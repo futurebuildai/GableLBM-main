@@ -35,6 +35,11 @@ func (s *Service) ListProducts(ctx context.Context) ([]Product, error) {
 	return s.repo.ListProducts(ctx)
 }
 
+// ListProductsPaginated returns products with pagination
+func (s *Service) ListProductsPaginated(ctx context.Context, limit, offset int) ([]Product, int, error) {
+	return s.repo.ListProductsPaginated(ctx, limit, offset)
+}
+
 // GetProduct retrieves a product by its ID
 func (s *Service) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	return s.repo.GetProduct(ctx, id)

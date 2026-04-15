@@ -29,10 +29,11 @@ export const DeliveryList: React.FC<DeliveryListProps> = ({ routeId, vehicleId, 
             onDeliveriesChange?.(data);
         } catch (err) {
             console.error(err);
+            showToast('Failed to load deliveries', 'error');
         } finally {
             setLoading(false);
         }
-    }, [onDeliveriesChange]);
+    }, [onDeliveriesChange, showToast]);
 
     useEffect(() => {
         if (routeId) {
@@ -139,6 +140,7 @@ export const DeliveryList: React.FC<DeliveryListProps> = ({ routeId, vehicleId, 
                             disabled={reordering}
                             className="p-1.5 rounded bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-colors"
                             title="Reverse stop order"
+                            aria-label="Reverse stop order"
                         >
                             <RotateCcw className="w-3.5 h-3.5" />
                         </button>
@@ -196,6 +198,7 @@ export const DeliveryList: React.FC<DeliveryListProps> = ({ routeId, vehicleId, 
                                             onClick={(e) => { e.stopPropagation(); moveStop(index, 'up'); }}
                                             className="p-1 rounded bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                                             title="Move up"
+                                            aria-label="Move up"
                                         >
                                             <ArrowUp className="w-3 h-3" />
                                         </button>
@@ -204,6 +207,7 @@ export const DeliveryList: React.FC<DeliveryListProps> = ({ routeId, vehicleId, 
                                             onClick={(e) => { e.stopPropagation(); moveStop(index, 'down'); }}
                                             className="p-1 rounded bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
                                             title="Move down"
+                                            aria-label="Move down"
                                         >
                                             <ArrowDown className="w-3 h-3" />
                                         </button>

@@ -2,9 +2,12 @@ package reporting
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
+
+const maxCacheEntries = 1000
 
 type cachedReport struct {
 	data      interface{}
@@ -59,7 +62,9 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 
 	// Write Cache
 	s.cacheMutex.Lock()
-	s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	if len(s.cache) < maxCacheEntries {
+		s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	}
 	s.cacheMutex.Unlock()
 
 	return data, nil
@@ -106,7 +111,9 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 
 	// Write Cache
 	s.cacheMutex.Lock()
-	s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	if len(s.cache) < maxCacheEntries {
+		s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	}
 	s.cacheMutex.Unlock()
 
 	return data, nil
@@ -130,7 +137,9 @@ func (s *Service) GetARAgingReport(ctx context.Context) (*ARAgingReport, error) 
 	}
 
 	s.cacheMutex.Lock()
-	s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	if len(s.cache) < maxCacheEntries {
+		s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	}
 	s.cacheMutex.Unlock()
 
 	return data, nil
@@ -192,6 +201,9 @@ return s.repo.UpdateReportScheduleNextRun(ctx, scheduleID, nextRun)
 }
 
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {
-// Call Builder logic
-return BuildAndExecuteQuery(ctx, s.repo.(*PostgresRepository).db.Pool, def, entityType)
+	pgRepo, ok := s.repo.(*PostgresRepository)
+	if !ok {
+		return nil, fmt.Errorf("report builder requires PostgresRepository")
+	}
+	return BuildAndExecuteQuery(ctx, pgRepo.db.Pool, def, entityType)
 }

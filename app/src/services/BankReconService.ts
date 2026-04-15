@@ -7,13 +7,14 @@ import type {
     ManualMatchRequest,
     ImportResult,
 } from '../types/bankrecon';
+import { fetchWithAuth } from './fetchClient';
 
-const API = '';
+const API = import.meta.env.VITE_API_URL || '';
 
 // --- Bank Accounts ---
 
 export async function createBankAccount(data: CreateBankAccountRequest): Promise<BankAccount> {
-    const res = await fetch(`${API}/api/bankrecon/accounts`, {
+    const res = await fetchWithAuth(`${API}/api/bankrecon/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -23,7 +24,7 @@ export async function createBankAccount(data: CreateBankAccountRequest): Promise
 }
 
 export async function listBankAccounts(): Promise<BankAccount[]> {
-    const res = await fetch(`${API}/api/bankrecon/accounts`);
+    const res = await fetchWithAuth(`${API}/api/bankrecon/accounts`);
     if (!res.ok) throw new Error('Failed to fetch bank accounts');
     return res.json();
 }
@@ -31,7 +32,7 @@ export async function listBankAccounts(): Promise<BankAccount[]> {
 // --- CSV Import ---
 
 export async function importStatement(data: ImportCSVRequest): Promise<ImportResult> {
-    const res = await fetch(`${API}/api/bankrecon/import`, {
+    const res = await fetchWithAuth(`${API}/api/bankrecon/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -43,7 +44,7 @@ export async function importStatement(data: ImportCSVRequest): Promise<ImportRes
 // --- Reconciliation Sessions ---
 
 export async function createSession(data: CreateSessionRequest): Promise<ReconciliationSession> {
-    const res = await fetch(`${API}/api/bankrecon/sessions`, {
+    const res = await fetchWithAuth(`${API}/api/bankrecon/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -53,20 +54,20 @@ export async function createSession(data: CreateSessionRequest): Promise<Reconci
 }
 
 export async function getSession(id: string): Promise<ReconciliationSession> {
-    const res = await fetch(`${API}/api/bankrecon/sessions/${id}`);
+    const res = await fetchWithAuth(`${API}/api/bankrecon/sessions/${id}`);
     if (!res.ok) throw new Error('Failed to fetch session');
     return res.json();
 }
 
 export async function listSessions(bankAccountId?: string): Promise<ReconciliationSession[]> {
     const params = bankAccountId ? `?bank_account_id=${bankAccountId}` : '';
-    const res = await fetch(`${API}/api/bankrecon/sessions${params}`);
+    const res = await fetchWithAuth(`${API}/api/bankrecon/sessions${params}`);
     if (!res.ok) throw new Error('Failed to fetch sessions');
     return res.json();
 }
 
 export async function completeSession(id: string): Promise<ReconciliationSession> {
-    const res = await fetch(`${API}/api/bankrecon/sessions/${id}/complete`, { method: 'POST' });
+    const res = await fetchWithAuth(`${API}/api/bankrecon/sessions/${id}/complete`, { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
 }
@@ -74,7 +75,7 @@ export async function completeSession(id: string): Promise<ReconciliationSession
 // --- Match/Unmatch ---
 
 export async function matchTransaction(data: ManualMatchRequest): Promise<void> {
-    const res = await fetch(`${API}/api/bankrecon/match`, {
+    const res = await fetchWithAuth(`${API}/api/bankrecon/match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -83,7 +84,7 @@ export async function matchTransaction(data: ManualMatchRequest): Promise<void> 
 }
 
 export async function unmatchTransaction(bankTransactionId: string): Promise<void> {
-    const res = await fetch(`${API}/api/bankrecon/unmatch`, {
+    const res = await fetchWithAuth(`${API}/api/bankrecon/unmatch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bank_transaction_id: bankTransactionId }),

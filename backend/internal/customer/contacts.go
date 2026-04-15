@@ -46,7 +46,7 @@ func (r *PostgresRepository) CreateContact(ctx context.Context, c *Contact) erro
 			id, customer_id, first_name, last_name, title, email, phone, role, is_primary, is_active, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.ID, c.CustomerID, c.FirstName, c.LastName, c.Title, c.Email, c.Phone, c.Role, c.IsPrimary, c.IsActive, c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *PostgresRepository) GetContact(ctx context.Context, id uuid.UUID) (*Con
 		WHERE id = $1
 	`
 	var c Contact
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&c.ID, &c.CustomerID, &c.FirstName, &c.LastName, &c.Title, &c.Email, &c.Phone, &c.Role, &c.IsPrimary, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -81,7 +81,7 @@ func (r *PostgresRepository) ListContactsByCustomer(ctx context.Context, custome
 		WHERE customer_id = $1
 		ORDER BY is_primary DESC, last_name ASC, first_name ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list contacts: %w", err)
 	}
@@ -107,7 +107,7 @@ func (r *PostgresRepository) UpdateContact(ctx context.Context, c *Contact) erro
 		SET first_name = $1, last_name = $2, title = $3, email = $4, phone = $5, role = $6, is_primary = $7, is_active = $8, updated_at = $9
 		WHERE id = $10
 	`
-	tag, err := r.db.Pool.Exec(ctx, query,
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		c.FirstName, c.LastName, c.Title, c.Email, c.Phone, c.Role, c.IsPrimary, c.IsActive, c.UpdatedAt, c.ID,
 	)
 	if err != nil {
@@ -121,7 +121,7 @@ func (r *PostgresRepository) UpdateContact(ctx context.Context, c *Contact) erro
 
 func (r *PostgresRepository) DeleteContact(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM customer_contacts WHERE id = $1`
-	tag, err := r.db.Pool.Exec(ctx, query, id)
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete contact: %w", err)
 	}

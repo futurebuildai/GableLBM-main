@@ -3,6 +3,8 @@ package pricing
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 // EscalatorHandler handles HTTP requests for price escalation endpoints.
@@ -16,9 +18,19 @@ func NewEscalatorHandler(s *EscalatorService) *EscalatorHandler {
 }
 
 // RegisterRoutes registers the escalator API routes on the given mux.
-func (h *EscalatorHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/pricing/calculate-escalation", h.HandleCalculateEscalation)
-	mux.HandleFunc("GET /api/v1/market-indices", h.HandleListMarketIndices)
+// roleGuard protects all endpoints; pass middleware.RequireRole("admin","owner") in production.
+func (h *EscalatorHandler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /api/v1/pricing/calculate-escalation", guard(h.HandleCalculateEscalation))
+	mux.HandleFunc("GET /api/v1/market-indices", guard(h.HandleListMarketIndices))
 }
 
 // HandleCalculateEscalation calculates future pricing based on escalation parameters.
@@ -28,31 +40,31 @@ func (h *EscalatorHandler) HandleCalculateEscalation(w http.ResponseWriter, r *h
 
 	var req EscalationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	// Validate required fields
 	if req.BasePrice <= 0 {
-		http.Error(w, "base_price must be positive", http.StatusBadRequest)
+		httputil.RespondError(w, r, "base_price must be positive", http.StatusBadRequest, nil)
 		return
 	}
 	if req.EscalationType == "" {
-		http.Error(w, "escalation_type is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "escalation_type is required", http.StatusBadRequest, nil)
 		return
 	}
 	if req.EscalationType != EscalationPercentage && req.EscalationType != EscalationIndexDelta {
-		http.Error(w, "escalation_type must be PERCENTAGE or INDEX_DELTA", http.StatusBadRequest)
+		httputil.RespondError(w, r, "escalation_type must be PERCENTAGE or INDEX_DELTA", http.StatusBadRequest, nil)
 		return
 	}
 	if req.EffectiveDate == "" || req.TargetDate == "" {
-		http.Error(w, "effective_date and target_date are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "effective_date and target_date are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	result, err := h.service.CalculateEscalation(r.Context(), req)
 	if err != nil {
-		http.Error(w, "Failed to calculate escalation", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Internal server error", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -64,7 +76,7 @@ func (h *EscalatorHandler) HandleCalculateEscalation(w http.ResponseWriter, r *h
 func (h *EscalatorHandler) HandleListMarketIndices(w http.ResponseWriter, r *http.Request) {
 	indices, err := h.service.ListMarketIndices(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to list market indices", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Internal server error", http.StatusInternalServerError, err)
 		return
 	}
 

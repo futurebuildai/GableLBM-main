@@ -4,6 +4,7 @@ import type { Product } from '../../types/product';
 
 import { PricingService } from '../../services/pricing.service';
 import type { CalculatedPrice } from '../../types/pricing';
+import { useToast } from '../ui/ToastContext';
 
 interface LineItemEditorProps {
     products: Product[];
@@ -12,6 +13,7 @@ interface LineItemEditorProps {
 }
 
 export const LineItemEditor = ({ products, customerId, onAddLine }: LineItemEditorProps) => {
+    const { showToast } = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
     const [quantity, setQuantity] = useState<number>(1);
@@ -37,6 +39,7 @@ export const LineItemEditor = ({ products, customerId, onAddLine }: LineItemEdit
                 setPriceDetails(pricing);
             } catch (err) {
                 console.error("Failed to fetch price", err);
+                showToast('Resolved price failed, using fallback base price', 'error');
                 setPrice(p.base_price || 0);
                 setPriceDetails(null);
             }

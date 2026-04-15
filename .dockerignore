@@ -1,0 +1,12 @@
+.git
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+**/*.log
+.agent/
+.agents/
+.claude/
+docs/
+**/*.md
+backend/server_bin

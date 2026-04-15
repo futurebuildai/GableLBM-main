@@ -1,10 +1,11 @@
 import type { RFC, CreateRFCInput, UpdateRFCInput } from '../types/governance';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const GovernanceService = {
     async listRFCs(): Promise<RFC[]> {
-        const response = await fetch(`${API_URL}/api/v1/governance/rfcs`);
+        const response = await fetchWithAuth(`${API_URL}/api/v1/governance/rfcs`);
         if (!response.ok) {
             throw new Error('Failed to list RFCs');
         }
@@ -12,7 +13,7 @@ export const GovernanceService = {
     },
 
     async getRFC(id: string): Promise<RFC> {
-        const response = await fetch(`${API_URL}/api/v1/governance/rfcs/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/api/v1/governance/rfcs/${id}`);
         if (!response.ok) {
             throw new Error('Failed to get RFC');
         }
@@ -20,7 +21,7 @@ export const GovernanceService = {
     },
 
     async createRFC(input: CreateRFCInput): Promise<RFC> {
-        const response = await fetch(`${API_URL}/api/v1/governance/rfcs`, {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/governance/rfcs`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -37,7 +38,7 @@ export const GovernanceService = {
     },
 
     async updateRFC(id: string, input: UpdateRFCInput): Promise<RFC> {
-        const response = await fetch(`${API_URL}/api/v1/governance/rfcs/${id}`, {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/governance/rfcs/${id}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',

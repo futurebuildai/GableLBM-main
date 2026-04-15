@@ -22,7 +22,7 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 		VALUES ($1, $2, $3)
 		RETURNING created_at, updated_at
 	`
-	return r.db.Pool.QueryRow(ctx, query,
+	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		po.ID,
 		po.VendorID,
 		po.Status,
@@ -34,7 +34,7 @@ func (r *Repository) AddPOLine(ctx context.Context, line *PurchaseOrderLine) err
 		INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost, linked_so_line_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		line.ID,
 		line.POID,
 		line.ProductID,
@@ -58,7 +58,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 		LIMIT 1
 	`
 	var po PurchaseOrder
-	err := r.db.Pool.QueryRow(ctx, query, vendorID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
@@ -81,7 +81,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 		GROUP BY po.id
 		ORDER BY po.created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POs: %w", err)
 	}
@@ -109,7 +109,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
 	query := `SELECT id, vendor_id, status, created_at, updated_at FROM purchase_orders WHERE id = $1`
 	var po PurchaseOrder
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
@@ -125,7 +125,7 @@ func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, e
 		FROM purchase_order_lines
 		WHERE po_id = $1
 	`
-	rows, err := r.db.Pool.Query(ctx, linesQuery, id)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, linesQuery, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PO lines: %w", err)
 	}
@@ -153,12 +153,12 @@ func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, e
 
 func (r *Repository) UpdatePO(ctx context.Context, po *PurchaseOrder) error {
 	query := `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Pool.Exec(ctx, query, po.Status, po.ID)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, po.Status, po.ID)
 	return err
 }
 
 func (r *Repository) UpdateLineReceived(ctx context.Context, lineID uuid.UUID, qtyReceived float64) error {
 	query := `UPDATE purchase_order_lines SET qty_received = $1 WHERE id = $2`
-	_, err := r.db.Pool.Exec(ctx, query, qtyReceived, lineID)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, qtyReceived, lineID)
 	return err
 }

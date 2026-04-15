@@ -2,8 +2,9 @@ package configurator
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 type Handler struct {
@@ -14,19 +15,27 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/configurator/rules", h.handleGetRules)
-	mux.HandleFunc("POST /api/configurator/validate", h.handleValidate)
-	mux.HandleFunc("POST /api/configurator/build-sku", h.handleBuildSKU)
-	mux.HandleFunc("GET /api/configurator/options", h.handleGetOptions)
-	mux.HandleFunc("GET /api/configurator/presets", h.handleGetPresets)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("GET /api/configurator/rules", guard(h.handleGetRules))
+	mux.HandleFunc("POST /api/configurator/validate", guard(h.handleValidate))
+	mux.HandleFunc("POST /api/configurator/build-sku", guard(h.handleBuildSKU))
+	mux.HandleFunc("GET /api/configurator/options", guard(h.handleGetOptions))
+	mux.HandleFunc("GET /api/configurator/presets", guard(h.handleGetPresets))
 }
 
 func (h *Handler) handleGetRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := h.service.GetAllRules(r.Context())
 	if err != nil {
-		slog.Error("Failed to fetch configurator rules", "error", err)
-		http.Error(w, "Failed to fetch configurator rules", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch configurator rules", http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -36,19 +45,18 @@ func (h *Handler) handleGetRules(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 	var req ValidateConfigRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if len(req.Selections) == 0 {
-		http.Error(w, "Selections map is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Selections map is required", http.StatusBadRequest, nil)
 		return
 	}
 
 	resp, err := h.service.ValidateConfig(r.Context(), req)
 	if err != nil {
-		slog.Error("Validation failed", "error", err)
-		http.Error(w, "Internal validation error", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Internal validation error", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -59,19 +67,18 @@ func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleBuildSKU(w http.ResponseWriter, r *http.Request) {
 	var req BuildSKURequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.ProductType == "" || len(req.Selections) == 0 {
-		http.Error(w, "ProductType and Selections are required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "ProductType and Selections are required", http.StatusBadRequest, nil)
 		return
 	}
 
 	resp, err := h.service.BuildSKU(r.Context(), req)
 	if err != nil {
-		// BuildSKU returns user-facing validation errors, safe to surface
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to build SKU", http.StatusBadRequest, err)
 		return
 	}
 
@@ -82,7 +89,7 @@ func (h *Handler) handleBuildSKU(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGetOptions(w http.ResponseWriter, r *http.Request) {
 	attributeType := r.URL.Query().Get("attribute_type")
 	if attributeType == "" {
-		http.Error(w, "attribute_type query parameter is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "attribute_type query parameter is required", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -101,8 +108,7 @@ func (h *Handler) handleGetOptions(w http.ResponseWriter, r *http.Request) {
 
 	options, err := h.service.GetAvailableOptions(r.Context(), req)
 	if err != nil {
-		slog.Error("Failed to fetch options", "error", err)
-		http.Error(w, "Failed to fetch options", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch options", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -115,8 +121,7 @@ func (h *Handler) handleGetPresets(w http.ResponseWriter, r *http.Request) {
 
 	presets, err := h.service.GetPresets(r.Context(), productType)
 	if err != nil {
-		slog.Error("Failed to fetch presets", "error", err)
-		http.Error(w, "Failed to fetch presets", http.StatusInternalServerError)
+		httputil.RespondError(w, r, "Failed to fetch presets", http.StatusInternalServerError, err)
 		return
 	}
 

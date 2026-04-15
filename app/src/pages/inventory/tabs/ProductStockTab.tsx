@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Inventory } from '../../../types/product';
 import { InventoryService } from '../../../services/InventoryService';
 import { MapPin, Plus, Minus, ArrowRightLeft, Loader2, Warehouse } from 'lucide-react';
+import { useToast } from '../../../components/ui/ToastContext';
 
 interface Props {
     productId: string;
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export const ProductStockTab: React.FC<Props> = ({ productId, productDescription }) => {
+    const { showToast } = useToast();
     const [inventory, setInventory] = useState<Inventory[]>([]);
     const [loading, setLoading] = useState(true);
     const [adjustModal, setAdjustModal] = useState<{ locationId: string; locationName: string } | null>(null);
@@ -22,10 +24,11 @@ export const ProductStockTab: React.FC<Props> = ({ productId, productDescription
             setInventory(data || []);
         } catch (err) {
             console.error('Failed to load inventory:', err);
+            showToast('Failed to load inventory data', 'error');
         } finally {
             setLoading(false);
         }
-    }, [productId]);
+    }, [productId, showToast]);
 
     useEffect(() => {
         loadInventory();
@@ -48,6 +51,7 @@ export const ProductStockTab: React.FC<Props> = ({ productId, productDescription
             loadInventory();
         } catch (err) {
             console.error('Adjust failed:', err);
+            showToast('Failed to adjust stock', 'error');
         } finally {
             setAdjusting(false);
         }

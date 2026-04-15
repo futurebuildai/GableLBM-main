@@ -1,4 +1,5 @@
 import type { CalculatedPrice, MarketIndex, EscalationRequest, EscalationResult } from '../types/pricing';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -14,7 +15,7 @@ export const PricingService = {
         if (jobId) {
             params.set('job_id', jobId);
         }
-        const response = await fetch(`${API_URL}/pricing/calculate?${params.toString()}`);
+        const response = await fetchWithAuth(`${API_URL}/pricing/calculate?${params.toString()}`);
         if (!response.ok) {
             throw new Error('Failed to calculate price');
         }
@@ -22,7 +23,7 @@ export const PricingService = {
     },
 
     getMarketIndices: async (): Promise<MarketIndex[]> => {
-        const response = await fetch(`${API_URL}/api/v1/market-indices`);
+        const response = await fetchWithAuth(`${API_URL}/api/v1/market-indices`);
         if (!response.ok) {
             throw new Error('Failed to fetch market indices');
         }
@@ -30,7 +31,7 @@ export const PricingService = {
     },
 
     calculateEscalation: async (request: EscalationRequest): Promise<EscalationResult> => {
-        const response = await fetch(`${API_URL}/api/v1/pricing/calculate-escalation`, {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pricing/calculate-escalation`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),

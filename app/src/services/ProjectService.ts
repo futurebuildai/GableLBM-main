@@ -4,21 +4,17 @@ import type {
     CreateProjectRequest,
     UpdateProjectRequest
 } from '../types/project';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
-const TOKEN_KEY = 'portal_token';
 
-async function fetchWithAuth<T>(url: string, options: RequestInit = {}): Promise<T> {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string> || {}),
-    };
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
+/**
+ * Wrapper around shared fetchWithAuth that handles response parsing.
+ * 401 handling is delegated to fetchWithAuth (centralized interceptor).
+ */
+async function authedFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+    const response = await fetchWithAuth(url, options);
 
-    const response = await fetch(url, { ...options, headers });
     if (!response.ok) {
         const text = await response.text().catch(() => response.statusText);
         throw new Error(`API error: ${response.status} ${text}`);
@@ -29,22 +25,22 @@ async function fetchWithAuth<T>(url: string, options: RequestInit = {}): Promise
 
 export const ProjectService = {
     async listProjects(): Promise<Project[]> {
-        return fetchWithAuth<Project[]>(`${API_URL}/api/portal/v1/projects`);
+        return authedFetch<Project[]>(`${API_URL}/api/portal/v1/projects`);
     },
 
     async getProjectDashboard(id: string): Promise<ProjectDashboardDTO> {
-        return fetchWithAuth<ProjectDashboardDTO>(`${API_URL}/api/portal/v1/projects/${id}`);
+        return authedFetch<ProjectDashboardDTO>(`${API_URL}/api/portal/v1/projects/${id}`);
     },
 
     async createProject(req: CreateProjectRequest): Promise<Project> {
-        return fetchWithAuth<Project>(`${API_URL}/api/portal/v1/projects`, {
+        return authedFetch<Project>(`${API_URL}/api/portal/v1/projects`, {
             method: 'POST',
             body: JSON.stringify(req),
         });
     },
 
     async updateProject(id: string, req: UpdateProjectRequest): Promise<Project> {
-        return fetchWithAuth<Project>(`${API_URL}/api/portal/v1/projects/${id}`, {
+        return authedFetch<Project>(`${API_URL}/api/portal/v1/projects/${id}`, {
             method: 'PUT',
             body: JSON.stringify(req),
         });

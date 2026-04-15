@@ -7,17 +7,27 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
 type Service struct {
-	repo    Repository
-	gl      *gl.Service
-	account account.Service
+	repo     Repository
+	gl       *gl.Service
+	account  account.Service
+	auditLog *audit.Logger
+	db       *database.DB
 }
 
-func NewService(repo Repository, glService *gl.Service, accountService account.Service) *Service {
-	return &Service{repo: repo, gl: glService, account: accountService}
+func NewService(repo Repository, glService *gl.Service, accountService account.Service, db *database.DB) *Service {
+	return &Service{repo: repo, gl: glService, account: accountService, db: db}
+}
+
+// WithAuditLog sets the audit logger for financial operation tracking.
+func (s *Service) WithAuditLog(l *audit.Logger) *Service {
+	s.auditLog = l
+	return s
 }
 
 // DefaultTaxRate is the default sales tax rate (configurable per jurisdiction)
@@ -54,7 +64,31 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 		inv.DueDate = &dueDate
 	}
 
-	return s.repo.CreateInvoice(ctx, inv)
+	if err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.CreateInvoice(txCtx, inv); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Audit log: invoice created
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "invoice.created",
+			EntityType: "invoice",
+			EntityID:   inv.ID,
+			Changes: map[string]interface{}{
+				"customer_id":  inv.CustomerID,
+				"order_id":     inv.OrderID,
+				"total_amount": inv.TotalAmount,
+				"status":       inv.Status,
+			},
+		})
+	}
+
+	return nil
 }
 
 func calcDueDate(from time.Time, terms string) time.Time {
@@ -80,27 +114,38 @@ func (s *Service) ListInvoices(ctx context.Context) ([]Invoice, error) {
 	return s.repo.ListInvoices(ctx)
 }
 
+func (s *Service) ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error) {
+	return s.repo.ListInvoicesPaginated(ctx, limit, offset)
+}
+
 func (s *Service) FinalizeInvoice(ctx context.Context, id uuid.UUID) error {
 	inv, err := s.repo.GetInvoice(ctx, id)
 	if err != nil {
 		return err
 	}
-	// Post to GL
-	if err := s.gl.SyncInvoice(ctx, inv.ID.String(), inv.TotalAmount); err != nil {
-		return fmt.Errorf("failed to sync to GL: %w", err)
-	}
 
-	// Post to Account Ledger (Debit)
-	_, err = s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypeInvoice, inv.TotalAmount, &inv.ID, "Invoice #"+inv.ID.String())
-	if err != nil {
-		return fmt.Errorf("failed to post to account ledger: %w", err)
-	}
+	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		// Post to GL
+		if err := s.gl.SyncInvoice(txCtx, inv.ID.String(), inv.TotalAmount); err != nil {
+			return fmt.Errorf("failed to sync to GL: %w", err)
+		}
 
-	return nil
+		// Post to Account Ledger (Debit)
+		_, err := s.account.PostTransaction(txCtx, inv.CustomerID, account.TransactionTypeInvoice, inv.TotalAmount, &inv.ID, "Invoice #"+inv.ID.String())
+		if err != nil {
+			return fmt.Errorf("failed to post to account ledger: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // C2: Credit memo workflow
 func (s *Service) CreateCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("amount_cents must be positive")
+	}
+
 	cm := &CreditMemo{
 		CustomerID: customerID,
 		InvoiceID:  invoiceID,
@@ -131,17 +176,61 @@ func (s *Service) ApplyCreditMemoFull(ctx context.Context, cm *CreditMemo) error
 	cm.Status = "APPLIED"
 	cm.AppliedAt = &now
 
-	if err := s.repo.UpdateCreditMemo(ctx, cm); err != nil {
-		return fmt.Errorf("failed to update credit memo: %w", err)
+	return s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.UpdateCreditMemo(txCtx, cm); err != nil {
+			return fmt.Errorf("failed to update credit memo: %w", err)
+		}
+
+		// Post negative amount (credit) to customer account
+		_, err := s.account.PostTransaction(txCtx, cm.CustomerID, account.TransactionTypeRefund, -cm.Amount, &cm.ID, "Credit Memo: "+cm.Reason)
+		if err != nil {
+			return fmt.Errorf("failed to post credit to account: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// CreateAndApplyCreditMemo atomically creates a credit memo and applies it in a single transaction.
+func (s *Service) CreateAndApplyCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
+	if amountCents <= 0 {
+		return nil, fmt.Errorf("amount_cents must be positive")
 	}
 
-	// Post negative amount (credit) to customer account
-	_, err := s.account.PostTransaction(ctx, cm.CustomerID, account.TransactionTypeRefund, -cm.Amount, &cm.ID, "Credit Memo: "+cm.Reason)
+	cm := &CreditMemo{
+		CustomerID: customerID,
+		InvoiceID:  invoiceID,
+		Amount:     amountCents,
+		Reason:     reason,
+		Status:     "PENDING",
+	}
+
+	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.CreateCreditMemo(txCtx, cm); err != nil {
+			return fmt.Errorf("failed to create credit memo: %w", err)
+		}
+
+		now := time.Now()
+		cm.Status = "APPLIED"
+		cm.AppliedAt = &now
+
+		if err := s.repo.UpdateCreditMemo(txCtx, cm); err != nil {
+			return fmt.Errorf("failed to update credit memo: %w", err)
+		}
+
+		// Post negative amount (credit) to customer account
+		_, err := s.account.PostTransaction(txCtx, cm.CustomerID, account.TransactionTypeRefund, -cm.Amount, &cm.ID, "Credit Memo: "+cm.Reason)
+		if err != nil {
+			return fmt.Errorf("failed to post credit to account: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to post credit to account: %w", err)
+		return nil, err
 	}
 
-	return nil
+	return cm, nil
 }
 
 func (s *Service) ListCreditMemos(ctx context.Context, customerID uuid.UUID) ([]CreditMemo, error) {

@@ -5,23 +5,24 @@ import type { Delivery } from "../../types/delivery";
 import { PageTransition } from "../../components/ui/PageTransition";
 import { Card, CardContent } from "../../components/ui/Card";
 import { ArrowLeft, MapPin, CheckCircle, Navigation, Package } from "lucide-react";
+import { useToast } from "../../components/ui/ToastContext";
 
 export function StopList() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { showToast } = useToast();
     const [deliveries, setDeliveries] = useState<Delivery[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         if (id) {
-            if (id) {
-                setTimeout(() => setLoading(true), 0);
-                deliveryService.listDeliveries(id)
-                    .then(setDeliveries)
-                    .finally(() => setLoading(false));
-            }
+            setLoading(true);
+            deliveryService.listDeliveries(id)
+                .then(setDeliveries)
+                .catch(() => { setDeliveries([]); showToast('Failed to load deliveries', 'error'); })
+                .finally(() => setLoading(false));
         }
-    }, [id]);
+    }, [id, showToast]);
 
     if (!id) return <div>Invalid Route</div>;
 
@@ -42,7 +43,7 @@ export function StopList() {
             <div className="flex flex-col h-full space-y-4 p-4 max-w-md mx-auto min-h-screen">
                 {/* Header */}
                 <div className="flex items-center gap-4 mb-2">
-                    <button onClick={() => navigate('/driver')} className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors">
+                    <button onClick={() => navigate('/driver')} aria-label="Go back" className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                     </button>
                     <div>

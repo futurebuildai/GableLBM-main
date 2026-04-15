@@ -1,10 +1,11 @@
 import type { Quote, QuoteState, CreateQuoteRequest, QuoteAnalytics } from '../types/quote';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const QuoteService = {
     async createQuote(request: CreateQuoteRequest): Promise<Quote> {
-        const response = await fetch(`${API_URL}/quotes`, {
+        const response = await fetchWithAuth(`${API_URL}/quotes`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -21,7 +22,7 @@ export const QuoteService = {
     },
 
     async getQuote(id: string): Promise<Quote> {
-        const response = await fetch(`${API_URL}/quotes/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/quotes/${id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch quote');
         }
@@ -29,7 +30,7 @@ export const QuoteService = {
     },
 
     async listQuotes(): Promise<Quote[]> {
-        const response = await fetch(`${API_URL}/quotes`);
+        const response = await fetchWithAuth(`${API_URL}/quotes`);
         if (!response.ok) {
             throw new Error('Failed to fetch quotes');
         }
@@ -37,7 +38,7 @@ export const QuoteService = {
     },
 
     async updateQuoteState(quoteId: string, state: QuoteState): Promise<Quote> {
-        const response = await fetch(`${API_URL}/quotes/${quoteId}/state`, {
+        const response = await fetchWithAuth(`${API_URL}/quotes/${quoteId}/state`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state }),
@@ -50,7 +51,7 @@ export const QuoteService = {
     },
 
     async getAnalytics(): Promise<QuoteAnalytics> {
-        const response = await fetch(`${API_URL}/quotes/analytics`);
+        const response = await fetchWithAuth(`${API_URL}/quotes/analytics`);
         if (!response.ok) {
             throw new Error('Failed to fetch quote analytics');
         }
@@ -62,7 +63,7 @@ export const QuoteService = {
     },
 
     async updateQuote(id: string, request: CreateQuoteRequest): Promise<Quote> {
-        const response = await fetch(`${API_URL}/quotes/${id}`, {
+        const response = await fetchWithAuth(`${API_URL}/quotes/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -75,7 +76,7 @@ export const QuoteService = {
     },
 
     async convertToOrder(quoteId: string): Promise<{ customer_id: string; quote_id: string; lines: { product_id: string; quantity: number; price_each: number }[] }> {
-        const response = await fetch(`${API_URL}/quotes/${quoteId}/convert`, {
+        const response = await fetchWithAuth(`${API_URL}/quotes/${quoteId}/convert`, {
             method: 'POST',
         });
         if (!response.ok) {

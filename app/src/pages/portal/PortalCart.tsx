@@ -4,11 +4,13 @@ import { ShoppingCart, Trash2, Minus, Plus, ArrowLeft, ArrowRight, RefreshCw } f
 import { Card, CardContent } from '../../components/ui/Card';
 import { PortalService } from '../../services/PortalService';
 import type { Cart } from '../../types/portal';
+import { useToast } from '../../components/ui/ToastContext';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
 
 export const PortalCart = () => {
+    const { showToast } = useToast();
     const [cart, setCart] = useState<Cart | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -35,6 +37,7 @@ export const PortalCart = () => {
             }
         } catch (err) {
             console.error('Update cart failed:', err);
+            showToast('Failed to update cart quantity', 'error');
         }
     };
 
@@ -44,6 +47,7 @@ export const PortalCart = () => {
             setCart(updated);
         } catch (err) {
             console.error('Remove item failed:', err);
+            showToast('Failed to remove item from cart', 'error');
         }
     };
 

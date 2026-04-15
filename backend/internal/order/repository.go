@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -10,10 +11,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// dollarsToInt64Cents converts a float64 dollar amount (from DB NUMERIC scan)
+// to int64 cents with rounding.
+func dollarsToInt64Cents(dollars float64) int64 {
+	return int64(math.Round(dollars * 100))
+}
+
 type Repository interface {
 	CreateOrder(ctx context.Context, o *Order) error
 	GetOrder(ctx context.Context, id uuid.UUID) (*Order, error)
 	ListOrders(ctx context.Context) ([]Order, error)
+	ListOrdersPaginated(ctx context.Context, limit, offset int) ([]Order, int, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status OrderStatus) error
 }
 
@@ -26,11 +34,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	exec := r.db.GetExecutor(ctx)
 
 	if o.ID == uuid.Nil {
 		o.ID = uuid.New()
@@ -40,13 +44,14 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 	o.UpdatedAt = now
 	o.Status = StatusDraft // Default to draft if not set
 
-	// Insert Order
+	// Insert Order — DB stores dollars as NUMERIC(19,4), model holds cents.
 	queryOrder := `
 		INSERT INTO orders (id, customer_id, quote_id, status, total_amount, salesperson_id, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
-	_, err = tx.Exec(ctx, queryOrder,
-		o.ID, o.CustomerID, o.QuoteID, o.Status, o.TotalAmount, o.SalespersonID, o.CreatedAt, o.UpdatedAt,
+	totalDollars := float64(o.TotalAmount) / 100.0
+	_, err := exec.Exec(ctx, queryOrder,
+		o.ID, o.CustomerID, o.QuoteID, o.Status, totalDollars, o.SalespersonID, o.CreatedAt, o.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert order: %w", err)
@@ -63,16 +68,13 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 			line.ID = uuid.New()
 		}
 		line.OrderID = o.ID
-		_, err = tx.Exec(ctx, queryLine,
-			line.ID, line.OrderID, line.ProductID, line.Quantity, line.PriceEach, now,
+		priceEachDollars := float64(line.PriceEach) / 100.0
+		_, err = exec.Exec(ctx, queryLine,
+			line.ID, line.OrderID, line.ProductID, line.Quantity, priceEachDollars, now,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert order line: %w", err)
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil
@@ -88,8 +90,9 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 		WHERE o.id = $1
 	`
 	var o Order
-	err := r.db.Pool.QueryRow(ctx, queryOrder, id).Scan(
-		&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
+	var totalAmountDB float64 // DB stores dollars as NUMERIC(19,4)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryOrder, id).Scan(
+		&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
 		&o.SalespersonID, &o.SalespersonName,
 	)
 	if err != nil {
@@ -98,6 +101,7 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 		}
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
+	o.TotalAmount = dollarsToInt64Cents(totalAmountDB)
 
 	// Get Lines with product names + cost data for margin/commission
 	queryLines := `
@@ -108,32 +112,36 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 		LEFT JOIN products p ON p.id = ol.product_id
 		WHERE ol.order_id = $1
 	`
-	rows, err := r.db.Pool.Query(ctx, queryLines, id)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryLines, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order lines: %w", err)
 	}
 	defer rows.Close()
 
-	var totalCost, totalCommission float64
+	var totalCostCents, totalCommissionCents int64
 	for rows.Next() {
 		var l OrderLine
+		var priceEachDB, unitCostDB float64 // DB stores dollars as NUMERIC(19,4)
 		if err := rows.Scan(&l.ID, &l.OrderID, &l.ProductID, &l.ProductSKU, &l.ProductName,
-			&l.Quantity, &l.PriceEach, &l.UnitCost, &l.CommissionRate); err != nil {
+			&l.Quantity, &priceEachDB, &unitCostDB, &l.CommissionRate); err != nil {
 			return nil, fmt.Errorf("failed to scan order line: %w", err)
 		}
-		lineCost := l.Quantity * l.UnitCost
-		lineRevenue := l.Quantity * l.PriceEach
-		totalCost += lineCost
-		totalCommission += lineRevenue * (l.CommissionRate / 100.0)
+		l.PriceEach = dollarsToInt64Cents(priceEachDB)
+		l.UnitCost = dollarsToInt64Cents(unitCostDB)
+
+		lineCostCents := int64(math.Round(l.Quantity * float64(l.UnitCost)))
+		lineRevenueCents := int64(math.Round(l.Quantity * float64(l.PriceEach)))
+		totalCostCents += lineCostCents
+		totalCommissionCents += int64(math.Round(float64(lineRevenueCents) * (l.CommissionRate / 100.0)))
 		o.Lines = append(o.Lines, l)
 	}
 
-	o.TotalCost = totalCost
-	o.TotalMargin = o.TotalAmount - totalCost
+	o.TotalCost = totalCostCents
+	o.TotalMargin = o.TotalAmount - totalCostCents
 	if o.TotalAmount > 0 {
-		o.MarginPercent = (o.TotalMargin / o.TotalAmount) * 100.0
+		o.MarginPercent = (float64(o.TotalMargin) / float64(o.TotalAmount)) * 100.0
 	}
-	o.TotalCommission = totalCommission
+	o.TotalCommission = totalCommissionCents
 
 	return &o, nil
 }
@@ -147,7 +155,7 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
 		ORDER BY o.created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list orders: %w", err)
 	}
@@ -156,20 +164,61 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 	var orders []Order
 	for rows.Next() {
 		var o Order
+		var totalAmountDB float64
 		if err := rows.Scan(
-			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
+			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
 			&o.SalespersonID, &o.SalespersonName,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
 		}
+		o.TotalAmount = dollarsToInt64Cents(totalAmountDB)
 		orders = append(orders, o)
 	}
 	return orders, nil
 }
 
+func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, offset int) ([]Order, int, error) {
+	// Get total count
+	countQuery := `SELECT COUNT(*) FROM orders`
+	var total int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count orders: %w", err)
+	}
+
+	query := `
+		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
+			o.salesperson_id, COALESCE(st.name, '')
+		FROM orders o
+		LEFT JOIN customers c ON c.id = o.customer_id
+		LEFT JOIN sales_team st ON o.salesperson_id = st.id
+		ORDER BY o.created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []Order
+	for rows.Next() {
+		var o Order
+		var totalAmountDB float64
+		if err := rows.Scan(
+			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
+			&o.SalespersonID, &o.SalespersonName,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan order: %w", err)
+		}
+		o.TotalAmount = dollarsToInt64Cents(totalAmountDB)
+		orders = append(orders, o)
+	}
+	return orders, total, nil
+}
+
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status OrderStatus) error {
 	query := `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Pool.Exec(ctx, query, status, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, id)
 	if err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}

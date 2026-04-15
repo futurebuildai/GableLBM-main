@@ -33,12 +33,12 @@ export function InventoryTransferModal({ isOpen, onClose, product, onSuccess }: 
                     // Fallback to location if location_id missing
                     setFromLoc(data[0].location_id || data[0].location || "");
                 }
-            });
+            }).catch(() => showToast('Failed to load data', 'error'));
 
             // Load all locations for dest options
             LocationService.listLocations().then((data: Location[]) => {
                 setLocations(data);
-            });
+            }).catch(() => showToast('Failed to load data', 'error'));
 
             setQuantity("");
             setReason("");
@@ -75,11 +75,11 @@ export function InventoryTransferModal({ isOpen, onClose, product, onSuccess }: 
     const maxQty = sourceItem ? sourceItem.quantity : 0;
 
     return (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-stock-modal-title">
             <div className="bg-[#161821] w-full max-w-lg rounded-xl border border-white/10 shadow-2xl">
                 <div className="flex justify-between items-center p-6 border-b border-white/10">
-                    <h2 className="text-xl font-bold">Transfer Stock</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white">
+                    <h2 id="transfer-stock-modal-title" className="text-xl font-bold">Transfer Stock</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white" aria-label="Close transfer dialog">
                         <X className="w-6 h-6" />
                     </button>
                 </div>

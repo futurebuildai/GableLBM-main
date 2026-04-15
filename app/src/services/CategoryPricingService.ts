@@ -1,17 +1,18 @@
 import type { ProductCategory, CategoryPricingRule, MatrixResponse, ResolvedCategoryPrice, CategoryPricingAudit, PaginatedRulesResponse } from '../types/category-pricing';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const categoryPricingService = {
   // --- Categories ---
   listCategories: async (view: 'tree' | 'flat' = 'tree'): Promise<ProductCategory[]> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/categories?view=${view}`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/categories?view=${view}`);
     if (!res.ok) throw new Error('Failed to load categories');
     return res.json();
   },
 
   createCategory: async (data: Partial<ProductCategory>): Promise<ProductCategory> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/categories`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/categories`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -21,7 +22,7 @@ export const categoryPricingService = {
   },
 
   updateCategory: async (id: string, data: Partial<ProductCategory>): Promise<ProductCategory> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/categories/${id}`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/categories/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -33,20 +34,20 @@ export const categoryPricingService = {
   // --- Rules ---
   listRules: async (params?: Record<string, string>): Promise<CategoryPricingRule[]> => {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules${query}`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules${query}`);
     if (!res.ok) throw new Error('Failed to load rules');
     return (await res.json()) ?? [];
   },
 
   listRulesPaginated: async (params?: Record<string, string>): Promise<PaginatedRulesResponse> => {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules${query}`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules${query}`);
     if (!res.ok) throw new Error('Failed to load rules');
     return res.json();
   },
 
   createRule: async (rule: Partial<CategoryPricingRule>): Promise<CategoryPricingRule> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rule),
@@ -59,7 +60,7 @@ export const categoryPricingService = {
   },
 
   updateRule: async (id: string, rule: Partial<CategoryPricingRule>): Promise<CategoryPricingRule> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules/${id}`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rule),
@@ -69,13 +70,13 @@ export const categoryPricingService = {
   },
 
   deleteRule: async (id: string): Promise<void> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules/${id}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete rule');
   },
 
   // --- Bulk ---
   bulkUpsertRules: async (rules: Partial<CategoryPricingRule>[]): Promise<{ count: number }> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules/bulk`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules/bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rules),
@@ -85,7 +86,7 @@ export const categoryPricingService = {
   },
 
   bulkDeleteRules: async (ids: string[]): Promise<void> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules/bulk`, {
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules/bulk`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
@@ -95,14 +96,14 @@ export const categoryPricingService = {
 
   // --- Audit ---
   getRuleAudit: async (ruleId: string): Promise<CategoryPricingAudit[]> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/category-rules/${ruleId}/audit`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/category-rules/${ruleId}/audit`);
     if (!res.ok) throw new Error('Failed to load audit trail');
     return res.json();
   },
 
   // --- Matrix ---
   getMatrix: async (): Promise<MatrixResponse> => {
-    const res = await fetch(`${API_URL}/api/v1/pricing/matrix`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/matrix`);
     if (!res.ok) throw new Error('Failed to load matrix');
     return res.json();
   },
@@ -112,7 +113,7 @@ export const categoryPricingService = {
     const params = new URLSearchParams({ product_id: productId });
     if (customerId) params.set('customer_id', customerId);
     if (tier) params.set('tier', tier);
-    const res = await fetch(`${API_URL}/api/v1/pricing/resolve?${params.toString()}`);
+    const res = await fetchWithAuth(`${API_URL}/api/v1/pricing/resolve?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to resolve price');
     return res.json();
   },

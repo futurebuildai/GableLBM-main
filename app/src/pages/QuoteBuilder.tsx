@@ -129,7 +129,7 @@ export const QuoteBuilder = () => {
             }
         };
         loadQuote();
-    }, [editId]);
+    }, [editId, showToast, navigate]);
 
     const handleAddLine = (product: Product, quantity: number, unitPrice: number) => {
         setLines([...lines, {

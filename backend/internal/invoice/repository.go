@@ -14,6 +14,7 @@ type Repository interface {
 	CreateInvoice(ctx context.Context, inv *Invoice) error
 	GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error)
 	ListInvoices(ctx context.Context) ([]Invoice, error)
+	ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error)
 	UpdateInvoice(ctx context.Context, inv *Invoice) error
 	CreateCreditMemo(ctx context.Context, cm *CreditMemo) error
 	ListCreditMemos(ctx context.Context, customerID uuid.UUID) ([]CreditMemo, error)
@@ -29,11 +30,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	exec := r.db.GetExecutor(ctx)
 
 	if inv.ID == uuid.Nil {
 		inv.ID = uuid.New()
@@ -55,7 +52,7 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount, payment_terms, due_date, paid_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
-	_, err = tx.Exec(ctx, queryInv,
+	_, err := exec.Exec(ctx, queryInv,
 		inv.ID, inv.OrderID, inv.CustomerID, inv.Status, totalAmountFloat, subtotalFloat, inv.TaxRate, taxAmountFloat, inv.PaymentTerms, inv.DueDate, inv.PaidAt, inv.CreatedAt, inv.UpdatedAt,
 	)
 	if err != nil {
@@ -76,16 +73,12 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 		// Convert PriceEach (Cents -> Dollars)
 		priceEachFloat := float64(line.PriceEach) / 100.0
 
-		_, err = tx.Exec(ctx, queryLine,
+		_, err = exec.Exec(ctx, queryLine,
 			line.ID, line.InvoiceID, line.ProductID, line.Quantity, priceEachFloat, now,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert invoice line: %w", err)
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil
@@ -109,15 +102,15 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 		&inv.PaymentTerms,
 		&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt,
 	)
-	inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
-	inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
-	inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("invoice not found")
 		}
 		return nil, fmt.Errorf("failed to get invoice: %w", err)
 	}
+	inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
+	inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
+	inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
 
 	// Get Lines with product names
 	queryLines := `
@@ -155,7 +148,7 @@ func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error
 		LEFT JOIN customers c ON c.id = i.customer_id
 		ORDER BY i.created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list invoices: %w", err)
 	}
@@ -179,6 +172,50 @@ func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error
 		invoices = append(invoices, inv)
 	}
 	return invoices, nil
+}
+
+func (r *PostgresRepository) ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error) {
+	// Get total count
+	countQuery := `SELECT COUNT(*) FROM invoices`
+	var total int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count invoices: %w", err)
+	}
+
+	query := `
+		SELECT i.id, i.order_id, i.customer_id, COALESCE(c.name, ''), i.status,
+		       i.total_amount, COALESCE(i.subtotal, i.total_amount), COALESCE(i.tax_rate, 0), COALESCE(i.tax_amount, 0),
+		       COALESCE(i.payment_terms, 'NET30'),
+		       i.due_date, i.paid_at, i.created_at, i.updated_at
+		FROM invoices i
+		LEFT JOIN customers c ON c.id = i.customer_id
+		ORDER BY i.created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list invoices: %w", err)
+	}
+	defer rows.Close()
+
+	var invoices []Invoice
+	for rows.Next() {
+		var inv Invoice
+		var totalAmountFloat, subtotalFloat, taxAmountFloat float64
+		if err := rows.Scan(
+			&inv.ID, &inv.OrderID, &inv.CustomerID, &inv.CustomerName, &inv.Status,
+			&totalAmountFloat, &subtotalFloat, &inv.TaxRate, &taxAmountFloat,
+			&inv.PaymentTerms,
+			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan invoice: %w", err)
+		}
+		inv.TotalAmount = int64(totalAmountFloat*100.0 + 0.5)
+		inv.Subtotal = int64(subtotalFloat*100.0 + 0.5)
+		inv.TaxAmount = int64(taxAmountFloat*100.0 + 0.5)
+		invoices = append(invoices, inv)
+	}
+	return invoices, total, nil
 }
 
 func (r *PostgresRepository) UpdateInvoice(ctx context.Context, inv *Invoice) error {
@@ -206,7 +243,7 @@ func (r *PostgresRepository) CreateCreditMemo(ctx context.Context, cm *CreditMem
 		INSERT INTO credit_memos (id, invoice_id, customer_id, amount, reason, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		cm.ID, cm.InvoiceID, cm.CustomerID, amountFloat, cm.Reason, cm.Status, cm.CreatedAt,
 	)
 	if err != nil {
@@ -222,7 +259,7 @@ func (r *PostgresRepository) ListCreditMemos(ctx context.Context, customerID uui
 		WHERE customer_id = $1
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list credit memos: %w", err)
 	}
@@ -243,6 +280,6 @@ func (r *PostgresRepository) ListCreditMemos(ctx context.Context, customerID uui
 
 func (r *PostgresRepository) UpdateCreditMemo(ctx context.Context, cm *CreditMemo) error {
 	query := `UPDATE credit_memos SET status = $1, applied_at = $2 WHERE id = $3`
-	_, err := r.db.Pool.Exec(ctx, query, cm.Status, cm.AppliedAt, cm.ID)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, cm.Status, cm.AppliedAt, cm.ID)
 	return err
 }

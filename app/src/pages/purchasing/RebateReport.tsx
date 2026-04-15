@@ -29,7 +29,7 @@ export function RebateReport() {
             console.error(err);
             showToast('Failed to load programs', 'error');
         });
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         if (selectedProgramId) {

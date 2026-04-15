@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 type Handler struct {
@@ -14,8 +16,17 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/vision/scan", h.handleScan)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /api/vision/scan", guard(h.handleScan))
 }
 
 func (h *Handler) handleScan(w http.ResponseWriter, r *http.Request) {
@@ -23,12 +34,12 @@ func (h *Handler) handleScan(w http.ResponseWriter, r *http.Request) {
 	// Limit body to 1MB to prevent DoS from large blueprint payloads
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		slog.Warn("Vision scan: invalid request body", "error", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if req.BlueprintText == "" {
-		http.Error(w, "blueprint_text is required", http.StatusBadRequest)
+		httputil.RespondError(w, r, "blueprint_text is required", http.StatusBadRequest, nil)
 		return
 	}
 

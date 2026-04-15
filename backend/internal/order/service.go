@@ -3,30 +3,45 @@ package order
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/purchase_order"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
 
 type Service struct {
 	repo         Repository
+	db           *database.DB
 	inventorySvc *inventory.Service
 	invoiceSvc   *invoice.Service
 	customerSvc  *customer.Service
 	poSvc        *purchase_order.Service
+	auditLog     *audit.Logger
 }
 
-func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *invoice.Service, customerSvc *customer.Service, poSvc *purchase_order.Service) *Service {
-	return &Service{
+func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *invoice.Service, customerSvc *customer.Service, poSvc *purchase_order.Service, db ...*database.DB) *Service {
+	s := &Service{
 		repo:         repo,
 		inventorySvc: inventorySvc,
 		invoiceSvc:   invoiceSvc,
 		customerSvc:  customerSvc,
 		poSvc:        poSvc,
 	}
+	if len(db) > 0 {
+		s.db = db[0]
+	}
+	return s
+}
+
+// WithAuditLog sets the audit logger for financial operation tracking.
+func (s *Service) WithAuditLog(l *audit.Logger) *Service {
+	s.auditLog = l
+	return s
 }
 
 func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Order, error) {
@@ -51,7 +66,7 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Ord
 		o.SalespersonID = cust.SalespersonID
 	}
 
-	var total float64
+	var totalCents int64
 	for _, l := range req.Lines {
 		if l.Quantity <= 0 {
 			return nil, fmt.Errorf("line quantity must be positive")
@@ -70,27 +85,44 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Ord
 			SpecialOrderCost: l.SpecialOrderCost,
 		}
 		o.Lines = append(o.Lines, line)
-		total += l.Quantity * l.PriceEach
+		totalCents += int64(math.Round(l.Quantity * float64(l.PriceEach)))
 	}
-	o.TotalAmount = total
+	o.TotalAmount = totalCents
 
-	// 2. Persist Order (Draft)
-	if err := s.repo.CreateOrder(ctx, o); err != nil {
-		return nil, fmt.Errorf("failed to create order: %w", err)
-	}
-
-	// 3. Handle Special Orders (Create POs)
-	// Note: In a real system, might do this async or transactionally.
-	// For MVP, we do it synchronously here.
-	for _, line := range o.Lines {
-		if line.IsSpecialOrder && line.VendorID != nil {
-			// Trigger PO creation
-			description := fmt.Sprintf("Special Order for Customer %s (Order %s)", o.CustomerID, o.ID)
-			if err := s.poSvc.CreateFromSOLine(ctx, line.ID, line.VendorID, description, line.Quantity, line.SpecialOrderCost); err != nil {
-				// Log error but don't fail the order placement?
-				// Or fail strict?
-				// L8 Strict: Fail safer to not lose the PO requirement.
-				return nil, fmt.Errorf("failed to create PO for special order line: %w", err)
+	// 2. Persist Order + POs in a single transaction
+	if s.db != nil {
+		err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+			if err := s.repo.CreateOrder(txCtx, o); err != nil {
+				return fmt.Errorf("failed to create order: %w", err)
+			}
+			for _, line := range o.Lines {
+				if line.IsSpecialOrder && line.VendorID != nil {
+					description := fmt.Sprintf("Special Order for Customer %s (Order %s)", o.CustomerID, o.ID)
+					// TODO: align with int64 cents — CreateFromSOLine accepts float64 dollars
+					soCostDollars := float64(line.SpecialOrderCost) / 100.0
+					if err := s.poSvc.CreateFromSOLine(txCtx, line.ID, line.VendorID, description, line.Quantity, soCostDollars); err != nil {
+						return fmt.Errorf("failed to create PO for special order line: %w", err)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Fallback for tests without DB handle
+		if err := s.repo.CreateOrder(ctx, o); err != nil {
+			return nil, fmt.Errorf("failed to create order: %w", err)
+		}
+		for _, line := range o.Lines {
+			if line.IsSpecialOrder && line.VendorID != nil {
+				description := fmt.Sprintf("Special Order for Customer %s (Order %s)", o.CustomerID, o.ID)
+				// TODO: align with int64 cents — CreateFromSOLine accepts float64 dollars
+				soCostDollars := float64(line.SpecialOrderCost) / 100.0
+				if err := s.poSvc.CreateFromSOLine(ctx, line.ID, line.VendorID, description, line.Quantity, soCostDollars); err != nil {
+					return nil, fmt.Errorf("failed to create PO for special order line: %w", err)
+				}
 			}
 		}
 	}
@@ -116,48 +148,62 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 	}
 
 	// If Credit Limit is set (> 0) and (Balance + OrderTotal > Limit)
-	if cust.CreditLimit > 0 && (cust.BalanceDue+o.TotalAmount) > cust.CreditLimit {
+	// TODO: align with int64 cents — customer.CreditLimit and BalanceDue are still float64 dollars
+	orderDollars := float64(o.TotalAmount) / 100.0
+	if cust.CreditLimit > 0 && (cust.BalanceDue+orderDollars) > cust.CreditLimit {
 		// Place On Hold
 		if err := s.repo.UpdateStatus(ctx, id, StatusOnHold); err != nil {
 			return fmt.Errorf("failed to update order status to ON_HOLD: %w", err)
 		}
-		// Return specific error or just return nil implying "Processed"?
-		// Returning error makes frontend handle "Failure". returning nil implies "Success" (but status is Hold).
-		// Let's return a specific error that the handler can detect if we want special UI, or just success.
-		// For now, let's treat it as a "Soft Failure" - i.e. we didn't confirm it.
-		// But if we return error, the user might think it crashed.
-		// Best practice: Return nil, but let frontend check status.
-		// Or return a sentinel error "ErrCreditLimitExceeded".
-		// Let's return nil, but assume the caller re-fetches the order or we return the updated order (method returns error only though).
 		return fmt.Errorf("credit limit exceeded: order placed ON HOLD")
 	}
 
-	// 2. Allocate Inventory for each line (with Rollback)
-	var allocated []OrderLine
-	defer func() {
-		// If status not updated, rollback
-		// This is a naive check (if err != nil). Better: check success flag.
-	}()
+	// 2. Wrap inventory allocation + status update in a single transaction
+	txFn := func(txCtx context.Context) error {
+		var allocated []OrderLine
 
-	for _, line := range o.Lines {
-		if err := s.inventorySvc.Allocate(ctx, line.ProductID, line.Quantity); err != nil {
-			// Rollback previous allocations
-			for _, prev := range allocated {
-				// Best effort rollback
-				_ = s.inventorySvc.Release(ctx, prev.ProductID, prev.Quantity)
+		for _, line := range o.Lines {
+			if err := s.inventorySvc.Allocate(txCtx, line.ProductID, line.Quantity); err != nil {
+				// Rollback previous allocations within the tx
+				for _, prev := range allocated {
+					_ = s.inventorySvc.Release(txCtx, prev.ProductID, prev.Quantity)
+				}
+				return fmt.Errorf("failed to allocate stock for product %s: %w", line.ProductID, err)
 			}
-			return fmt.Errorf("failed to allocate stock for product %s: %w", line.ProductID, err)
+			allocated = append(allocated, line)
 		}
-		allocated = append(allocated, line)
+
+		// 3. Update Status
+		if err := s.repo.UpdateStatus(txCtx, id, StatusConfirmed); err != nil {
+			return fmt.Errorf("failed to update order status: %w", err)
+		}
+
+		return nil
 	}
 
-	// 3. Update Status
-	if err := s.repo.UpdateStatus(ctx, id, StatusConfirmed); err != nil {
-		// Rollback ALL allocations if status update fails
-		for _, prev := range allocated {
-			_ = s.inventorySvc.Release(ctx, prev.ProductID, prev.Quantity)
+	if s.db != nil {
+		if err := s.db.RunInTx(ctx, txFn); err != nil {
+			return err
 		}
-		return fmt.Errorf("failed to update order status: %w", err)
+	} else {
+		// Fallback for tests without DB handle
+		if err := txFn(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Audit log: order confirmed (non-transactional, after commit)
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "order.confirmed",
+			EntityType: "order",
+			EntityID:   id,
+			Changes: map[string]interface{}{
+				"customer_id":  o.CustomerID,
+				"total_amount": o.TotalAmount,
+				"line_count":   len(o.Lines),
+			},
+		})
 	}
 
 	return nil
@@ -165,6 +211,10 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 
 func (s *Service) ListOrders(ctx context.Context) ([]Order, error) {
 	return s.repo.ListOrders(ctx)
+}
+
+func (s *Service) ListOrdersPaginated(ctx context.Context, limit, offset int) ([]Order, int, error) {
+	return s.repo.ListOrdersPaginated(ctx, limit, offset)
 }
 
 func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
@@ -187,66 +237,71 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("failed to get customer: %w", err)
 	}
-	if cust.CreditLimit > 0 && (cust.BalanceDue+o.TotalAmount) > cust.CreditLimit {
-		return fmt.Errorf("credit limit exceeded: balance %.2f + order %.2f > limit %.2f", cust.BalanceDue, o.TotalAmount, cust.CreditLimit)
+	// TODO: align with int64 cents — customer.CreditLimit and BalanceDue are still float64 dollars
+	fulfillOrderDollars := float64(o.TotalAmount) / 100.0
+	if cust.CreditLimit > 0 && (cust.BalanceDue+fulfillOrderDollars) > cust.CreditLimit {
+		return fmt.Errorf("credit limit exceeded: balance %.2f + order %.2f > limit %.2f", cust.BalanceDue, fulfillOrderDollars, cust.CreditLimit)
 	}
 
-	// 2. Fulfill Inventory (with Rollback)
-	var fulfilled []OrderLine
-
-	for _, line := range o.Lines {
-		if err := s.inventorySvc.Fulfill(ctx, line.ProductID, line.Quantity); err != nil {
-			// Rollback previous fulfillments
-			for _, prev := range fulfilled {
-				_ = s.inventorySvc.RevertFulfillment(ctx, prev.ProductID, prev.Quantity)
+	// 2. Wrap all DB mutations in a single transaction:
+	//    inventory fulfill, invoice creation, customer balance update, order status update.
+	//    If any step fails, the entire transaction rolls back automatically.
+	txFn := func(txCtx context.Context) error {
+		// 2a. Fulfill Inventory
+		var fulfilled []OrderLine
+		for _, line := range o.Lines {
+			if err := s.inventorySvc.Fulfill(txCtx, line.ProductID, line.Quantity); err != nil {
+				// Rollback previous fulfillments within the tx
+				for _, prev := range fulfilled {
+					_ = s.inventorySvc.RevertFulfillment(txCtx, prev.ProductID, prev.Quantity)
+				}
+				return fmt.Errorf("failed to fulfill inventory for product %s: %w", line.ProductID, err)
 			}
-			return fmt.Errorf("failed to fulfill inventory for product %s: %w", line.ProductID, err)
+			fulfilled = append(fulfilled, line)
 		}
-		fulfilled = append(fulfilled, line)
-	}
 
-	// 3. Create Invoice
-	inv := &invoice.Invoice{
-		OrderID:     o.ID,
-		CustomerID:  o.CustomerID,
-		TotalAmount: int64(o.TotalAmount*100.0 + 0.5), // Cents
-		Status:      invoice.InvoiceStatusUnpaid,
-	}
-	// Map lines
-	for _, ol := range o.Lines {
-		inv.Lines = append(inv.Lines, invoice.InvoiceLine{
-			ProductID: ol.ProductID,
-			Quantity:  ol.Quantity,
-			PriceEach: int64(ol.PriceEach*100.0 + 0.5), // Cents
-		})
-	}
-
-	if err := s.invoiceSvc.CreateInvoice(ctx, inv); err != nil {
-		// Rollback fulfillments
-		for _, prev := range fulfilled {
-			_ = s.inventorySvc.RevertFulfillment(ctx, prev.ProductID, prev.Quantity)
+		// 2b. Create Invoice — TotalAmount and PriceEach are already in cents
+		inv := &invoice.Invoice{
+			OrderID:     o.ID,
+			CustomerID:  o.CustomerID,
+			TotalAmount: o.TotalAmount,
+			Status:      invoice.InvoiceStatusUnpaid,
 		}
-		return fmt.Errorf("failed to create invoice: %w", err)
+		for _, ol := range o.Lines {
+			inv.Lines = append(inv.Lines, invoice.InvoiceLine{
+				ProductID: ol.ProductID,
+				Quantity:  ol.Quantity,
+				PriceEach: ol.PriceEach,
+			})
+		}
+		if err := s.invoiceSvc.CreateInvoice(txCtx, inv); err != nil {
+			return fmt.Errorf("failed to create invoice: %w", err)
+		}
+
+		// 2c. Update Customer Balance
+		// TODO: align with int64 cents — customer.UpdateBalance accepts float64 dollars
+		balanceDelta := float64(o.TotalAmount) / 100.0
+		if err := s.customerSvc.UpdateBalance(txCtx, o.CustomerID, balanceDelta); err != nil {
+			return fmt.Errorf("failed to update customer balance: %w", err)
+		}
+
+		// 2d. Update Order Status
+		if err := s.repo.UpdateStatus(txCtx, id, StatusFulfilled); err != nil {
+			return fmt.Errorf("failed to update order status: %w", err)
+		}
+
+		return nil
 	}
 
-	// 3.5 Update Customer Balance
-	if err := s.customerSvc.UpdateBalance(ctx, o.CustomerID, o.TotalAmount); err != nil {
-		// Severe error, but invoice created.
-		// For now log and return error
-		return fmt.Errorf("failed to update customer balance: %w", err)
-	}
-
-	// 4. Update Status
-	if err := s.repo.UpdateStatus(ctx, id, StatusFulfilled); err != nil {
-		// This is tricky. Invoice is created, stock fulfilled.
-		// If status update fails, we are in inconsistent state: Invoice exists, Stock gone, but Order says CONFIRMED.
-		// User might click "Fulfill" again -> double invoice, double stock deduction.
-		// We should rollback Invoice? InvoiceService doesn't have Delete.
-		// L8 Antagonistic: This is still a risk.
-		// Mitigation: Log CRITICAL error. Or implement Invoice Delete.
-		// For now, we attempt to rollback fulfillment and ERROR out.
-		// Ideally we need DeleteInvoice.
-		return fmt.Errorf("CRITICAL: Order status update failed after invoice creation: %w", err)
+	if s.db != nil {
+		if err := s.db.RunInTx(ctx, txFn); err != nil {
+			return err
+		}
+	} else {
+		// Fallback for tests without DB handle
+		if err := txFn(ctx); err != nil {
+			return err
+		}
 	}
 
 	return nil

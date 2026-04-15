@@ -59,7 +59,7 @@ func (r *PostgresRepository) ListAccounts(ctx context.Context) ([]GLAccount, err
 		FROM gl_accounts a
 		ORDER BY a.code
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list accounts: %w", err)
 	}
@@ -99,7 +99,7 @@ func (r *PostgresRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLA
 	`
 	var a GLAccount
 	var balanceFloat float64
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&a.ID, &a.Code, &a.Name, &a.Type, &a.Subtype, &a.ParentID,
 		&a.NormalBalance, &a.IsActive, &a.Description,
 		&balanceFloat,
@@ -127,7 +127,7 @@ func (r *PostgresRepository) CreateAccount(ctx context.Context, acct *GLAccount)
 		INSERT INTO gl_accounts (id, code, name, type, subtype, parent_id, normal_balance, is_active, description, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		acct.ID, acct.Code, acct.Name, acct.Type, acct.Subtype,
 		acct.ParentID, acct.NormalBalance, acct.IsActive, acct.Description,
 		acct.CreatedAt, acct.UpdatedAt,
@@ -146,7 +146,7 @@ func (r *PostgresRepository) UpdateAccount(ctx context.Context, acct *GLAccount)
 		    normal_balance = $6, is_active = $7, description = $8, updated_at = $9
 		WHERE id = $10
 	`
-	_, err := r.db.Pool.Exec(ctx, query,
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		acct.Code, acct.Name, acct.Type, acct.Subtype, acct.ParentID,
 		acct.NormalBalance, acct.IsActive, acct.Description, acct.UpdatedAt,
 		acct.ID,
@@ -218,7 +218,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 		WHERE id = $1
 	`
 	var e JournalEntry
-	err := r.db.Pool.QueryRow(ctx, queryHeader, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source,
 		&e.SourceRefID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt,
 	)
@@ -237,7 +237,7 @@ func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) 
 		WHERE l.journal_entry_id = $1
 		ORDER BY l.debit DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, queryLines, id)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryLines, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get journal lines: %w", err)
 	}
@@ -272,7 +272,7 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 		FROM gl_journal_entries e
 		ORDER BY e.entry_date DESC, e.entry_number DESC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list journal entries: %w", err)
 	}
@@ -299,7 +299,7 @@ func (r *PostgresRepository) ListJournalEntries(ctx context.Context) ([]JournalE
 
 func (r *PostgresRepository) UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error {
 	query := `UPDATE gl_journal_entries SET status = $1, posted_by = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.Pool.Exec(ctx, query, status, postedBy, id)
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, postedBy, id)
 	if err != nil {
 		return fmt.Errorf("failed to update journal entry status: %w", err)
 	}
@@ -321,7 +321,7 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 		HAVING COALESCE(SUM(l.debit), 0) > 0 OR COALESCE(SUM(l.credit), 0) > 0
 		ORDER BY a.code
 	`
-	rows, err := r.db.Pool.Query(ctx, query, asOfDate)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trial balance: %w", err)
 	}
@@ -349,7 +349,7 @@ func (r *PostgresRepository) ListFiscalPeriods(ctx context.Context) ([]FiscalPer
 		FROM gl_fiscal_periods
 		ORDER BY start_date
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list fiscal periods: %w", err)
 	}
@@ -374,7 +374,7 @@ func (r *PostgresRepository) GetFiscalPeriodForDate(ctx context.Context, date ti
 		LIMIT 1
 	`
 	var p FiscalPeriod
-	err := r.db.Pool.QueryRow(ctx, query, date).Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, date).Scan(&p.ID, &p.Name, &p.StartDate, &p.EndDate, &p.Status, &p.ClosedAt, &p.ClosedBy, &p.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // No fiscal period defined for this date
@@ -386,7 +386,7 @@ func (r *PostgresRepository) GetFiscalPeriodForDate(ctx context.Context, date ti
 
 func (r *PostgresRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, closedBy string) error {
 	query := `UPDATE gl_fiscal_periods SET status = 'CLOSED', closed_at = NOW(), closed_by = $1 WHERE id = $2 AND status = 'OPEN'`
-	result, err := r.db.Pool.Exec(ctx, query, closedBy, id)
+	result, err := r.db.GetExecutor(ctx).Exec(ctx, query, closedBy, id)
 	if err != nil {
 		return fmt.Errorf("failed to close fiscal period: %w", err)
 	}

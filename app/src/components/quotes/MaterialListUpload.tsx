@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, Camera, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { ParseResponse } from '../../types/parsing';
@@ -18,6 +18,15 @@ export const MaterialListUpload = ({ onParseComplete, disabled }: MaterialListUp
     const [progress, setProgress] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const parseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (progressRef.current) clearInterval(progressRef.current);
+            if (parseTimerRef.current) clearTimeout(parseTimerRef.current);
+        };
+    }, []);
 
     const handleClick = useCallback(() => {
         fileInputRef.current?.click();
@@ -32,23 +41,23 @@ export const MaterialListUpload = ({ onParseComplete, disabled }: MaterialListUp
         setProgress(0);
 
         // Simulate progress for UX (real upload is fast since it's local)
-        const progressInterval = setInterval(() => {
+        progressRef.current = setInterval(() => {
             setProgress(prev => Math.min(prev + 15, 85));
         }, 200);
 
         try {
             const result = await ParsingService.uploadMaterialList(file);
             setProgress(100);
-            clearInterval(progressInterval);
+            clearInterval(progressRef.current!);
 
             // Brief delay to show 100% before callback
-            setTimeout(() => {
+            parseTimerRef.current = setTimeout(() => {
                 onParseComplete(result);
                 setUploading(false);
                 setProgress(0);
             }, 300);
         } catch (err) {
-            clearInterval(progressInterval);
+            clearInterval(progressRef.current!);
             setError(err instanceof Error ? err.message : 'Failed to parse material list');
             setUploading(false);
             setProgress(0);
@@ -69,6 +78,7 @@ export const MaterialListUpload = ({ onParseComplete, disabled }: MaterialListUp
                 className="hidden"
                 onChange={handleFileChange}
                 id="material-list-upload-input"
+                aria-label="Upload material list file"
             />
 
             <Button

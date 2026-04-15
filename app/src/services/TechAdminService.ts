@@ -1,3 +1,5 @@
+import { fetchWithAuth } from './fetchClient';
+
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export interface APIKey {
@@ -23,7 +25,7 @@ export interface AISettings {
 
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
-        const response = await fetch(`${API_URL}/api/admin/keys`);
+        const response = await fetchWithAuth(`${API_URL}/api/admin/keys`);
         if (!response.ok) {
             throw new Error('Failed to fetch API keys');
         }
@@ -32,7 +34,7 @@ export const techAdminService = {
     },
 
     async createKey(name: string, scopes: string[]): Promise<CreateKeyResponse> {
-        const response = await fetch(`${API_URL}/api/admin/keys`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/keys`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -46,7 +48,7 @@ export const techAdminService = {
     },
 
     async revokeKey(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/api/admin/keys/${id}`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/keys/${id}`, {
             method: 'DELETE',
         });
         if (!response.ok) {
@@ -57,13 +59,13 @@ export const techAdminService = {
     // --- AI Settings ---
 
     async getAISettings(): Promise<AISettings> {
-        const response = await fetch(`${API_URL}/api/admin/settings/ai`);
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/ai`);
         if (!response.ok) throw new Error('Failed to fetch AI settings');
         return response.json();
     },
 
     async saveAIKey(apiKey: string): Promise<void> {
-        const response = await fetch(`${API_URL}/api/admin/settings/ai`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/ai`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ api_key: apiKey }),
@@ -75,7 +77,7 @@ export const techAdminService = {
     },
 
     async deleteAIKey(): Promise<void> {
-        const response = await fetch(`${API_URL}/api/admin/settings/ai`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/ai`, {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete API key');
@@ -84,13 +86,13 @@ export const techAdminService = {
     // --- Gemini Settings ---
 
     async getGeminiSettings(): Promise<AISettings> {
-        const response = await fetch(`${API_URL}/api/admin/settings/gemini`);
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/gemini`);
         if (!response.ok) throw new Error('Failed to fetch Gemini settings');
         return response.json();
     },
 
     async saveGeminiKey(apiKey: string): Promise<void> {
-        const response = await fetch(`${API_URL}/api/admin/settings/gemini`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/gemini`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ api_key: apiKey }),
@@ -102,7 +104,7 @@ export const techAdminService = {
     },
 
     async deleteGeminiKey(): Promise<void> {
-        const response = await fetch(`${API_URL}/api/admin/settings/gemini`, {
+        const response = await fetchWithAuth(`${API_URL}/api/admin/settings/gemini`, {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete Gemini API key');
@@ -132,18 +134,18 @@ export interface EDITradingPartner {
 
 export const ediService = {
     async listPartners(): Promise<EDITradingPartner[]> {
-        const response = await fetch(`${API_URL}/api/v1/edi/partners`);
+        const response = await fetchWithAuth(`${API_URL}/api/v1/edi/partners`);
         if (!response.ok) throw new Error('Failed to fetch EDI partners');
         return response.json();
     },
 
     async deletePartner(id: string): Promise<void> {
-        const response = await fetch(`${API_URL}/api/v1/edi/partners/${id}`, { method: 'DELETE' });
+        const response = await fetchWithAuth(`${API_URL}/api/v1/edi/partners/${id}`, { method: 'DELETE' });
         if (!response.ok) throw new Error('Failed to delete EDI partner');
     },
 
     async togglePartner(partner: EDITradingPartner): Promise<EDITradingPartner> {
-        const response = await fetch(`${API_URL}/api/v1/edi/partners/${partner.id}`, {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/edi/partners/${partner.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...partner, is_active: !partner.is_active }),

@@ -1,5 +1,10 @@
 /**
  * useOfflineSync.ts — React hook for managing POS offline/online state and sync.
+ *
+ * NOTE: This module intentionally uses raw fetch() instead of fetchWithAuth.
+ * POS offline sync operates outside the normal auth flow — transactions are
+ * queued locally in IndexedDB while offline and batch-synced when connectivity
+ * returns. The POS terminal has its own register-level authentication model.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {

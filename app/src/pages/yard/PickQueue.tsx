@@ -5,11 +5,13 @@ import type { Order } from "../../types/order";
 import { PageTransition } from "../../components/ui/PageTransition";
 import { Card, CardContent } from "../../components/ui/Card";
 import { ClipboardList, ChevronRight, Package, Clock, User } from "lucide-react";
+import { useToast } from "../../components/ui/ToastContext";
 
 export function PickQueue() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
+    const { showToast } = useToast();
 
     useEffect(() => {
         OrderService.listOrders()
@@ -18,9 +20,9 @@ export function PickQueue() {
                 confirmed.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
                 setOrders(confirmed);
             })
-            .catch(() => setOrders([]))
+            .catch(() => { setOrders([]); showToast('Failed to load pick queue', 'error'); })
             .finally(() => setLoading(false));
-    }, []);
+    }, [showToast]);
 
     if (loading) {
         return (

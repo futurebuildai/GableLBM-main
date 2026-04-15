@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles, Shield, AlertCircle, ImageIcon, Network, Power, RefreshCw } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
@@ -14,6 +14,14 @@ const APIKeyManager = () => {
     const [newKeyName, setNewKeyName] = useState('');
     const [generatedKey, setGeneratedKey] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         loadKeys();
@@ -21,10 +29,12 @@ const APIKeyManager = () => {
 
     const loadKeys = async () => {
         try {
+            setError(null);
             const data = await techAdminService.listKeys();
             setKeys(data);
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to load API keys');
         } finally {
             setLoading(false);
         }
@@ -33,29 +43,33 @@ const APIKeyManager = () => {
     const handleCreate = async () => {
         if (!newKeyName) return;
         try {
+            setError(null);
             const res = await techAdminService.createKey(newKeyName, ['read:inventory', 'write:orders']); // Default scopes for now
             setGeneratedKey(res.api_key);
             setNewKeyName(''); // Reset input
             loadKeys();
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to create API key');
         }
     };
 
     const handleRevoke = async (id: string) => {
         if (!confirm('Are you sure you want to revoke this key? integrations using it will break immediately.')) return;
         try {
+            setError(null);
             await techAdminService.revokeKey(id);
             loadKeys();
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to revoke API key');
         }
     };
 
     const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text);
+        navigator.clipboard.writeText(text).catch(() => {});
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
     };
 
     return (
@@ -120,6 +134,9 @@ const APIKeyManager = () => {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Error */}
+            {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">{error}</div>}
 
             {/* Key List */}
             <div className="bg-slate-steel border border-white/5 rounded-lg overflow-hidden">
@@ -197,6 +214,7 @@ const IntegrationCard = ({ name, description, icon: Icon, connected = false }: {
 const EDITradingPartnersManager = () => {
     const [partners, setPartners] = useState<EDITradingPartner[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         loadPartners();
@@ -205,10 +223,12 @@ const EDITradingPartnersManager = () => {
     const loadPartners = async () => {
         setLoading(true);
         try {
+            setError(null);
             const data = await ediService.listPartners();
             setPartners(data);
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to load EDI partners');
         } finally {
             setLoading(false);
         }
@@ -216,20 +236,24 @@ const EDITradingPartnersManager = () => {
 
     const handleToggle = async (partner: EDITradingPartner) => {
         try {
+            setError(null);
             await ediService.togglePartner(partner);
             loadPartners();
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to toggle partner status');
         }
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
         try {
+            setError(null);
             await ediService.deletePartner(id);
             loadPartners();
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to delete EDI partner');
         }
     };
 
@@ -248,6 +272,8 @@ const EDITradingPartnersManager = () => {
                     Refresh
                 </Button>
             </div>
+
+            {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">{error}</div>}
 
             <div className="bg-slate-steel border border-white/5 rounded-lg overflow-hidden">
                 <table className="w-full text-left text-sm">

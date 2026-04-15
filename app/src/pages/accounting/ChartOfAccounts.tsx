@@ -4,6 +4,7 @@ import type { GLAccount, CreateAccountRequest } from '../../types/gl';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { BookOpen, Plus, X } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 const ACCOUNT_TYPE_COLORS: Record<string, string> = {
     ASSET: 'bg-blue-500/20 text-blue-300',
@@ -16,6 +17,7 @@ const ACCOUNT_TYPE_COLORS: Record<string, string> = {
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
 
 const ChartOfAccounts: React.FC = () => {
+    const { showToast } = useToast();
     const [accounts, setAccounts] = useState<GLAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -30,10 +32,11 @@ const ChartOfAccounts: React.FC = () => {
             setAccounts(data || []);
         } catch (err) {
             console.error(err);
+            showToast('Failed to load chart of accounts', 'error');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => { load(); }, [load]);
 

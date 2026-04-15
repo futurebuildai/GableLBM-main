@@ -19,7 +19,7 @@ export interface Payment {
 
 export interface CreatePaymentRequest {
     invoice_id: string;
-    amount: number;
+    amount: number; // cents
     method: PaymentMethod;
     reference: string;
     notes: string;
@@ -28,7 +28,7 @@ export interface CreatePaymentRequest {
 // Run Payments card payment flow
 export interface PaymentIntentRequest {
     invoice_id: string;
-    amount: number;
+    amount: number; // cents
 }
 
 export interface PaymentIntentResponse {
@@ -40,13 +40,13 @@ export interface PaymentIntentResponse {
 export interface ProcessCardPaymentRequest {
     invoice_id: string;
     token_id: string;
-    amount: number;
+    amount: number; // cents
     notes: string;
 }
 
 export interface RefundRequest {
     payment_id: string;
-    amount: number;
+    amount: number; // cents
     reason: string;
 }
 

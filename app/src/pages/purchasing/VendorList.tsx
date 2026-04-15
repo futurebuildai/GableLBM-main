@@ -5,15 +5,17 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Ca
 import { Button } from '../../components/ui/Button';
 import { Warehouse, Clock, DollarSign } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '../../components/ui/ToastContext';
 
 const VendorList: React.FC = () => {
+    const { showToast } = useToast();
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
     useEffect(() => {
         loadVendors();
-    }, []);
+    }, [showToast]);
 
     const loadVendors = async () => {
         try {
@@ -21,6 +23,7 @@ const VendorList: React.FC = () => {
             setVendors(data);
         } catch (error) {
             console.error(error);
+            showToast('Failed to load vendors', 'error');
         } finally {
             setLoading(false);
         }

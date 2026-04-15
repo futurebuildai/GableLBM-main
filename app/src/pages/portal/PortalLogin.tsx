@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn, AlertCircle, Loader2 } from 'lucide-react';
-import { PortalService, setToken } from '../../services/PortalService';
+import { PortalService } from '../../services/PortalService';
 import type { PortalConfig } from '../../types/portal';
 import { BrandLogo } from '../../components/ui/BrandLogo';
 
@@ -26,7 +26,7 @@ export const PortalLogin = () => {
 
         try {
             const resp = await PortalService.login(email, password);
-            setToken(resp.token);
+            // Token is now set as httpOnly cookie by the backend
             localStorage.setItem('portal_config', JSON.stringify(resp.config));
             localStorage.setItem('portal_user', JSON.stringify(resp.user));
             navigate('/portal', { replace: true });
@@ -163,3 +163,5 @@ export const PortalLogin = () => {
         </div>
     );
 };
+
+export default PortalLogin;

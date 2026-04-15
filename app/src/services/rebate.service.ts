@@ -1,10 +1,11 @@
 import type { RebateProgram, RebateTier, RebateClaim, CalculateClaimRequest } from '../types/rebate';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const RebateService = {
     createProgram: async (program: RebateProgram, tiers: RebateTier[]): Promise<RebateProgram> => {
-        const response = await fetch(`${API_URL}/pricing/rebates/programs`, {
+        const response = await fetchWithAuth(`${API_URL}/pricing/rebates/programs`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ program, tiers }),
@@ -20,7 +21,7 @@ export const RebateService = {
         if (vendorId) {
             url += `?vendor_id=${encodeURIComponent(vendorId)}`;
         }
-        const response = await fetch(url);
+        const response = await fetchWithAuth(url);
         if (!response.ok) {
             throw new Error('Failed to fetch rebate programs');
         }
@@ -28,7 +29,7 @@ export const RebateService = {
     },
 
     getProgram: async (id: string): Promise<RebateProgram> => {
-        const response = await fetch(`${API_URL}/pricing/rebates/programs/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/pricing/rebates/programs/${id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch rebate program');
         }
@@ -36,7 +37,7 @@ export const RebateService = {
     },
 
     calculateClaim: async (programId: string, request: CalculateClaimRequest): Promise<RebateClaim> => {
-        const response = await fetch(`${API_URL}/pricing/rebates/programs/${programId}/claims/calculate`, {
+        const response = await fetchWithAuth(`${API_URL}/pricing/rebates/programs/${programId}/claims/calculate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
@@ -48,7 +49,7 @@ export const RebateService = {
     },
 
     listClaims: async (programId: string): Promise<RebateClaim[]> => {
-        const response = await fetch(`${API_URL}/pricing/rebates/programs/${programId}/claims`);
+        const response = await fetchWithAuth(`${API_URL}/pricing/rebates/programs/${programId}/claims`);
         if (!response.ok) {
             throw new Error('Failed to fetch rebate claims');
         }

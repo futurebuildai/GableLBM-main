@@ -1,10 +1,11 @@
 import type { SalesPerson } from '../types/salesteam';
+import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const SalesTeamService = {
     async listSalesTeam(): Promise<SalesPerson[]> {
-        const response = await fetch(`${API_URL}/sales-team`);
+        const response = await fetchWithAuth(`${API_URL}/sales-team`);
         if (!response.ok) {
             throw new Error('Failed to fetch sales team');
         }
@@ -12,7 +13,7 @@ export const SalesTeamService = {
     },
 
     async getSalesPerson(id: string): Promise<SalesPerson> {
-        const response = await fetch(`${API_URL}/sales-team/${id}`);
+        const response = await fetchWithAuth(`${API_URL}/sales-team/${id}`);
         if (!response.ok) {
             throw new Error('Failed to fetch salesperson');
         }

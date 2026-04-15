@@ -1,5 +1,5 @@
 -- Up
-CREATE TABLE portal_invites (
+CREATE TABLE IF NOT EXISTS portal_invites (
     id UUID PRIMARY KEY,
     customer_id UUID NOT NULL REFERENCES customers(id),
     email VARCHAR(255) NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE portal_invites (
 
 ALTER TABLE customer_users ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'Active';
 
-CREATE TABLE projects (
+CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY,
     customer_id UUID NOT NULL REFERENCES customers(id),
     name VARCHAR(255) NOT NULL,

@@ -12,23 +12,35 @@ const VendorDetail: React.FC = () => {
     const navigate = useNavigate();
     const [vendor, setVendor] = useState<Vendor | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         if (id) loadVendor(id);
     }, [id]);
 
     const loadVendor = async (vendorId: string) => {
+        setError(null);
+        setLoading(true);
         try {
             const data = await VendorService.getVendor(vendorId);
             setVendor(data);
-        } catch (error) {
-            console.error(error);
+        } catch (err) {
+            console.error(err);
+            setError(err instanceof Error ? err.message : 'Failed to load vendor');
         } finally {
             setLoading(false);
         }
     };
 
     if (loading) return <div className="p-8 text-center text-zinc-400">Loading vendor...</div>;
+    if (error) return (
+        <div className="p-8 text-center space-y-4">
+            <p className="text-red-400">{error}</p>
+            <Button variant="outline" onClick={() => id && loadVendor(id)}>
+                Retry
+            </Button>
+        </div>
+    );
     if (!vendor) return <div className="p-8 text-center text-zinc-400">Vendor not found</div>;
 
     return (

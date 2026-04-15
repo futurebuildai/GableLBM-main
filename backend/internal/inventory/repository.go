@@ -15,7 +15,9 @@ type Repository interface {
 	CreateInventory(ctx context.Context, inv *Inventory) error
 	ListInventoryByProduct(ctx context.Context, productID uuid.UUID) ([]Inventory, error)
 	AllocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
+	DeallocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	FulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
+	RevertFulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	ExecuteInTx(ctx context.Context, fn func(context.Context) error) error
 }
 
@@ -118,23 +120,62 @@ func (r *PostgresRepository) AllocateStock(ctx context.Context, inventoryID uuid
 	query := `
 		UPDATE inventory
 		SET allocated = allocated + $1, updated_at = NOW()
-		WHERE id = $2
+		WHERE id = $2 AND (quantity - allocated) >= $1
 	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
 	if err != nil {
 		return fmt.Errorf("failed to allocate stock: %w", err)
 	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("insufficient available stock for allocation")
+	}
 	return nil
 }
+
+func (r *PostgresRepository) DeallocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error {
+	query := `
+		UPDATE inventory
+		SET allocated = allocated - $1, updated_at = NOW()
+		WHERE id = $2 AND allocated >= $1
+	`
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to deallocate stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("insufficient allocated stock for deallocation")
+	}
+	return nil
+}
+
+func (r *PostgresRepository) RevertFulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error {
+	query := `
+		UPDATE inventory
+		SET quantity = quantity + $1, allocated = allocated + $1, updated_at = NOW()
+		WHERE id = $2
+	`
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to revert fulfillment: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("inventory record not found for revert")
+	}
+	return nil
+}
+
 func (r *PostgresRepository) FulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error {
 	query := `
 		UPDATE inventory
 		SET quantity = quantity - $1, allocated = allocated - $1, updated_at = NOW()
-		WHERE id = $2
+		WHERE id = $2 AND quantity >= $1 AND allocated >= $1
 	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, query, delta, inventoryID)
 	if err != nil {
 		return fmt.Errorf("failed to fulfill stock: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("insufficient stock for fulfillment")
 	}
 	return nil
 }

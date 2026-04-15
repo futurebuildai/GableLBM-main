@@ -50,9 +50,9 @@ export function ReceivePO() {
             .then(data => {
                 setPOs(data.filter(po => po.status === "SENT" || po.status === "PARTIAL"));
             })
-            .catch(() => setPOs([]))
+            .catch(() => { setPOs([]); showToast('Failed to load purchase orders', 'error'); })
             .finally(() => setLoading(false));
-    }, []);
+    }, [showToast]);
 
     const selectPO = async (po: PurchaseOrder) => {
         try {
@@ -60,7 +60,10 @@ export function ReceivePO() {
             setSelectedPO(detail);
             setReceivedQtys({});
             setSubmitted(false);
-        } catch { /* noop */ }
+        } catch (err) {
+            console.error('Failed to load PO:', err);
+            showToast('Failed to load purchase order details', 'error');
+        }
     };
 
     const handleReceive = async () => {
@@ -77,7 +80,10 @@ export function ReceivePO() {
                 await PurchaseOrderService.receivePO(selectedPO.id, { lines });
             }
             setSubmitted(true);
-        } catch { /* noop */ }
+        } catch (err) {
+            console.error('Failed to receive PO:', err);
+            showToast('Failed to receive purchase order', 'error');
+        }
         setSubmitting(false);
     };
 
@@ -172,6 +178,7 @@ export function ReceivePO() {
                                 <button
                                     onClick={() => setSelectedPO(null)}
                                     className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 transition-colors"
+                                    aria-label="Go back"
                                 >
                                     <ArrowLeft className="w-5 h-5" />
                                 </button>

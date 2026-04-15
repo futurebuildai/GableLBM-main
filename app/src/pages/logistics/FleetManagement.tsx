@@ -3,6 +3,7 @@ import { Card, CardContent } from '../../components/ui/Card';
 import { PageTransition } from '../../components/ui/PageTransition';
 import { Truck, Users, Plus, Pencil, Trash2, AlertTriangle, RefreshCw, X, Upload } from 'lucide-react';
 import { deliveryService } from '../../services/deliveryService';
+import { useToast } from '../../components/ui/ToastContext';
 import type { Vehicle, Driver, CreateVehicleRequest, UpdateVehicleRequest, CreateDriverRequest, UpdateDriverRequest, VehicleType, DriverStatus } from '../../types/delivery';
 
 type Tab = 'vehicles' | 'drivers';
@@ -266,6 +267,7 @@ function DriversTab({ drivers, onEdit, onAdd }: { drivers: Driver[]; onEdit: (d:
 /* ─── Vehicle Modal ────────────────────────────────────────────── */
 
 function VehicleModal({ vehicle, onClose, onSaved }: { vehicle?: Vehicle; onClose: () => void; onSaved: () => void }) {
+    const { showToast } = useToast();
     const isEdit = !!vehicle;
     const [form, setForm] = useState<CreateVehicleRequest & { id?: string }>({
         name: vehicle?.name || '',
@@ -296,7 +298,7 @@ function VehicleModal({ vehicle, onClose, onSaved }: { vehicle?: Vehicle; onClos
             }
             onSaved();
             onClose();
-        } catch { /* handled by parent */ } finally { setSaving(false); }
+        } catch { showToast('Failed to save vehicle', 'error'); } finally { setSaving(false); }
     };
 
     const handleDelete = async () => {
@@ -306,7 +308,7 @@ function VehicleModal({ vehicle, onClose, onSaved }: { vehicle?: Vehicle; onClos
             await deliveryService.deleteVehicle(vehicle.id);
             onSaved();
             onClose();
-        } catch { /* handled by parent */ } finally { setDeleting(false); }
+        } catch { showToast('Failed to delete vehicle', 'error'); } finally { setDeleting(false); }
     };
 
     const handlePhoto = async (file: File) => {
@@ -316,7 +318,7 @@ function VehicleModal({ vehicle, onClose, onSaved }: { vehicle?: Vehicle; onClos
             const url = await deliveryService.uploadVehiclePhoto(vehicle.id, file);
             setPhotoUrl(url);
             onSaved();
-        } catch { /* ignore */ } finally { setUploading(false); }
+        } catch { showToast('Failed to upload photo', 'error'); } finally { setUploading(false); }
     };
 
     return (
@@ -389,6 +391,7 @@ function VehicleModal({ vehicle, onClose, onSaved }: { vehicle?: Vehicle; onClos
 /* ─── Driver Modal ─────────────────────────────────────────────── */
 
 function DriverModal({ driver, onClose, onSaved }: { driver?: Driver; onClose: () => void; onSaved: () => void }) {
+    const { showToast } = useToast();
     const isEdit = !!driver;
     const [form, setForm] = useState({
         name: driver?.name || '',
@@ -415,7 +418,7 @@ function DriverModal({ driver, onClose, onSaved }: { driver?: Driver; onClose: (
             }
             onSaved();
             onClose();
-        } catch { /* handled by parent */ } finally { setSaving(false); }
+        } catch { showToast('Failed to save driver', 'error'); } finally { setSaving(false); }
     };
 
     const handleDelete = async () => {
@@ -425,7 +428,7 @@ function DriverModal({ driver, onClose, onSaved }: { driver?: Driver; onClose: (
             await deliveryService.deleteDriver(driver.id);
             onSaved();
             onClose();
-        } catch { /* handled by parent */ } finally { setDeleting(false); }
+        } catch { showToast('Failed to delete driver', 'error'); } finally { setDeleting(false); }
     };
 
     const handlePhoto = async (file: File) => {
@@ -435,7 +438,7 @@ function DriverModal({ driver, onClose, onSaved }: { driver?: Driver; onClose: (
             const url = await deliveryService.uploadDriverPhoto(driver.id, file);
             setPhotoUrl(url);
             onSaved();
-        } catch { /* ignore */ } finally { setUploading(false); }
+        } catch { showToast('Failed to upload photo', 'error'); } finally { setUploading(false); }
     };
 
     return (

@@ -31,7 +31,7 @@ func (r *PostgresRepository) ListVendors(ctx context.Context) ([]Vendor, error) 
 		FROM vendors
 		ORDER BY name ASC
 	`
-	rows, err := r.db.Pool.Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}

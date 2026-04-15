@@ -4,9 +4,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"regexp"
 
+	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
+
+// safeFilename strips any characters that are not alphanumeric, hyphens,
+// underscores, or dots to prevent header injection in Content-Disposition.
+var unsafeFilenameChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
+func sanitizeFilename(name string) string {
+	return unsafeFilenameChars.ReplaceAllString(name, "_")
+}
 
 type Handler struct {
 	service *Service
@@ -16,15 +27,24 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /quotes", h.HandleCreateQuote)
-	mux.HandleFunc("GET /quotes/analytics", h.HandleGetAnalytics)
-	mux.HandleFunc("GET /quotes", h.HandleListQuotes)
-	mux.HandleFunc("GET /quotes/{id}", h.HandleGetQuotePath)
-	mux.HandleFunc("GET /quotes/{id}/file", h.HandleDownloadOriginalFile)
-	mux.HandleFunc("PUT /quotes/{id}", h.HandleUpdateQuote)
-	mux.HandleFunc("PUT /quotes/{id}/state", h.HandleUpdateState)
-	mux.HandleFunc("POST /quotes/{id}/convert", h.HandleConvertToOrder)
+func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+	guard := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 0 && roleGuard[0] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[0](handler).ServeHTTP(w, r)
+			}
+		}
+		return handler
+	}
+
+	mux.HandleFunc("POST /quotes", guard(h.HandleCreateQuote))
+	mux.HandleFunc("GET /quotes/analytics", guard(h.HandleGetAnalytics))
+	mux.HandleFunc("GET /quotes", guard(h.HandleListQuotes))
+	mux.HandleFunc("GET /quotes/{id}", guard(h.HandleGetQuotePath))
+	mux.HandleFunc("GET /quotes/{id}/file", guard(h.HandleDownloadOriginalFile))
+	mux.HandleFunc("PUT /quotes/{id}", guard(h.HandleUpdateQuote))
+	mux.HandleFunc("PUT /quotes/{id}/state", guard(h.HandleUpdateState))
+	mux.HandleFunc("POST /quotes/{id}/convert", guard(h.HandleConvertToOrder))
 }
 
 // createQuoteRequest is the JSON payload for creating a quote.
@@ -37,7 +57,7 @@ type createQuoteRequest struct {
 func (h *Handler) HandleCreateQuote(w http.ResponseWriter, r *http.Request) {
 	var req createQuoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -47,12 +67,16 @@ func (h *Handler) HandleCreateQuote(w http.ResponseWriter, r *http.Request) {
 	if req.OriginalFileB64 != "" {
 		data, err := base64.StdEncoding.DecodeString(req.OriginalFileB64)
 		if err == nil {
+			if len(data) > 5<<20 {
+				httputil.RespondError(w, r, "original file exceeds 5MB limit", http.StatusBadRequest, nil)
+				return
+			}
 			q.OriginalFile = data
 		}
 	}
 
 	if err := h.service.CreateQuote(r.Context(), q); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to create quote", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -64,13 +88,13 @@ func (h *Handler) HandleGetQuotePath(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	q, err := h.service.GetQuote(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httputil.RespondError(w, r, "failed to get quote", http.StatusNotFound, err)
 		return
 	}
 
@@ -79,32 +103,43 @@ func (h *Handler) HandleGetQuotePath(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleListQuotes(w http.ResponseWriter, r *http.Request) {
-	quotes, err := h.service.ListQuotes(r.Context())
+	page := pagination.FromRequest(r)
+	quotes, total, err := h.service.ListQuotesPaginated(r.Context(), page.Limit, page.Offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to list quotes", http.StatusInternalServerError, err)
 		return
 	}
 
+	resp := pagination.PagedResponse[Quote]{
+		Data:   quotes,
+		Total:  total,
+		Limit:  page.Limit,
+		Offset: page.Offset,
+	}
+	if resp.Data == nil {
+		resp.Data = []Quote{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(quotes)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) HandleConvertToOrder(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	q, err := h.service.GetQuote(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Quote not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "Quote not found", http.StatusNotFound, err)
 		return
 	}
 
 	if q.State != QuoteStateDraft && q.State != QuoteStateSent && q.State != QuoteStateAccepted {
-		http.Error(w, "Quote cannot be converted in its current state", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Quote cannot be converted in its current state", http.StatusBadRequest, nil)
 		return
 	}
 
@@ -134,7 +169,7 @@ func (h *Handler) HandleConvertToOrder(w http.ResponseWriter, r *http.Request) {
 
 	// Mark quote as ACCEPTED
 	if err := h.service.UpdateState(r.Context(), id, QuoteStateAccepted); err != nil {
-		http.Error(w, "Failed to update quote state: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to update quote state", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -147,13 +182,13 @@ func (h *Handler) HandleUpdateQuote(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	var req createQuoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
@@ -162,9 +197,9 @@ func (h *Handler) HandleUpdateQuote(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.service.UpdateQuote(r.Context(), q); err != nil {
 		if err.Error() == "only DRAFT quotes can be edited" {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httputil.RespondError(w, r, "only DRAFT quotes can be edited", http.StatusBadRequest, err)
 		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httputil.RespondError(w, r, "failed to update quote", http.StatusInternalServerError, err)
 		}
 		return
 	}
@@ -172,7 +207,7 @@ func (h *Handler) HandleUpdateQuote(w http.ResponseWriter, r *http.Request) {
 	// Return updated quote with lines
 	updated, err := h.service.GetQuote(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get updated quote", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -184,7 +219,7 @@ func (h *Handler) HandleUpdateState(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
@@ -192,19 +227,19 @@ func (h *Handler) HandleUpdateState(w http.ResponseWriter, r *http.Request) {
 		State QuoteState `json:"state"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.service.UpdateState(r.Context(), id, body.State); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, r, "failed to update quote state", http.StatusBadRequest, err)
 		return
 	}
 
 	// Return updated quote
 	q, err := h.service.GetQuote(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get quote after state update", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -215,7 +250,7 @@ func (h *Handler) HandleUpdateState(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleGetAnalytics(w http.ResponseWriter, r *http.Request) {
 	analytics, err := h.service.GetAnalytics(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, r, "failed to get quote analytics", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -227,23 +262,24 @@ func (h *Handler) HandleDownloadOriginalFile(w http.ResponseWriter, r *http.Requ
 	idStr := r.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "Invalid ID format", http.StatusBadRequest)
+		httputil.RespondError(w, r, "Invalid ID format", http.StatusBadRequest, err)
 		return
 	}
 
 	data, filename, contentType, err := h.service.GetOriginalFile(r.Context(), id)
 	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
+		httputil.RespondError(w, r, "File not found", http.StatusNotFound, err)
 		return
 	}
 	if len(data) == 0 {
-		http.Error(w, "No original file stored for this quote", http.StatusNotFound)
+		httputil.RespondError(w, r, "No original file stored for this quote", http.StatusNotFound, nil)
 		return
 	}
 
 	if filename == "" {
 		filename = "original-upload"
 	}
+	filename = sanitizeFilename(filename)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "inline; filename=\""+filename+"\"")

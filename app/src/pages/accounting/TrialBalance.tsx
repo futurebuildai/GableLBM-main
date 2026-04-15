@@ -3,6 +3,7 @@ import { fetchTrialBalance } from '../../services/GLService';
 import type { TrialBalanceRow } from '../../types/gl';
 import { Card, CardContent } from '../../components/ui/Card';
 import { BarChart3 } from 'lucide-react';
+import { useToast } from '../../components/ui/ToastContext';
 
 const TYPE_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
 const TYPE_LABELS: Record<string, string> = {
@@ -21,6 +22,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 const TrialBalance: React.FC = () => {
+    const { showToast } = useToast();
     const [rows, setRows] = useState<TrialBalanceRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [asOfDate, setAsOfDate] = useState(new Date().toISOString().split('T')[0]);
@@ -32,10 +34,11 @@ const TrialBalance: React.FC = () => {
             setRows(data || []);
         } catch (err) {
             console.error(err);
+            showToast('Failed to load trial balance', 'error');
         } finally {
             setLoading(false);
         }
-    }, [asOfDate]);
+    }, [asOfDate, showToast]);
 
     useEffect(() => { load(); }, [load]);
 

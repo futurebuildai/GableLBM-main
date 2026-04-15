@@ -269,7 +269,13 @@ func (s *Service) ListRoutes(ctx context.Context, dateStr *string, driverID *uui
 }
 
 func (s *Service) DispatchRoute(ctx context.Context, id uuid.UUID) error {
-	// TODO: Validate driver/vehicle availability?
+	route, err := s.repo.GetRoute(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get route: %w", err)
+	}
+	if route.Status != RouteStatusDraft && route.Status != RouteStatusScheduled {
+		return fmt.Errorf("cannot dispatch route in status %s: must be DRAFT or SCHEDULED", route.Status)
+	}
 	return s.repo.UpdateRouteStatus(ctx, id, RouteStatusInTransit)
 }
 
@@ -337,6 +343,13 @@ func (s *Service) GetDelivery(ctx context.Context, id uuid.UUID) (*Delivery, err
 }
 
 func (s *Service) CompleteDelivery(ctx context.Context, id uuid.UUID, req UpdateDeliveryStatusRequest) error {
+	switch req.Status {
+	case DeliveryStatusDelivered, DeliveryStatusFailed, DeliveryStatusPartial:
+		// valid terminal states
+	default:
+		return fmt.Errorf("invalid delivery status: %s", req.Status)
+	}
+
 	var pod *PODUpdate
 	if req.Status == DeliveryStatusDelivered || req.Status == DeliveryStatusPartial {
 		if req.PODProofURL == nil || req.PODSignedBy == nil {

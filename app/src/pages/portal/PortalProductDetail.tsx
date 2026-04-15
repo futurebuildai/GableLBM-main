@@ -4,6 +4,7 @@ import { ArrowLeft, Package, Plus, Minus, CheckCircle, XCircle, ShoppingCart } f
 import { Card, CardContent } from '../../components/ui/Card';
 import { PortalService } from '../../services/PortalService';
 import { CartSidebar } from '../../components/portal/CartSidebar';
+import { useToast } from '../../components/ui/ToastContext';
 import type { CatalogDetail } from '../../types/portal';
 
 const formatCurrency = (val: number): string =>
@@ -18,6 +19,7 @@ export const PortalProductDetail = () => {
     const [adding, setAdding] = useState(false);
     const [cartOpen, setCartOpen] = useState(false);
     const [cartRefresh, setCartRefresh] = useState(0);
+    const { showToast } = useToast();
 
     const fetchProduct = useCallback(() => {
         if (!id) return;
@@ -39,6 +41,7 @@ export const PortalProductDetail = () => {
             setCartOpen(true);
         } catch (err) {
             console.error('Add to cart failed:', err);
+            showToast('Failed to add to cart', 'error');
         } finally {
             setAdding(false);
         }

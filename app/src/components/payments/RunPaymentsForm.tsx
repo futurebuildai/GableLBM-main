@@ -1,5 +1,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { paymentService } from '../../services/paymentService';
+import type { Payment } from '../../types/payment';
+
+declare global {
+    interface Window {
+        Runner?: {
+            init(opts: Record<string, unknown>): void;
+            createToken(): Promise<{ token: string }>;
+        };
+    }
+}
 
 /**
  * RunPaymentsForm — PCI-compliant card input component.
@@ -20,19 +30,20 @@ import { paymentService } from '../../services/paymentService';
 
 interface RunPaymentsFormProps {
     invoiceId: string;
-    amount: number; // In dollars
-    onSuccess: (payment: any) => void;
+    amountCents: number; // In cents
+    onSuccess: (payment: Payment) => void;
     onError: (error: string) => void;
     onCancel: () => void;
 }
 
 const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
     invoiceId,
-    amount,
+    amountCents,
     onSuccess,
     onError,
     onCancel,
 }) => {
+    const displayAmount = (amountCents / 100).toFixed(2);
     const [loading, setLoading] = useState(false);
     const [, setPublicKey] = useState<string | null>(null);
     const [initError] = useState<string | null>(null);
@@ -48,26 +59,26 @@ const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
             try {
                 const intent = await paymentService.createPaymentIntent({
                     invoice_id: invoiceId,
-                    amount,
+                    amount: amountCents,
                 });
                 setPublicKey(intent.public_key);
 
                 // Initialize Runner.js with the public key
                 // In production, this would load the Runner.js script and mount the secure iframe
-                if (typeof (window as any).Runner !== 'undefined') {
-                    (window as any).Runner.init({
+                if (typeof window.Runner !== 'undefined') {
+                    window.Runner.init({
                         publicKey: intent.public_key,
                         container: '#run-payments-container',
                     });
                 }
-            } catch (err: any) {
+            } catch (err: unknown) {
                 // Gateway not configured — fall back to demo mode
-                console.warn('Run Payments not available, using demo mode:', err.message);
+                console.warn('Run Payments not available, using demo mode:', err instanceof Error ? err.message : 'Unknown error');
                 setDemoMode(true);
             }
         };
         fetchIntent();
-    }, [invoiceId, amount]);
+    }, [invoiceId, amountCents]);
 
     const handleSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
@@ -79,9 +90,9 @@ const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
             if (demoMode) {
                 // Demo mode: create a fake token
                 tokenId = `demo_tok_${Date.now()}`;
-            } else if (typeof (window as any).Runner !== 'undefined') {
+            } else if (typeof window.Runner !== 'undefined') {
                 // Production mode: get token from Runner.js
-                const result = await (window as any).Runner.createToken();
+                const result = await window.Runner.createToken();
                 tokenId = result.token;
             } else {
                 throw new Error('Runner.js not loaded');
@@ -91,17 +102,17 @@ const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
             const payment = await paymentService.processCardPayment({
                 invoice_id: invoiceId,
                 token_id: tokenId,
-                amount,
+                amount: amountCents,
                 notes,
             });
 
             onSuccess(payment);
-        } catch (err: any) {
-            onError(err.message || 'Card payment failed');
+        } catch (err: unknown) {
+            onError(err instanceof Error ? err.message : 'Card payment failed');
         } finally {
             setLoading(false);
         }
-    }, [invoiceId, amount, notes, demoMode, onSuccess, onError]);
+    }, [invoiceId, amountCents, notes, demoMode, onSuccess, onError]);
 
     if (initError) {
         return (
@@ -117,7 +128,7 @@ const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
             <div style={styles.header}>
                 <div style={styles.amountDisplay}>
                     <span style={styles.amountLabel}>Charge Amount</span>
-                    <span style={styles.amountValue}>${amount.toFixed(2)}</span>
+                    <span style={styles.amountValue}>${displayAmount}</span>
                 </div>
                 <div style={styles.poweredBy}>
                     Powered by <strong>Run Payments</strong>
@@ -186,7 +197,7 @@ const RunPaymentsForm: React.FC<RunPaymentsFormProps> = ({
                     style={styles.submitButton}
                     disabled={loading}
                 >
-                    {loading ? 'Processing...' : `Charge $${amount.toFixed(2)}`}
+                    {loading ? 'Processing...' : `Charge $${displayAmount}`}
                 </button>
             </div>
         </form>

@@ -5,28 +5,30 @@ import { useNavigate } from "react-router-dom";
 import { PageTransition } from "../../components/ui/PageTransition";
 import { Card, CardContent } from "../../components/ui/Card";
 import { Truck, MapPin, Calendar, ChevronRight, User } from "lucide-react";
+import { useToast } from "../../components/ui/ToastContext";
 
 export function RouteList() {
     const [drivers, setDrivers] = useState<Driver[]>([]);
     const [selectedDriver, setSelectedDriver] = useState<string>("");
     const [routes, setRoutes] = useState<Route[]>([]);
     const navigate = useNavigate();
+    const { showToast } = useToast();
 
     useEffect(() => {
-        deliveryService.listDrivers().then(setDrivers);
-    }, []);
+        deliveryService.listDrivers().then(setDrivers).catch(() => { setDrivers([]); showToast('Failed to load drivers', 'error'); });
+    }, [showToast]);
 
     useEffect(() => {
         let active = true;
         if (selectedDriver) {
             deliveryService.listRoutes(undefined, selectedDriver).then(data => {
                 if (active) setRoutes(data);
-            });
+            }).catch(() => { if (active) { setRoutes([]); showToast('Failed to load routes', 'error'); } });
         } else {
-            setTimeout(() => setRoutes([]), 0);
+            setRoutes([]);
         }
         return () => { active = false; };
-    }, [selectedDriver]);
+    }, [selectedDriver, showToast]);
 
     const statusConfig = (status: string) => {
         switch (status) {

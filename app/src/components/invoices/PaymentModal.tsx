@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { CreatePaymentRequest, PaymentMethod } from '../../types/payment';
 
 interface PaymentModalProps {
@@ -12,7 +12,13 @@ interface PaymentModalProps {
 const PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'CARD', 'CHECK', 'ACCOUNT'];
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onSave, invoiceId, amountDue }) => {
-    const [amount, setAmount] = useState<number>(amountDue);
+    // amountDue is in cents; display input is in dollars
+    const [amountDollars, setAmountDollars] = useState<number>(amountDue / 100);
+
+    useEffect(() => {
+        setAmountDollars(amountDue / 100);
+    }, [amountDue]);
+
     const [method, setMethod] = useState<PaymentMethod>('CARD');
     const [reference, setReference] = useState('');
     const [notes, setNotes] = useState('');
@@ -27,10 +33,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
         setError('');
 
         try {
-            await onSave({ invoice_id: invoiceId, amount, method, reference, notes });
+            const amountCents = Math.round(amountDollars * 100);
+            await onSave({ invoice_id: invoiceId, amount: amountCents, method, reference, notes });
             onClose();
             // Reset
-            setAmount(0);
+            setAmountDollars(0);
             setMethod('CARD');
             setReference('');
             setNotes('');
@@ -42,10 +49,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
             <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                 <div className="mb-6">
-                    <h2 className="text-xl font-bold text-zinc-100">Record Payment</h2>
+                    <h2 id="payment-modal-title" className="text-xl font-bold text-zinc-100">Record Payment</h2>
                     <p className="text-zinc-400 text-sm mt-1">Apply payment to Invoice</p>
                 </div>
 
@@ -63,8 +70,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, onS
                             required
                             min="0.01"
                             step="0.01"
-                            value={amount}
-                            onChange={(e) => setAmount(parseFloat(e.target.value))}
+                            value={amountDollars}
+                            onChange={(e) => setAmountDollars(parseFloat(e.target.value))}
                             className="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono"
                         />
                     </div>

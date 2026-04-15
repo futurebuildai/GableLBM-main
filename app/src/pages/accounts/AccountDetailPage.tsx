@@ -13,8 +13,10 @@ import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users,
 import { cn } from '../../lib/utils';
 import { ContactList } from './ContactList';
 import { ActivityFeed } from './ActivityFeed';
+import { useToast } from '../../components/ui/ToastContext';
 
 export function AccountDetailPage() {
+    const { showToast } = useToast();
     const { id } = useParams<{ id: string }>();
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [summary, setSummary] = useState<AccountSummary | null>(null);
@@ -47,10 +49,11 @@ export function AccountDetailPage() {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
                     setSalesperson(sp);
-                } catch { /* not critical */ }
+                } catch { showToast('Failed to load salesperson details', 'error'); }
             }
         } catch (error) {
             console.error('Failed to load account data:', error);
+            showToast('Failed to load account data', 'error');
         } finally {
             setLoading(false);
         }
@@ -70,6 +73,7 @@ export function AccountDetailPage() {
             }
         } catch (error) {
             console.error('Failed to assign salesperson:', error);
+            showToast('Failed to assign salesperson', 'error');
         } finally {
             setAssigningRep(false);
             setShowSpDropdown(false);
@@ -81,7 +85,7 @@ export function AccountDetailPage() {
             try {
                 const team = await SalesTeamService.listSalesTeam();
                 setSalesTeam(team);
-            } catch { /* ignore */ }
+            } catch { showToast('Failed to load sales team', 'error'); }
         }
         setShowSpDropdown(!showSpDropdown);
     }
