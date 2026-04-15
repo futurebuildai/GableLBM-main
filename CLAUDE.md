@@ -5,7 +5,7 @@ GableLBM is an open-source ERP platform purpose-built for lumber and building ma
 
 ## Repo Structure
 ```
-app/          → React 19 frontend (Vite + TypeScript + Tailwind)
+app/          → Lit 3 frontend (Vite + TypeScript + Tailwind)
 backend/      → Go backend (Chi router + pgx + PostgreSQL)
 docs/         → Architecture, design system, and database specs
 .agent/       → Antigravity agent workflows
@@ -23,12 +23,12 @@ docs/         → Architecture, design system, and database specs
 - **PDF:** maroto | **Excel:** excelize | **Cron:** robfig/cron v3
 
 ### Frontend
-- **Framework:** React 19 + TypeScript 5.9 + Vite 7
+- **Framework:** Lit 3 Web Components + TypeScript 5.9 + Vite 7
 - **Styling:** Tailwind CSS 3.4 + custom design tokens
-- **Components:** Shadcn/UI (Headless UI + Radix primitives)
-- **Routing:** React Router 7 (nested routes under /erp, /portal, /driver, /yard, /pos)
-- **Animation:** Framer Motion 12
-- **Charts:** Recharts 3 | **Maps:** React Leaflet 5 | **Icons:** Lucide React
+- **Components:** Custom `gable-*` web components (Light DOM for Tailwind compatibility)
+- **Routing:** Custom SPA router (singleton service with popstate/pushState)
+- **Animation:** CSS transitions/animations (defined in tailwind.config.js)
+- **Charts:** Chart.js 4 | **Maps:** Vanilla Leaflet | **Icons:** Lucide (vanilla SVG)
 
 ## Architecture
 - **Pattern:** Modular monolith — single Go binary, strictly decoupled internal modules
@@ -55,9 +55,13 @@ docs/         → Architecture, design system, and database specs
 
 ### Frontend Code
 - App routes: `/erp/*` (ERP desktop), `/portal/*` (B2B dealer portal), `/driver/*` (mobile), `/yard/*` (warehouse), `/pos` (point of sale)
-- Layout shells: `AppShell` (ERP), `PortalLayout` (portal), `DriverLayout`, `YardLayout`
-- Use existing `Button`, `Toast`, `Omnibar`, `PageTransition` components
-- Design tokens defined in `tailwind.config.ts` — never hardcode colors
+- Layout shells: `<gable-app-shell>` (ERP), `<gable-portal-layout>` (portal), `<gable-driver-layout>`, `<gable-yard-layout>`
+- All custom elements use `gable-` prefix and Light DOM (`createRenderRoot() { return this; }`)
+- State: `@state()` for internal, `@property()` for external; services are framework-agnostic singletons
+- Routing: `router.navigate(path)` via singleton; route params as `@property({ attribute: 'route-id' })`
+- Toast notifications: `ToastService.show(message, type)` singleton
+- Icons: `icon(LucideIcon, size, classes)` helper from `lib/icons.ts`
+- Design tokens defined in `tailwind.config.js` — never hardcode colors
 
 ### Design System (Quick Ref)
 | Token | Hex | Usage |
