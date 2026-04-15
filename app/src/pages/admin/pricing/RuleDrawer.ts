@@ -7,6 +7,7 @@ import type { CategoryPricingRule, CategoryRuleType, CategoryPricingAudit } from
 import type { Customer } from '../../../types/customer';
 import { cn } from '../../../lib/utils';
 import { ToastService } from '../../../lib/toast-service';
+import '../../../components/customers/CustomerSelect.ts';
 
 const RULE_TYPES: { value: CategoryRuleType; label: string; unit: string; description: string }[] = [
   { value: 'MARKDOWN', label: 'Discount from List', unit: '%', description: 'Sell = List x (1 - X%)' },

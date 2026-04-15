@@ -6,6 +6,7 @@ import { Search, Package, MapPin, Minus, Plus, ArrowRightLeft, X, Loader2, ScanL
 import type { Product, Inventory } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
 import { fetchWithAuth } from '../../services/fetchClient';
+import '../../components/BarcodeScanner.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 

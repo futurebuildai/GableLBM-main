@@ -7,6 +7,8 @@ import type { ResolvedCategoryPrice } from '../../../types/category-pricing';
 import type { Product } from '../../../types/product';
 import type { Customer } from '../../../types/customer';
 import { cn } from '../../../lib/utils';
+import '../../../components/products/ProductSelect.ts';
+import '../../../components/customers/CustomerSelect.ts';
 
 const MATCH_LABELS: Record<string, { label: string; color: string }> = {
   account_exact: { label: 'Account + Exact Category', color: 'text-gable-green' },

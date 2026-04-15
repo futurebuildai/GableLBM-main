@@ -1,8 +1,7 @@
 import type { RouteConfig } from './lib/router.ts';
 
 /**
- * Route table — mirrors the React Router <Routes> from the old App.tsx.
- * Order matters: more-specific paths must come before less-specific ones.
+ * Route table — order matters: more-specific paths must come before less-specific ones.
  */
 export const routes: RouteConfig[] = [
   // ── POS (no layout) ─────────────────────────────────────────────

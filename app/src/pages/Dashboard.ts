@@ -12,6 +12,14 @@ import type {
     RevenueTrendPoint,
 } from '../types/dashboard.ts';
 
+// Side-effect imports: register child custom elements
+import '../components/dashboard/KPICard.ts';
+import '../components/dashboard/RevenueTrendChart.ts';
+import '../components/dashboard/OrderStatusChart.ts';
+import '../components/dashboard/TopCustomersTable.ts';
+import '../components/dashboard/InventoryAlertsWidget.ts';
+import '../components/dashboard/RecentOrdersFeed.ts';
+
 const REFRESH_INTERVAL = 60000; // 60 seconds
 
 @customElement('gable-dashboard')
@@ -146,7 +154,7 @@ export class GableDashboard extends LitElement {
                 <!-- KPI Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <gable-kpi-card
-                        title="Today's Revenue"
+                        card-title="Today's Revenue"
                         .value=${this.summary ? this.formatCurrency(this.summary.today_revenue) : '$0.00'}
                         .trend=${this.summary?.today_revenue_change ?? undefined}
                         .iconHtml=${icon(DollarSign, 20, 'w-5 h-5')}
@@ -154,20 +162,20 @@ export class GableDashboard extends LitElement {
                         valueColor="text-gable-green"
                     ></gable-kpi-card>
                     <gable-kpi-card
-                        title="Active Orders"
+                        card-title="Active Orders"
                         .value=${this.summary?.active_orders ?? 0}
                         .iconHtml=${icon(ShoppingCart, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                     ></gable-kpi-card>
                     <gable-kpi-card
-                        title="Pending Dispatch"
+                        card-title="Pending Dispatch"
                         .value=${this.summary?.pending_dispatch ?? 0}
                         .iconHtml=${icon(Truck, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-blueprint-blue"
                     ></gable-kpi-card>
                     <gable-kpi-card
-                        title="Outstanding AR"
+                        card-title="Outstanding AR"
                         .value=${this.summary ? this.formatCurrency(this.summary.outstanding_ar) : '$0.00'}
                         .subValue=${this.summary ? `${this.summary.outstanding_ar_count} invoices` : undefined}
                         .iconHtml=${icon(CreditCard, 20, 'w-5 h-5')}

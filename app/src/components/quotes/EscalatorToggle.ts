@@ -33,7 +33,7 @@ export class GableEscalatorToggle extends LitElement {
   }
 
   private _emit(escalator: QuoteLineEscalator) {
-    this.dispatchEvent(new CustomEvent('change', { detail: escalator, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('escalator-change', { detail: escalator, bubbles: true, composed: true }));
   }
 
   private _handleToggle() {

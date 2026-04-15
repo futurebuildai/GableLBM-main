@@ -5,6 +5,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ArrowLeft, Package, Plus, Minus, CheckCircle, XCircle, ShoppingCart } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { CatalogDetail } from '../../types/portal';
+import '../../components/portal/CartSidebar.ts';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -210,7 +211,7 @@ export class PortalProductDetail extends LitElement {
                 </div>
 
                 <gable-cart-sidebar
-                    ?isOpen=${this.cartOpen}
+                    ?is-open=${this.cartOpen}
                     .refreshKey=${this.cartRefresh}
                     @close=${() => { this.cartOpen = false; }}
                 ></gable-cart-sidebar>

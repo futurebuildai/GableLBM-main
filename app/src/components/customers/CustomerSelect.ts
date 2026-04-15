@@ -46,7 +46,7 @@ export class GableCustomerSelect extends LitElement {
   }
 
   private _selectCustomer(customer: Customer) {
-    this.dispatchEvent(new CustomEvent('select', { detail: customer, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('customer-select', { detail: customer, bubbles: true, composed: true }));
     this._searchTerm = '';
     this._isOpen = false;
   }

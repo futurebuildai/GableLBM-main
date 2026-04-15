@@ -5,6 +5,13 @@ import { Plus, Search, Package } from 'lucide';
 import { ProductService } from '../services/product.service.ts';
 import type { Product } from '../types/product.ts';
 
+// Side-effect imports: register child custom elements
+import '../components/inventory/InventoryTable.ts';
+import '../components/inventory/AddProductModal.ts';
+import '../components/inventory/StockAdjustmentModal.ts';
+import '../components/inventory/InventoryTransferModal.ts';
+import '../components/inventory/ProductMarginModal.ts';
+
 @customElement('gable-inventory')
 export class GableInventory extends LitElement {
     createRenderRoot() { return this; }
@@ -123,39 +130,39 @@ export class GableInventory extends LitElement {
                         ` : html`
                             <gable-inventory-table
                                 .products=${this.filteredProducts}
-                                .onAdjustStock=${(p: Product) => this.handleAdjustStock(p)}
-                                .onTransferStock=${(p: Product) => this.handleTransferStock(p)}
-                                .onEditMargins=${(p: Product) => this.handleEditMargins(p)}
+                                @adjust-stock=${(e: CustomEvent) => this.handleAdjustStock(e.detail)}
+                                @transfer-stock=${(e: CustomEvent) => this.handleTransferStock(e.detail)}
+                                @edit-margins=${(e: CustomEvent) => this.handleEditMargins(e.detail)}
                             ></gable-inventory-table>
                         `}
                     </div>
                 </div>
 
                 <gable-add-product-modal
-                    ?isOpen=${this.isModalOpen}
-                    .onClose=${() => { this.isModalOpen = false; }}
-                    .onSave=${(data: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => this.handleSaveProduct(data)}
+                    ?is-open=${this.isModalOpen}
+                    @close=${() => { this.isModalOpen = false; }}
+                    @save=${(e: CustomEvent) => this.handleSaveProduct(e.detail)}
                 ></gable-add-product-modal>
 
                 <gable-stock-adjustment-modal
-                    ?isOpen=${this.isStockModalOpen}
-                    .onClose=${() => { this.isStockModalOpen = false; }}
+                    ?is-open=${this.isStockModalOpen}
+                    @close=${() => { this.isStockModalOpen = false; }}
                     .product=${this.selectedProduct}
-                    .onSuccess=${() => { this.loadProducts(); }}
+                    @success=${() => { this.loadProducts(); }}
                 ></gable-stock-adjustment-modal>
 
                 <gable-inventory-transfer-modal
-                    ?isOpen=${this.isTransferModalOpen}
-                    .onClose=${() => { this.isTransferModalOpen = false; }}
+                    ?is-open=${this.isTransferModalOpen}
+                    @close=${() => { this.isTransferModalOpen = false; }}
                     .product=${this.selectedProduct}
-                    .onSuccess=${() => { this.loadProducts(); }}
+                    @success=${() => { this.loadProducts(); }}
                 ></gable-inventory-transfer-modal>
 
                 <gable-product-margin-modal
-                    ?isOpen=${this.isMarginModalOpen}
-                    .onClose=${() => { this.isMarginModalOpen = false; }}
+                    ?is-open=${this.isMarginModalOpen}
+                    @close=${() => { this.isMarginModalOpen = false; }}
                     .product=${this.selectedProduct}
-                    .onSuccess=${() => { this.loadProducts(); }}
+                    @success=${() => { this.loadProducts(); }}
                 ></gable-product-margin-modal>
             </div>
         `;

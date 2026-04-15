@@ -15,9 +15,16 @@ const navItems = [
 export class GableYardLayout extends LitElement {
   createRenderRoot() { return this; }
 
+  private _boundRouteChanged = () => { this.requestUpdate(); };
+
   connectedCallback() {
     super.connectedCallback();
-    router.addEventListener('route-changed', () => this.requestUpdate());
+    router.addEventListener('route-changed', this._boundRouteChanged);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    router.removeEventListener('route-changed', this._boundRouteChanged);
   }
 
   render() {

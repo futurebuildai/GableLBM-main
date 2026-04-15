@@ -10,6 +10,10 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown } from 'lucide';
 
+// Side-effect imports: register child custom elements
+import './ContactList.ts';
+import './ActivityFeed.ts';
+
 @customElement('gable-account-detail')
 export class GableAccountDetail extends LitElement {
     createRenderRoot() { return this; }

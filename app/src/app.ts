@@ -11,6 +11,9 @@ import './components/layout/yard-layout.ts';
 // Import toast container (global)
 import './components/ui/toast-container.ts';
 
+// Import not-found page (fallback for unknown routes)
+import './components/ui/not-found.ts';
+
 @customElement('gable-app')
 export class GableApp extends LitElement {
   // Light DOM so Tailwind works
@@ -122,12 +125,12 @@ export class GableApp extends LitElement {
       '/portal/team/invite': 'gable-portal-invite',
       '/portal/projects': 'gable-project-list',
       '/portal/projects/:id': 'gable-project-dashboard',
-      '/driver': 'gable-route-list',
+      '/driver': 'gable-driver-route-list',
       '/driver/routes/:id': 'gable-stop-list',
       '/driver/deliveries/:id': 'gable-delivery-detail',
       '/yard': 'gable-pick-queue',
       '/yard/pick/:id': 'gable-pick-detail',
-      '/yard/inventory': 'gable-inventory-lookup',
+      '/yard/inventory': 'gable-yard-inventory-lookup',
       '/yard/count': 'gable-cycle-count',
       '/yard/receiving': 'gable-receive-po',
     };

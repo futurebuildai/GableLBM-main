@@ -5,6 +5,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ScanBarcode, ChevronRight, ArrowLeft, Check, Package, Loader2, ScanLine } from 'lucide';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder } from '../../types/purchaseOrder';
+import '../../components/BarcodeScanner.ts';
 
 @customElement('gable-receive-po')
 export class ReceivePO extends LitElement {

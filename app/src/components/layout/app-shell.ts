@@ -23,13 +23,14 @@ export class GableAppShell extends LitElement {
   private _boundKeyDown = this._handleKeyDown.bind(this);
   private _boundOnline = () => { this._isOffline = false; };
   private _boundOffline = () => { this._isOffline = true; };
+  private _boundRouteChanged = () => { this.requestUpdate(); };
 
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener('keydown', this._boundKeyDown);
     window.addEventListener('online', this._boundOnline);
     window.addEventListener('offline', this._boundOffline);
-    router.addEventListener('route-changed', () => this.requestUpdate());
+    router.addEventListener('route-changed', this._boundRouteChanged);
   }
 
   disconnectedCallback() {
@@ -37,6 +38,7 @@ export class GableAppShell extends LitElement {
     window.removeEventListener('keydown', this._boundKeyDown);
     window.removeEventListener('online', this._boundOnline);
     window.removeEventListener('offline', this._boundOffline);
+    router.removeEventListener('route-changed', this._boundRouteChanged);
   }
 
   private _handleKeyDown(e: KeyboardEvent) {

@@ -6,6 +6,12 @@ import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
 import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse } from 'lucide';
+import './tabs/ProductOverviewTab.ts';
+import './tabs/ProductContentTab.ts';
+import './tabs/ProductMediaTab.ts';
+import './tabs/ProductCollateralTab.ts';
+import './tabs/ProductSEOTab.ts';
+import './tabs/ProductStockTab.ts';
 
 type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock';
 
@@ -144,35 +150,35 @@ export class GableProductDetail extends LitElement {
                     ${this.activeTab === 'overview' ? html`
                         <gable-product-overview-tab
                             .product=${this.product}
-                            .onProductUpdate=${() => this.loadProduct()}
+                            @open-margin-modal=${() => this.loadProduct()}
                         ></gable-product-overview-tab>
                     ` : nothing}
                     ${this.activeTab === 'content' ? html`
                         <gable-product-content-tab
                             .productId=${this.product.id}
                             .content=${this.product.content}
-                            .onContentUpdate=${(c: PIMContent) => this.handleContentUpdate(c)}
+                            @content-update=${(e: CustomEvent<PIMContent>) => this.handleContentUpdate(e.detail)}
                         ></gable-product-content-tab>
                     ` : nothing}
                     ${this.activeTab === 'media' ? html`
                         <gable-product-media-tab
                             .productId=${this.product.id}
                             .media=${this.product.media}
-                            .onMediaUpdate=${() => this.handleMediaUpdate()}
+                            @media-update=${() => this.handleMediaUpdate()}
                         ></gable-product-media-tab>
                     ` : nothing}
                     ${this.activeTab === 'collateral' ? html`
                         <gable-product-collateral-tab
                             .productId=${this.product.id}
                             .collateral=${this.product.collateral}
-                            .onCollateralUpdate=${() => this.handleCollateralUpdate()}
+                            @collateral-update=${() => this.handleCollateralUpdate()}
                         ></gable-product-collateral-tab>
                     ` : nothing}
                     ${this.activeTab === 'seo' ? html`
                         <gable-product-seo-tab
                             .productId=${this.product.id}
                             .content=${this.product.content}
-                            .onContentUpdate=${(c: PIMContent) => this.handleContentUpdate(c)}
+                            @content-update=${(e: CustomEvent<PIMContent>) => this.handleContentUpdate(e.detail)}
                         ></gable-product-seo-tab>
                     ` : nothing}
                     ${this.activeTab === 'stock' ? html`

@@ -5,6 +5,8 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { Search, Filter, ShoppingCart, RefreshCw, Package } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { CatalogProduct } from '../../types/portal';
+import '../../components/portal/CartSidebar.ts';
+import '../../components/portal/ProductCard.ts';
 
 @customElement('gable-portal-catalog')
 export class PortalCatalog extends LitElement {
@@ -172,18 +174,18 @@ export class PortalCatalog extends LitElement {
                     <p class="text-xs text-zinc-500 mb-4">${this.products.length} product${this.products.length !== 1 ? 's' : ''}</p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         ${this.products.map(product => html`
-                            <gable-product-card
+                            <gable-portal-product-card
                                 .product=${product}
                                 .adding=${this.addingId === product.id}
                                 @add-to-cart=${(e: CustomEvent) => this._handleAddToCart(e.detail.productId, e.detail.quantity)}
-                            ></gable-product-card>
+                            ></gable-portal-product-card>
                         `)}
                     </div>
                 `}
 
                 <!-- Cart Sidebar -->
                 <gable-cart-sidebar
-                    ?isOpen=${this.cartOpen}
+                    ?is-open=${this.cartOpen}
                     .refreshKey=${this.cartRefresh}
                     @close=${() => { this.cartOpen = false; }}
                 ></gable-cart-sidebar>

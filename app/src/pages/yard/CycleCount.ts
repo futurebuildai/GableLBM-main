@@ -6,6 +6,7 @@ import { ClipboardCheck, MapPin, ChevronRight, Check, AlertTriangle, Loader2, Sc
 import type { Product } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
 import { fetchWithAuth } from '../../services/fetchClient';
+import '../../components/BarcodeScanner.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 

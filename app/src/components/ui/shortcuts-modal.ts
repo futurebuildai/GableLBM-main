@@ -10,7 +10,7 @@ export class GableShortcutsModal extends LitElement {
   @property({ type: Boolean }) open = false;
 
   private _close() {
-    this.dispatchEvent(new Event('close'));
+    this.dispatchEvent(new Event('close', { bubbles: true, composed: true }));
   }
 
   private _shortcutItem(keys: string[], description: string) {

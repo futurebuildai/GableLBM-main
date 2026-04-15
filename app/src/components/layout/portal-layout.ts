@@ -31,7 +31,14 @@ export class GablePortalLayout extends LitElement {
     if (!this._user) {
       router.replace('/portal/login');
     }
-    router.addEventListener('route-changed', () => this.requestUpdate());
+    router.addEventListener('route-changed', this._boundRouteChanged);
+  }
+
+  private _boundRouteChanged = () => { this.requestUpdate(); };
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    router.removeEventListener('route-changed', this._boundRouteChanged);
   }
 
   private async _handleLogout() {

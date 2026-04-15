@@ -14,7 +14,14 @@ import type { QuoteLineEscalator } from '../types/pricing.ts';
 import type { ParseResponse, ParsedItem } from '../types/parsing.ts';
 import type { Vehicle } from '../types/delivery.ts';
 import { Save, FileText, Calculator, CreditCard, AlertCircle, TrendingUp, Truck, Package } from 'lucide';
-// gable-quote-view-tabs is defined in ./quotes/QuoteList.ts and must be imported there
+
+// Side-effect imports: register child custom elements
+import './quotes/QuoteList.ts';
+import '../components/customers/CustomerSelect.ts';
+import '../components/quotes/MaterialListUpload.ts';
+import '../components/quotes/LineItemEditor.ts';
+import '../components/quotes/EscalatorToggle.ts';
+import '../components/quotes/ParsedResultsPanel.ts';
 
 interface LineWithEscalator {
     product_id: string;
@@ -290,7 +297,7 @@ export class GableQuoteBuilder extends LitElement {
                                     Customer Details
                                 </h2>
                                 <gable-customer-select
-                                    .onSelect=${(c: Customer) => { this.customer = c; }}
+                                    @customer-select=${(e: CustomEvent) => { this.customer = e.detail; }}
                                     .selectedCustomerId=${this.customer?.id}
                                 ></gable-customer-select>
 
@@ -467,7 +474,7 @@ export class GableQuoteBuilder extends LitElement {
                                 <div class="flex items-center justify-between mb-6">
                                     <h2 class="text-lg font-medium text-white">Line Items</h2>
                                     <gable-material-list-upload
-                                        .onParseComplete=${(result: ParseResponse) => this.handleParseComplete(result)}
+                                        @parse-complete=${(e: CustomEvent) => this.handleParseComplete(e.detail)}
                                         ?disabled=${this.loading}
                                     ></gable-material-list-upload>
                                 </div>
@@ -475,7 +482,7 @@ export class GableQuoteBuilder extends LitElement {
                                 <gable-line-item-editor
                                     .products=${this.products}
                                     .customerId=${this.customer?.id}
-                                    .onAddLine=${(p: Product, q: number, u: number) => this.handleAddLine(p, q, u)}
+                                    @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.unitPrice)}
                                 ></gable-line-item-editor>
 
                                 <!-- Lines Table -->
@@ -506,7 +513,7 @@ export class GableQuoteBuilder extends LitElement {
                                                         <gable-escalator-toggle
                                                             .basePrice=${line.unit_price}
                                                             .escalator=${line.escalator}
-                                                            .onChange=${(esc: QuoteLineEscalator) => this.handleEscalatorChange(idx, esc)}
+                                                            @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
                                                         ></gable-escalator-toggle>
                                                     </td>
                                                     <td class="px-6 py-4 text-right font-mono text-zinc-300 align-top">
@@ -566,8 +573,8 @@ export class GableQuoteBuilder extends LitElement {
                 ${this.showParsePanel && this.parseResult ? html`
                     <gable-parsed-results-panel
                         .result=${this.parseResult}
-                        .onAccept=${(items: ParsedItem[]) => this.handleAcceptParsed(items)}
-                        .onClose=${() => {
+                        @accept=${(e: CustomEvent) => this.handleAcceptParsed(e.detail)}
+                        @close=${() => {
                             this.showParsePanel = false;
                             this.parseResult = null;
                         }}

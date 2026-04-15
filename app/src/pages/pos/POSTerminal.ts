@@ -2,6 +2,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { posService } from '../../services/POSService';
 import type { POSTransaction, QuickSearchResult, POSLineItem } from '../../types/pos';
+import '../../components/BarcodeScanner.ts';
 
 /**
  * POSTerminal -- Full-screen retail counter sales interface.

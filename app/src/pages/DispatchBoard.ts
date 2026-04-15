@@ -4,6 +4,11 @@ import { icon } from '../lib/icons.ts';
 import { Truck, Calendar } from 'lucide';
 import type { Delivery, RouteStatus } from '../types/delivery';
 
+// Side-effect imports: register child custom elements
+import '../components/logistics/RouteList.ts';
+import '../components/logistics/DeliveryList.ts';
+import '../components/logistics/RouteMap.ts';
+
 @customElement('gable-dispatch-board')
 export class DispatchBoard extends LitElement {
   createRenderRoot() { return this; }
@@ -51,13 +56,13 @@ export class DispatchBoard extends LitElement {
           <!-- Left Panel: Route List -->
           <div class="w-1/3 flex flex-col overflow-hidden rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-md">
             <div class="p-0 flex-1 overflow-hidden flex flex-col">
-              <gable-route-list
+              <gable-route-list-component
                 .selectedRouteId=${this._selectedRouteId}
                 @select-route=${(e: CustomEvent) => {
                   const { routeId, vehicleId, routeStatus } = e.detail;
                   this._handleSelectRoute(routeId, vehicleId, routeStatus);
                 }}
-              ></gable-route-list>
+              ></gable-route-list-component>
             </div>
           </div>
 

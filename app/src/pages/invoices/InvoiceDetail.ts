@@ -9,6 +9,9 @@ import type { Invoice } from '../../types/invoice.ts';
 import type { Payment, CreatePaymentRequest } from '../../types/payment.ts';
 import { Download, CreditCard, Mail, RotateCcw } from 'lucide';
 
+// Side-effect imports: register child custom elements
+import '../../components/invoices/PaymentModal.ts';
+
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-invoice-detail')
@@ -314,9 +317,9 @@ export class GableInvoiceDetail extends LitElement {
 
                 ${invoice.id ? html`
                     <gable-payment-modal
-                        ?isOpen=${this.isPaymentModalOpen}
-                        .onClose=${() => { this.isPaymentModalOpen = false; }}
-                        .onSave=${(input: CreatePaymentRequest) => this.handlePayment(input)}
+                        ?is-open=${this.isPaymentModalOpen}
+                        @close=${() => { this.isPaymentModalOpen = false; }}
+                        @save=${(e: CustomEvent<CreatePaymentRequest>) => this.handlePayment(e.detail)}
                         .invoiceId=${invoice.id}
                         .amountDue=${amountDue > 0 ? amountDue : 0}
                     ></gable-payment-modal>

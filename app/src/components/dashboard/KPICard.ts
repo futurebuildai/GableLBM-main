@@ -6,7 +6,7 @@ import type { TemplateResult } from 'lit';
 export class GableKPICard extends LitElement {
     createRenderRoot() { return this; }
 
-    @property({ type: String }) title = '';
+    @property({ type: String, attribute: 'card-title' }) cardTitle = '';
     @property() value: string | number = '';
     @property({ type: String }) subValue?: string;
     @property({ type: Number }) trend?: number;
@@ -66,7 +66,7 @@ export class GableKPICard extends LitElement {
 
                 <div class="p-6 relative z-10">
                     <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-zinc-400 font-sans tracking-wide">${this.title}</h3>
+                        <h3 class="text-sm font-medium text-zinc-400 font-sans tracking-wide">${this.cardTitle}</h3>
                         ${this.iconHtml ? html`
                             <div class="p-2 rounded-lg bg-white/5 text-zinc-300 group-hover:text-gable-green group-hover:bg-gable-green/10 transition-colors duration-300">
                                 ${this.iconHtml}

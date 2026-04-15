@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement } from 'lit/decorators.js';
+import '../components/location/LocationManager.ts';
 
 @customElement('gable-locations')
 export class GableLocations extends LitElement {

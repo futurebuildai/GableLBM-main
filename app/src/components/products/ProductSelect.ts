@@ -46,7 +46,7 @@ export class GableProductSelect extends LitElement {
   }
 
   private _selectProduct(product: Product) {
-    this.dispatchEvent(new CustomEvent('select', { detail: product, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('product-select', { detail: product, bubbles: true, composed: true }));
     this._searchTerm = '';
     this._isOpen = false;
   }
