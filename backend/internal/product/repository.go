@@ -18,6 +18,7 @@ type Repository interface {
 	ListBelowReorder(ctx context.Context) ([]ReorderAlert, error)
 	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
+	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 }
 
 // PostgresRepository implements Repository using pgx
@@ -33,11 +34,11 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // CreateProduct inserts a new product into the database
 func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) error {
 	query := `
-		INSERT INTO products (sku, description, uom_primary, base_price, vendor, upc) 
-		VALUES ($1, $2, $3, $4, $5, $6) 
+		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.UPC).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC).Scan(
 		&p.ID,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -56,7 +57,7 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 // GetProduct retrieves a product by its ID
 func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.upc,
+		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
 		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
@@ -75,6 +76,7 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		&p.UOMPrimary,
 		&p.BasePrice,
 		&p.Vendor,
+		&p.VendorID,
 		&p.UPC,
 		&p.WeightLbs,
 		&p.ReorderPoint,
@@ -101,7 +103,7 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 // ListProducts retrieves all products
 func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.upc,
+		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
 		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
@@ -128,6 +130,7 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 			&p.UOMPrimary,
 			&p.BasePrice,
 			&p.Vendor,
+			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
 			&p.ReorderPoint,
@@ -162,7 +165,7 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 	}
 
 	query := `
-		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.upc,
+		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
 		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
@@ -190,6 +193,7 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 			&p.UOMPrimary,
 			&p.BasePrice,
 			&p.Vendor,
+			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
 			&p.ReorderPoint,
@@ -217,7 +221,7 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 // ListBelowReorder returns products whose current stock is below their reorder point
 func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAlert, error) {
 	query := `
-		SELECT p.id, p.sku, p.description, p.vendor,
+		SELECT p.id, p.sku, p.description, p.vendor, p.vendor_id,
 		       p.reorder_point, COALESCE(p.reorder_qty, 0),
 		       COALESCE(SUM(i.quantity), 0) AS current_stock,
 		       p.reorder_point - COALESCE(SUM(i.quantity), 0) AS deficit
@@ -242,6 +246,7 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 			&a.SKU,
 			&a.Description,
 			&a.Vendor,
+			&a.VendorID,
 			&a.ReorderPoint,
 			&a.ReorderQty,
 			&a.CurrentStock,
@@ -253,6 +258,13 @@ func (r *PostgresRepository) ListBelowReorder(ctx context.Context) ([]ReorderAle
 	}
 
 	return alerts, nil
+}
+
+// UpdateVendor writes both vendor (display name) and vendor_id (FK) atomically.
+func (r *PostgresRepository) UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error {
+	query := `UPDATE products SET vendor = $1, vendor_id = $2, updated_at = NOW() WHERE id = $3`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, vendorName, vendorID, id)
+	return err
 }
 
 func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {

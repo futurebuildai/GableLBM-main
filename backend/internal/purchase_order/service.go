@@ -39,83 +39,57 @@ func (s *Service) WithAIClient(c *ai.Client) {
 	s.aiClient = c
 }
 
-// CreateReorders checks for low stock alerts and creates Draft POs automatically
+// CreateReorders checks for low stock alerts and creates Draft POs automatically,
+// grouped by canonical vendor_id. Existing DRAFT POs for the same vendor are
+// reused rather than duplicated. Alerts with no vendor_id are bucketed under a
+// single "Unknown Vendor" row (upserted via vendor.EnsureVendorByName) so the
+// FK on purchase_orders.vendor_id is always satisfied.
 func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	if s.productSvc == nil {
 		return 0, fmt.Errorf("product service not configured")
 	}
+	if s.vendorSvc == nil {
+		return 0, fmt.Errorf("vendor service not configured")
+	}
 
-	// 1. Get products below reorder point
 	alerts, err := s.productSvc.ListBelowReorder(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to list reorder alerts: %w", err)
 	}
-
 	if len(alerts) == 0 {
 		return 0, nil
 	}
 
-	// 2. Group by Vendor
-	// Map: Vendor Name -> List of alerts
-	// Note: If vendor is nil, we group under "Unknown Vendor"
-	byVendor := make(map[string][]product.ReorderAlert)
-
-	for _, a := range alerts {
-		v := "Unknown Vendor"
-		if a.Vendor != nil && *a.Vendor != "" {
-			v = *a.Vendor
+	// Group by canonical vendor UUID. Alerts with NULL vendor_id are bucketed
+	// under a single sentinel "Unknown Vendor" row, upserted lazily.
+	resolveUnknown := func() (uuid.UUID, error) {
+		v, err := s.vendorSvc.EnsureVendorByName(ctx, "Unknown Vendor")
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("ensure unknown vendor: %w", err)
 		}
-		byVendor[v] = append(byVendor[v], a)
+		return v.ID, nil
+	}
+	byVendor, err := groupAlertsByVendor(alerts, resolveUnknown)
+	if err != nil {
+		return 0, err
 	}
 
 	createdCount := 0
+	for vendorID, items := range byVendor {
+		vid := vendorID // local copy for pointer
 
-	// 3. Create PO for each vendor group
-	for vendorName, items := range byVendor {
-		// Try to find existing vendor ID if possible?
-		// MVP: We don't have a Vendors table yet (stored as string on Product).
-		// We can't link to a Vendor UUID easily unless we look it up or create one.
-		// Current PO structure uses UUID for VendorID.
-		// Workaround: Use a placeholder UUID or leave nil?
-		// PO struct requires VendorID pointer.
-		// For L8, we should probably have a Vendors table, but given current constraints:
-		// We will create a new PO with NO Vendor UUID but put the Name in notes?
-		// Or try to resolve it.
-
-		// Let's create a "One-Time Vendor" UUID deterministically? Or just random.
-		// Since we can't save the string name on PO directly (it has vendor_id uuid).
-		// Actually, PO table has vendor_id UUID.
-		// And we don't have a Vendor Service.
-		// Product has "Vendor" string.
-		// This is a data model gap.
-		// GAP: Product.Vendor is string, PO.VendorID is UUID.
-		// FIX: We need to either create a vendor or find one.
-		// Hack for MVP/Sprint 15: Generate a random UUID and store the name in Description/Notes?
-		// Or assume there is a Vendor with that Name?
-		// Let's create a PO with nil VendorID (if allowed) and add a Note with the Vendor Name.
-		// Checks: PO table definition.
-
-		// Checking 011_special_orders_and_po.sql: vendor_id UUID. Nullable?
-		// "vendor_id UUID, -- In a real system, REFERENCES vendors(id)"
-		// Yes, nullable.
-
-		// So we will leave VendorID nil and put "Auto-Reorder: [VendorName]" in external reference or notes?
-		// PO struct doesn't have Notes field?
-		// Let's check PurchaseOrder model.
-
-		// Wait, I can't check it right now inside replace_file_content.
-		// I'll proceed assuming I can create with nil VendorID.
-
-		po := &PurchaseOrder{
-			ID:     uuid.New(),
-			Status: StatusDraft,
-			// No VendorID for now
-		}
-		// If we had a way to store the Vendor Name string, we should.
-		// For now, we just create the PO. The user can edit the Vendor later.
-
-		if err := s.repo.CreatePO(ctx, po); err != nil {
-			return createdCount, fmt.Errorf("failed to create PO for vendor %s: %w", vendorName, err)
+		// Reuse an existing DRAFT PO for this vendor if one exists.
+		po, err := s.repo.GetDraftPOByVendor(ctx, &vid)
+		if err != nil || po == nil {
+			po = &PurchaseOrder{
+				ID:       uuid.New(),
+				VendorID: &vid,
+				Status:   StatusDraft,
+			}
+			if err := s.repo.CreatePO(ctx, po); err != nil {
+				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
+			}
+			createdCount++
 		}
 
 		for _, item := range items {
@@ -127,30 +101,19 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				qty = 1
 			}
 
-			// We need cost. Product model has BasePrice.
-			// Ideally we'd have a cost field.
-			// We'll use BasePrice * 0.6 as estimate again?
-			// Product struct in reorder alert doesn't have BasePrice.
-			// We need to fetch product or add Cost to Alert?
-			// ReorderAlert struct has limited fields.
-			// Let's fetch product to be safe or add BasePrice to Alert in repo?
-			// Fetching each product in loop n+1 query?
-			// Better: Update ReorderAlert to include Cost/Price.
-			// For now, let's just use 0 cost and let user fill it in.
-
+			productID := item.ProductID
 			line := &PurchaseOrderLine{
 				ID:          uuid.New(),
 				POID:        po.ID,
-				ProductID:   &item.ProductID,
+				ProductID:   &productID,
 				Description: fmt.Sprintf("%s - %s", item.SKU, item.Description),
 				Quantity:    qty,
-				Cost:        0, // User to fill
+				Cost:        0, // Cost catalog wiring is a separate backlog item.
 			}
 			if err := s.repo.AddPOLine(ctx, line); err != nil {
-				return createdCount, fmt.Errorf("failed to add PO line: %w", err)
+				return createdCount, fmt.Errorf("add PO line: %w", err)
 			}
 		}
-		createdCount++
 	}
 
 	return createdCount, nil
@@ -756,3 +719,31 @@ func (s *Service) GetFreightCharges(ctx context.Context, poID uuid.UUID) ([]Frei
 	return charges, nil
 }
 
+
+// groupAlertsByVendor partitions reorder alerts by canonical vendor_id. Any
+// alert whose VendorID is nil is bucketed under a single sentinel vendor
+// resolved lazily via resolveUnknown (typically vendor.EnsureVendorByName).
+// Extracted as a pure helper so the grouping logic can be unit-tested without
+// a database connection.
+func groupAlertsByVendor(
+	alerts []product.ReorderAlert,
+	resolveUnknown func() (uuid.UUID, error),
+) (map[uuid.UUID][]product.ReorderAlert, error) {
+	byVendor := make(map[uuid.UUID][]product.ReorderAlert)
+	var unknownID *uuid.UUID
+	for _, a := range alerts {
+		if a.VendorID != nil {
+			byVendor[*a.VendorID] = append(byVendor[*a.VendorID], a)
+			continue
+		}
+		if unknownID == nil {
+			id, err := resolveUnknown()
+			if err != nil {
+				return nil, err
+			}
+			unknownID = &id
+		}
+		byVendor[*unknownID] = append(byVendor[*unknownID], a)
+	}
+	return byVendor, nil
+}

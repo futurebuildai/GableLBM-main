@@ -176,12 +176,14 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 		return nil, fmt.Errorf("failed to load products: %w", err)
 	}
 
-	// 2. Build vendor lookup by name for lead times
-	vendorMap := make(map[string]*vendor.Vendor)
+	// 2. Build vendor lookup by UUID (primary) and name (legacy fallback) for lead times
+	vendorByID := make(map[uuid.UUID]*vendor.Vendor)
+	vendorByName := make(map[string]*vendor.Vendor)
 	vendors, err := rs.vendorSvc.ListVendors(ctx)
 	if err == nil {
 		for i := range vendors {
-			vendorMap[vendors[i].Name] = &vendors[i]
+			vendorByID[vendors[i].ID] = &vendors[i]
+			vendorByName[vendors[i].Name] = &vendors[i]
 		}
 	}
 
@@ -209,16 +211,28 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 			continue // No sales velocity, skip
 		}
 
-		// 5. Get lead time from vendor or use default
+		// 5. Get lead time from vendor or use default. Prefer canonical
+		// vendor_id; fall back to display-name lookup for legacy rows.
 		leadTime := rs.config.DefaultLeadTimeDays
 		vendorName := ""
-		if p.Vendor != nil && *p.Vendor != "" {
-			vendorName = *p.Vendor
-			if v, ok := vendorMap[vendorName]; ok {
-				if v.AverageLeadTimeDays > 0 {
-					leadTime = v.AverageLeadTimeDays
-				}
+		var matchedVendor *vendor.Vendor
+		if p.VendorID != nil {
+			if v, ok := vendorByID[*p.VendorID]; ok {
+				matchedVendor = v
 			}
+		}
+		if matchedVendor == nil && p.Vendor != nil && *p.Vendor != "" {
+			if v, ok := vendorByName[*p.Vendor]; ok {
+				matchedVendor = v
+			}
+		}
+		if matchedVendor != nil {
+			vendorName = matchedVendor.Name
+			if matchedVendor.AverageLeadTimeDays > 0 {
+				leadTime = matchedVendor.AverageLeadTimeDays
+			}
+		} else if p.Vendor != nil {
+			vendorName = *p.Vendor
 		}
 
 		// 6. Calculate reorder metrics

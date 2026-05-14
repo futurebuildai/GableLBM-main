@@ -22,7 +22,8 @@ export interface Product {
     description: string;
     uom_primary: UOM;
     base_price: number;
-    vendor?: string;
+    vendor?: string;         // Display name (denormalized)
+    vendor_id?: string;      // Canonical FK -> vendors.id
     upc?: string;
     weight_lbs?: number;
     reorder_point?: number;
@@ -41,6 +42,7 @@ export interface ReorderAlert {
     sku: string;
     description: string;
     vendor?: string;
+    vendor_id?: string;
     reorder_point: number;
     reorder_qty: number;
     current_stock: number;

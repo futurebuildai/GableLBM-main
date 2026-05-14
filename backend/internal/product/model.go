@@ -30,33 +30,35 @@ const (
 
 // Product represents a catalog item
 type Product struct {
-	ID             uuid.UUID `json:"id"`
-	SKU            string    `json:"sku"`
-	Description    string    `json:"description"`
-	UOMPrimary     UOM       `json:"uom_primary"`
-	BasePrice      float64   `json:"base_price"`
-	Vendor         *string   `json:"vendor"`
-	UPC            *string   `json:"upc"`
-	WeightLbs      float64   `json:"weight_lbs"`
-	ReorderPoint   float64   `json:"reorder_point"`
-	ReorderQty     float64   `json:"reorder_qty"`
-	TotalQuantity  float64   `json:"total_quantity" db:"-"` // Aggregated from inventory
-	TotalAllocated float64   `json:"total_allocated" db:"-"`
-	AverageUnitCost float64  `json:"average_unit_cost"`
-	TargetMargin    float64  `json:"target_margin"`
-	CommissionRate  float64  `json:"commission_rate"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID              uuid.UUID  `json:"id"`
+	SKU             string     `json:"sku"`
+	Description     string     `json:"description"`
+	UOMPrimary      UOM        `json:"uom_primary"`
+	BasePrice       float64    `json:"base_price"`
+	Vendor          *string    `json:"vendor"`     // Denormalized display name (kept for back-compat)
+	VendorID        *uuid.UUID `json:"vendor_id"`  // Canonical FK -> vendors.id
+	UPC             *string    `json:"upc"`
+	WeightLbs       float64    `json:"weight_lbs"`
+	ReorderPoint    float64    `json:"reorder_point"`
+	ReorderQty      float64    `json:"reorder_qty"`
+	TotalQuantity   float64    `json:"total_quantity" db:"-"` // Aggregated from inventory
+	TotalAllocated  float64    `json:"total_allocated" db:"-"`
+	AverageUnitCost float64    `json:"average_unit_cost"`
+	TargetMargin    float64    `json:"target_margin"`
+	CommissionRate  float64    `json:"commission_rate"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // ReorderAlert represents a product that's below its reorder point
 type ReorderAlert struct {
-	ProductID    uuid.UUID `json:"product_id"`
-	SKU          string    `json:"sku"`
-	Description  string    `json:"description"`
-	Vendor       *string   `json:"vendor"`
-	ReorderPoint float64   `json:"reorder_point"`
-	ReorderQty   float64   `json:"reorder_qty"`
-	CurrentStock float64   `json:"current_stock"`
-	Deficit      float64   `json:"deficit"`
+	ProductID    uuid.UUID  `json:"product_id"`
+	SKU          string     `json:"sku"`
+	Description  string     `json:"description"`
+	Vendor       *string    `json:"vendor"`
+	VendorID     *uuid.UUID `json:"vendor_id"`
+	ReorderPoint float64    `json:"reorder_point"`
+	ReorderQty   float64    `json:"reorder_qty"`
+	CurrentStock float64    `json:"current_stock"`
+	Deficit      float64    `json:"deficit"`
 }

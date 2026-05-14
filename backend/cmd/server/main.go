@@ -288,6 +288,10 @@ func main() {
 	vendorHandler := vendor.NewHandler(vendorSvc)
 	vendorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
 
+	// Back-wire vendor service into product service so CreateProduct can
+	// auto-resolve a free-text vendor name to a canonical vendor_id.
+	productSvc.WithVendorService(vendorSvc)
+
 	// Order Module - injected with InventoryService and InvoiceService
 	orderRepo := order.NewRepository(db)
 	poRepo := purchase_order.NewRepository(db)
