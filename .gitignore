@@ -5,6 +5,9 @@
 
 # Build artifacts
 backend/server_bin
+backend/seed
+backend/migrate
+backend/main
 *.log
 
 # Agent runtime artifacts (generated per-session, not committed)
