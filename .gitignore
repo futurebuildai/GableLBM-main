@@ -7,10 +7,10 @@
 backend/server_bin
 *.log
 
-# Agent/AI directories
-.agent/
-.agents/
-.claude/
+# Agent runtime artifacts (generated per-session, not committed)
+.agent/last_audit/findings.md
+.agents/handoff/*.md
+!.agents/handoff/.gitkeep
 
 # IDE
 .idea/
