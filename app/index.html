@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#00FFA3" />
+  <meta name="description" content="GableLBM - The Modern Operating System for Lumber & Building Materials" />
+
+  <!-- Google Fonts: Outfit (UI) & JetBrains Mono (Data) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+
+  <title>GableLBM | Enterprise OS</title>
+</head>
+
+<body>
+  <style>
+    body {
+      background-color: #0A0B10;
+      margin: 0;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .initial-loader {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      color: white;
+    }
+
+    .logo-container {
+      width: 80px;
+      height: 80px;
+      position: relative;
+      margin-bottom: 20px;
+    }
+
+    .logo-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      color: white;
+    }
+
+    .spinner {
+      position: absolute;
+      inset: -10px;
+      border: 4px solid rgba(255, 255, 255, 0.05);
+      border-top-color: #00FFA3;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .brand {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: baseline;
+      gap: 2px;
+    }
+
+    .accent {
+      color: #00FFA3;
+      font-weight: 300;
+      letter-spacing: 0.2em;
+    }
+  </style>
+  <div id="root">
+    <div class="initial-loader">
+      <div class="logo-container">
+        <div class="spinner"></div>
+        <!-- Embed Critical SVG for instant load -->
+        <svg class="logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 36 L32 8 L60 36" stroke="currentColor" stroke-width="6" stroke-linecap="round"
+            stroke-linejoin="round" />
+          <path d="M32 16 V28" stroke="#00FFA3" stroke-width="4" stroke-linecap="round" />
+          <path d="M22 28 C22 28 22 46 32 46 C42 46 42 28 42 28" stroke="#00FFA3" stroke-width="4"
+            stroke-linecap="round" fill="none" />
+          <rect x="28" y="46" width="8" height="6" rx="1" fill="#00FFA3" />
+        </svg>
+      </div>
+      <div class="brand">Gable<span class="accent">LBM</span></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

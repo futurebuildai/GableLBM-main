@@ -1,0 +1,45 @@
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+# app/.env is tracked as a stub (empty VITE_API_URL → routes through Vite proxy).
+!app/.env
+
+# Local docker compose override (developer-specific tweaks)
+docker-compose.override.yml
+
+# Build artifacts
+backend/server
+backend/server_bin
+backend/migrate
+backend/seed
+*.log
+
+# Stray binary that ended up committed at the repo root — do not re-add.
+/docker-compose
+
+# Agent/AI directories
+.agent/
+.agents/
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Digital Ocean — keep .do/*.yaml tracked, but ignore any local-only manifests
+# (e.g. dev-scratch specs or secret env files dropped alongside).
+.do/*.local.*
+.do/.env*
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gable Logo: Refined Vector Mark -->
+  <!-- Colors: Deep Charcoal (#1A202C) and Warm Cedar (#A67049) -->
+  
+  <rect width="512" height="512" fill="white"/>
+  
+  <!-- The Gable Roof & House Structure -->
+  <path d="M256 80 L80 230 V432 H432 V230 L256 80Z" fill="#1A202C" />
+  
+  <!-- Architectural Cut-out / Detail Line (Cedar Accent) -->
+  <path d="M80 230 L256 120 L432 230" stroke="#A67049" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+  
+  <!-- The 'G' Integration (Optimized Paths) -->
+  <path d="M340 280 H220 V385 H360 V330 H285" stroke="white" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  
+  <!-- Text Element -->
+  <text x="256" y="485" font-family="sans-serif" font-weight="900" font-size="72" fill="#1A202C" text-anchor="middle" letter-spacing="10">GABLE</text>
+</svg>

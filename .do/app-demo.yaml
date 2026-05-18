@@ -1,0 +1,129 @@
+# Digital Ocean App Platform spec — DEMO environment.
+#
+# Tracks the `community` branch of github.com/futurebuild/GableLBM and
+# auto-deploys to https://demo.gablelbm.com on push. Backed by a shared
+# DO Managed Postgres cluster (`gable-pg`), separate logical DB `gable_demo`.
+#
+# AUTH_MODE=dev is intentional: demo data is non-confidential, the seeded
+# `demo@gable.com` user becomes a full admin/owner via the dev-mode
+# claims-nil pass-through in pkg/middleware/auth.go.
+#
+# Apply with: doctl apps create --spec .do/app-demo.yaml  (first time)
+#             doctl apps update <app-id> --spec .do/app-demo.yaml
+name: gablelbm-demo
+# DO Managed Postgres is NOT available in tor1, so demo + staging both
+# live in nyc. Apps + DB cluster co-located in the New York metro for
+# low-latency cross-talk.
+region: nyc
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+domains:
+  - domain: demo.gablelbm.com
+    type: PRIMARY
+
+services:
+  - name: backend
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: community
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    health_check:
+      http_path: /healthz/live
+      initial_delay_seconds: 15
+      period_seconds: 30
+      failure_threshold: 3
+    routes:
+      # preserve_path_prefix keeps the original path when proxying to
+      # the container; without it App Platform strips the matched
+      # prefix and the Go router 404s (e.g. /healthz/live → /live).
+      - path: /api
+        preserve_path_prefix: true
+      - path: /health
+        preserve_path_prefix: true
+      - path: /healthz
+        preserve_path_prefix: true
+      - path: /metrics
+        preserve_path_prefix: true
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: AUTH_MODE
+        value: dev
+      - key: CORS_ORIGINS
+        value: https://demo.gablelbm.com
+      - key: GABLELBM_BRANCH
+        value: community
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+  - name: frontend
+    dockerfile_path: app/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: community
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    build_command: ""
+    envs:
+      - key: VITE_API_URL
+        value: https://demo.gablelbm.com
+        scope: BUILD_TIME
+      - key: VITE_DEMO_MODE
+        value: "true"
+        scope: BUILD_TIME
+      - key: BACKEND_URL
+        value: ${backend.PRIVATE_URL}
+        scope: RUN_TIME
+    routes:
+      - path: /
+
+jobs:
+  - name: migrate-and-seed
+    kind: POST_DEPLOY
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: community
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    # App Platform exec-splits run_command on whitespace and passes the
+    # tokens as argv to the first binary (no implicit /bin/sh). Wrapping
+    # with `sh -c` is required so the `&&` chain runs ./seed after
+    # ./migrate. Without this, only ./migrate executes and the seed
+    # binary is silently skipped (with "&&" "./seed" passed as ignored
+    # args to migrate). Discovered after migrations applied cleanly but
+    # the gable_demo customers table was empty post-deploy.
+    run_command: sh -c "./migrate && ./seed"
+    envs:
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
+      - key: GABLELBM_BRANCH
+        value: community
+
+databases:
+  - name: gable-pg
+    engine: PG
+    version: "16"
+    # production: true references an externally-managed cluster (created
+    # ahead of `doctl apps create` via `doctl databases create gable-pg
+    # --region nyc1 --size db-s-1vcpu-1gb --engine pg --version 16`).
+    # Demo + staging share the same cluster but use distinct logical DBs.
+    production: true
+    cluster_name: gable-pg
+    db_name: gable_demo
+    db_user: gable_user

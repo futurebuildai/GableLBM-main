@@ -1,0 +1,2703 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://SpruceWeb/WebServices/ECommerce" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" targetNamespace="http://SpruceWeb/WebServices/ECommerce" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://SpruceWeb/WebServices/ECommerce">
+      <s:element name="GetAccounts">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountFilter" type="tns:AccountFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AccountFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="unbounded" name="AccountNumbers" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Search" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="EmailAddress" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PhoneNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="BaseModel">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Success" type="s:boolean" />
+          <s:element minOccurs="0" maxOccurs="1" name="ErrorMessages" type="tns:ArrayOfErrorMessage" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfErrorMessage">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="ErrorMessage" nillable="true" type="tns:ErrorMessage" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ErrorMessage">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ErrorCode" type="tns:ErrorCode" />
+          <s:element minOccurs="0" maxOccurs="1" name="ErrorMessage" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:simpleType name="ErrorCode">
+        <s:restriction base="s:string">
+          <s:enumeration value="None" />
+          <s:enumeration value="UnspecifiedError" />
+          <s:enumeration value="NoResultsReturned" />
+          <s:enumeration value="InvalidFilter" />
+          <s:enumeration value="TooManyRowsRequested" />
+          <s:enumeration value="InvalidBranchID" />
+          <s:enumeration value="InvalidDatesSpecified" />
+          <s:enumeration value="InvalidDocumentStatus" />
+          <s:enumeration value="InvalidInvoiceType" />
+          <s:enumeration value="InvalidOrderType" />
+          <s:enumeration value="InvalidAccount" />
+          <s:enumeration value="InvalidJob" />
+          <s:enumeration value="AccountDisabled" />
+          <s:enumeration value="AccountClosed" />
+          <s:enumeration value="AccountOnHold" />
+          <s:enumeration value="JobDisabled" />
+          <s:enumeration value="JobClosed" />
+          <s:enumeration value="JobOnHold" />
+          <s:enumeration value="TaxLocationRequired" />
+          <s:enumeration value="NameRequired" />
+          <s:enumeration value="ItemDisabled" />
+          <s:enumeration value="ItemTypeNotPermitted" />
+          <s:enumeration value="ItemDoesNotExist" />
+          <s:enumeration value="ItemNotFoundAtBranch" />
+          <s:enumeration value="InvalidTaxCode" />
+          <s:enumeration value="MissingOrIncompleteAddressInfo" />
+          <s:enumeration value="OrderHasNoDetails" />
+          <s:enumeration value="QuoteHasNoDetails" />
+          <s:enumeration value="InvoiceHasNoDetails" />
+          <s:enumeration value="AccountGenerateError" />
+          <s:enumeration value="AccountNumberRequired" />
+          <s:enumeration value="DataLengthError" />
+          <s:enumeration value="NameIsRequired" />
+          <s:enumeration value="EmailRequired" />
+          <s:enumeration value="InvalidEmailFormat" />
+          <s:enumeration value="EmailAlreadyUsed" />
+          <s:enumeration value="InvalidDataError" />
+          <s:enumeration value="InvoiceNotFound" />
+          <s:enumeration value="OrderNotFound" />
+          <s:enumeration value="InvalidDocumentId" />
+          <s:enumeration value="InvoiceTypeRequired" />
+          <s:enumeration value="OrderTypeRequired" />
+          <s:enumeration value="InvalidPostalCode" />
+          <s:enumeration value="ImportSourceRequired" />
+          <s:enumeration value="ImportSourceIdRequired" />
+          <s:enumeration value="ImportSourceIdNotUnique" />
+          <s:enumeration value="InvalidDocumentType" />
+          <s:enumeration value="ItemNumberRequired" />
+          <s:enumeration value="OrderDetailItemsRequired" />
+          <s:enumeration value="UnitPriceRequired" />
+          <s:enumeration value="PriceUnitOfMeasureRequired" />
+          <s:enumeration value="QuantityRequired" />
+          <s:enumeration value="BranchRequired" />
+          <s:enumeration value="InvalidDepositAmount" />
+          <s:enumeration value="DepositTotalMatchError" />
+          <s:enumeration value="OrderTotalError" />
+          <s:enumeration value="RequestCannotBeCancelled" />
+          <s:enumeration value="MissingData" />
+          <s:enumeration value="InvalidDeliveryStatus" />
+          <s:enumeration value="InvalidPaymentInfo" />
+          <s:enumeration value="InvalidItemQuantity" />
+          <s:enumeration value="InvalidUM" />
+          <s:enumeration value="InvalidPriceCode" />
+          <s:enumeration value="InvalidTallyDetail" />
+          <s:enumeration value="DocumentPDFError" />
+          <s:enumeration value="DocumentSummaryError" />
+          <s:enumeration value="TaxTotalMatchError" />
+          <s:enumeration value="InvalidRequestId" />
+          <s:enumeration value="InvalidCardOnFile" />
+          <s:enumeration value="DatabaseError" />
+          <s:enumeration value="PaymentProcessingError" />
+          <s:enumeration value="PONumberRequired" />
+          <s:enumeration value="DiscountPercentError" />
+          <s:enumeration value="OrderSubTotalError" />
+          <s:enumeration value="DeliveryZipCodeError" />
+          <s:enumeration value="DiscountAmountError" />
+          <s:enumeration value="InvalidDiscount" />
+        </s:restriction>
+      </s:simpleType>
+      <s:complexType name="Account">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="Source" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Email" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxLocation" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Company" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Zip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PhoneNumber" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="AccountResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Accounts" type="tns:Account" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetAccountsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAccountsResult" type="tns:AccountResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateAccount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="account" type="tns:Account" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateAccountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreateAccountResult" type="tns:Account" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateAccount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="account" type="tns:Account" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateAccountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="UpdateAccountResult" type="tns:Account" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="UpdateAccountJob">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountJob" type="tns:AccountJob" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AccountJob">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Company" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Zip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PhoneNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShippingInfo" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ContactName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Email" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxLocation" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="UpdateAccountJobResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="UpdateAccountJobResult" type="tns:AccountJob" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAccount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountNumber" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAccountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAccountResult" type="tns:Account" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAccountDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountNumber" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAccountDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAccountDetailResult" type="tns:AccountDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AccountDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:Account">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="BillingType" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastChargeDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastSaleDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastPaymentDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastPaymentAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="YTDDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="MTDDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PMDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PYDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditLimit" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditAvailable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="OutstandingBalance" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditBalance" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DueNow" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="NewCharges" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxExemptNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="AccountType" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="ARType" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="FinanceChargesFirst" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="PaymentPostingRule" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Jobs" type="tns:AccountJobDetail" />
+              <s:element minOccurs="1" maxOccurs="1" name="Status" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="ARBranch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="POSBranch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PostNetDeliveryPoint" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="AccountJobDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Company" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Zip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShippingInfo" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ContactName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PhoneNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Email" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxLocation" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastChargeDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastSaleDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastPaymentDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastPaymentAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="YTDDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="MTDDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PMDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PYDollarsSold" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditLimit" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditAvailable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="OutstandingBalance" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CreditBalance" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DueNow" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="NewCharges" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CardOnFile" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="PriceLevel" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="PriceGroup" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CustomerClass" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="CardDetail" type="tns:AccountCard" />
+              <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="CustomerPONumberRequired" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="Status" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="PostNetDeliveryPoint" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="AccountCard">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="CardLastFour" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CardExp" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CardType" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="CardAROnly" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="CardId" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetAccountBalanceDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountNumber" type="tns:ArrayOfString" />
+            <s:element minOccurs="1" maxOccurs="1" name="jobNumber" nillable="true" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfString">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="string" nillable="true" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetAccountBalanceDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAccountBalanceDetailResult" type="tns:AccountBalanceDetailResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AccountBalanceDetailResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="AccountBalanceDetails" type="tns:AccountBalanceDetail" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="AccountBalanceDetail">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BalanceDetail" type="tns:BalanceDetail" />
+          <s:element minOccurs="0" maxOccurs="unbounded" name="JobBalanceDetails" type="tns:JobBalanceDetail" />
+          <s:element minOccurs="0" maxOccurs="unbounded" name="OpenDocuments" type="tns:OpenDocumentDetail" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="BalanceDetail">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="StatementBalance" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="StatementDiscount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountBalance" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountRemaining" nillable="true" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="UnbilledCharges" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="TotalDue" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="OutstandingBalance" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="LastChargeDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="LastSaleDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="LastPaymentDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="LastPaymentAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="YTDDollarsSold" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="MTDDollarsSold" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="PMDollarsSold" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="PYDollarsSold" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Due30Days" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Due60Days" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Due90Days" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Due120Days" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="FinanceCharges" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="OpenCredits" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="CreditAvailable" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="StatementDate" nillable="true" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="DueDate" nillable="true" type="s:dateTime" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="JobBalanceDetail">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BalanceDetail" type="tns:BalanceDetail" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="OpenDocumentDetail">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="DocIDInternal" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocStatus" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocType" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="EntryDate" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Account" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocBalance" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetAccountJobDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountNumber" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="jobNumber" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetAccountJobDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetAccountJobDetailResult" type="tns:AccountJobDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetBranches">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="branchFilter" type="tns:BranchFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="BranchFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="unbounded" name="BranchID" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Search" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetBranchesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetBranchesResult" type="tns:BranchResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="BranchResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Branches" type="tns:Branch" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="Branch">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Company" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Zip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PhoneNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TimeOffset" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetItems">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="itemFilter" type="tns:ItemFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="unbounded" name="ItemNumbers" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Search" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Group" nillable="true" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="Section" nillable="true" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastModifiedDateTime" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="StockedValue" nillable="true" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetItemsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemsResult" type="tns:ItemResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:Item" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="Item">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="CustomerPrice" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="SOAverageCost" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="CustomerPriceUM" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="IsSalePrice" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="QtyAvailable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="QtyOnHand" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="PriceBreaks" type="tns:PriceBreaks" />
+              <s:element minOccurs="0" maxOccurs="1" name="PriceID" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="PriceCode" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="IsTally" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="TallyType" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="Depth" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Width" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Length" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="LastModifiedDateTime" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="LeadTime" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="ItemTaxCategory" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Stocked" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="Weight" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Cubes" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="OnOrder" type="s:decimal" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="PriceBreaks">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="PriceBreak" type="tns:PriceBreak" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="PriceBreak">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Quantity" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="Price" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetItemDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="itemNumber" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="branch" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemDetailResult" type="tns:ItemDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:Item">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="Group" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="GroupDescription" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Section" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="SectionDescription" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Discontinued" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="TrackOnHand" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="Taxable" type="tns:Options" />
+              <s:element minOccurs="0" maxOccurs="1" name="VATLocation" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="TallyItems" type="tns:Item" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:simpleType name="Options">
+        <s:restriction base="s:string">
+          <s:enumeration value="Yes" />
+          <s:enumeration value="No" />
+          <s:enumeration value="Always" />
+          <s:enumeration value="VAT" />
+          <s:enumeration value="GSTOnly" />
+          <s:enumeration value="PSTOnly" />
+        </s:restriction>
+      </s:simpleType>
+      <s:element name="GetItemDetailAccount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="itemNumber" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="branch" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="accountNumber" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="jobNumber" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemDetailAccountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemDetailAccountResult" type="tns:ItemDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemQuantityChanges">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="itemFilter" type="tns:ItemChangedFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemChangedFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="LastModifiedDateTime" type="s:dateTime" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="ItemNumbers" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="BranchIds" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetItemQuantityChangesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemQuantityChangesResult" type="tns:ItemQuantityChangeResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemQuantityChangeResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:ItemQuantityChange" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="ItemQuantityChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BaseUM" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Branches" type="tns:ArrayOfItemBranchQuantityChange" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfItemBranchQuantityChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Branch" nillable="true" type="tns:ItemBranchQuantityChange" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ItemBranchQuantityChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="AvailableQty" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="QtyOnHand" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetItemPriceChanges">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="itemFilter" type="tns:ItemChangedFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetItemPriceChangesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetItemPriceChangesResult" type="tns:ItemPriceChangeResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ItemPriceChangeResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Items" type="tns:ArrayOfItemPriceChange" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="ArrayOfItemPriceChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Item" nillable="true" type="tns:ItemPriceChange" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ItemPriceChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BaseUM" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Branches" type="tns:ArrayOfItemBranchPriceChange" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfItemBranchPriceChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Branch" nillable="true" type="tns:ItemBranchPriceChange" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ItemBranchPriceChange">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="RetailPrice" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="BaseUM" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CreateOrderRequest">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="orderRequest" type="tns:OrderRequest" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderRequest">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingPhone" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSource" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSourceId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocNotes" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocType" type="tns:DocType" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocDescription" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="NewJobRequested" type="s:boolean" />
+          <s:element minOccurs="0" maxOccurs="1" name="CustomerPO" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingCompany" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingAddress1" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingAddress2" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingCity" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingState" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingZip" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BillingPhone" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryStatusEnum" type="tns:DeliveryStatusTypes" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryStatus" />
+          <s:element minOccurs="1" maxOccurs="1" name="ShipSameAsBilling" type="s:boolean" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingCompany" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingAddress1" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingAddress2" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingCity" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingState" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShippingZip" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryInfo" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Purchaser" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="TaxCodeReference" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentReference" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentToken" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentCard" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentCardType" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DepositAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="GSTTaxTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="PSTTaxTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountPercent" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Items" type="tns:ArrayOfOrderRequestItem" />
+          <s:element minOccurs="1" maxOccurs="1" name="AutoProcess" type="s:boolean" />
+          <s:element minOccurs="1" maxOccurs="1" name="PaymentCardOnFileId" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:simpleType name="DocType">
+        <s:restriction base="s:string">
+          <s:enumeration value="All" />
+          <s:enumeration value="Quotes" />
+          <s:enumeration value="Orders" />
+          <s:enumeration value="Payments" />
+        </s:restriction>
+      </s:simpleType>
+      <s:simpleType name="DeliveryStatusTypes">
+        <s:restriction base="s:string">
+          <s:enumeration value="NoDelivery" />
+          <s:enumeration value="ToBeDelivered" />
+          <s:enumeration value="Scheduled" />
+        </s:restriction>
+      </s:simpleType>
+      <s:complexType name="ArrayOfOrderRequestItem">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="OrderRequestItem" nillable="true" type="tns:OrderRequestItem" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="OrderRequestItem">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="UnitPrice" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="PriceUM" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Quantity" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Comments" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="IsSalePrice" type="s:boolean" />
+          <s:element minOccurs="1" maxOccurs="1" name="ExtendedAmt" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Tax" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="UnitCost" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="UnitCostUM" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="ExtendedCost" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="MnfrSKU" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="VendorCode" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CatalogSKU" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="SOItemDesc" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="VendorListPrice" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Weight" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Cubes" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="PriceID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="PriceCode" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="TallyDetail" type="tns:ArrayOfTallyDetailData" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfTallyDetailData">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="TallyDetailData" nillable="true" type="tns:TallyDetailData" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="TallyDetailData">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Quantity" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="MeasureFT" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="MeasureInch" nillable="true" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="MeasureWidth" nillable="true" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CreateOrderRequestResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreateOrderRequestResult" type="tns:OrderRequestResult" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderRequestResult">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RequestId" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetOrderRequestStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="requestId" type="tns:ArrayOfInt" />
+            <s:element minOccurs="0" maxOccurs="1" name="importSource" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="importSourceId" type="tns:ArrayOfString" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfInt">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="int" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="OrderRequestStatus">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="RequestId" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSource" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSourceId" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="RequestStatus" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="Status" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="StatusComments" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocumentId" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocumentDate" type="s:dateTime" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfOrderRequestStatus">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="OrderRequestStatus" nillable="true" type="tns:OrderRequestStatus" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderRequestStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderRequestStatusResult" type="tns:OrderRequestStatusResult" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderRequestStatusResult">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="RequestStatus" type="tns:ArrayOfOrderRequestStatus" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetPaymentRequestStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="requestId" type="tns:ArrayOfInt" />
+            <s:element minOccurs="0" maxOccurs="1" name="importSource" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="importSourceId" type="tns:ArrayOfString" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="PaymentRequestStatus">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="RequestId" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSource" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSourceId" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="RequestStatus" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="Status" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="StatusComments" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocumentId" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocumentDate" type="s:dateTime" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfPaymentRequestStatus">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="PaymentRequestStatus" nillable="true" type="tns:PaymentRequestStatus" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetPaymentRequestStatusResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPaymentRequestStatusResult" type="tns:PaymentRequestStatusResult" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="PaymentRequestStatusResult">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="RequestStatus" type="tns:ArrayOfPaymentRequestStatus" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="CancelOrderRequest">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="requestId" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CancelOrderRequestResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CancelOrderRequestResult" type="tns:BaseModel" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CleanupOrderRequests">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="requestId" type="tns:ArrayOfInt" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CleanupOrderRequestsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CleanupOrderRequestsResult" type="tns:BaseModel" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrders">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="orderFilter" type="tns:OrderFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" nillable="true" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="DocId" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DocStatus" type="tns:ArrayOfInt" />
+              <s:element minOccurs="0" maxOccurs="1" name="OrderTypes" type="tns:ArrayOfInt" />
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="DateRangeStart" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="DateRangeEnd" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="SearchText" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="Order">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="DocStatus" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="OrderType" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocIDInternal" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:OrderItem" />
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="JobName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="TaxCodeReference" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentReference" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="ForDelivery" type="s:boolean" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryInfo" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ECommerceID" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="IssueDate" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="Purchaser" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="OrderItem">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Quantity" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrdersResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrdersResult" type="tns:OrderResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Orders" type="tns:Order" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetOrderDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="docID" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="AdderDetails">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="Code" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfAdderDetails">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="AdderDetails" nillable="true" type="tns:AdderDetails" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderDetailResult" type="tns:OrderDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="OrderType" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="DocIDInternal" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="DocStatus" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="OrderNotes" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="IssueDate" type="s:dateTime" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipCompany" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipAddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipAddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipCity" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipState" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipZip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:OrderItemDetail" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="PaymentRef" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="SubTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="AdderTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalDeposit" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DepositRemaining" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryStatus" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryDate" type="s:dateTime" />
+              <s:element minOccurs="0" maxOccurs="1" name="DeliveryRoute" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DeliveryNotes" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DQDelvStatus" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ECommerceID" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Adders" type="tns:ArrayOfAdderDetails" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="OrderItemDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:OrderItem">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="QuantityUM" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="UnitPrice" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="PriceUM" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="ExtendedAmt" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Backorder" type="s:boolean" />
+              <s:element minOccurs="0" maxOccurs="1" name="Comments" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ECommerceImportSKU" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetInvoices">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="invoiceFilter" type="tns:InvoiceFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="InvoiceFilter">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" nillable="true" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="DocStatus" nillable="true" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="InvoiceTypes" type="tns:ArrayOfInt" />
+              <s:element minOccurs="1" maxOccurs="1" name="DateRangeStart" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="DateRangeEnd" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="ECommerceRequestIDs" type="tns:ArrayOfString" />
+              <s:element minOccurs="0" maxOccurs="1" name="SearchText" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="Invoice">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocIDInternal" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:InvoiceItem" />
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocStatus" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="InvoiceType" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="JobName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="AdderTotal" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="InvoiceTotal" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="ECommerceID" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="AppliedDepositTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="RemitTotal" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSourceId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="IssueDate" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="ARPaid" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DueDate" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="OutstandingAmount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Purchaser" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountDate" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="OutstandingAmountDiscount" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="InvoiceItem">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ItemNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Quantity" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="QuantitySold" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="QuantityUOM" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="ExtendedPrice" type="s:decimal" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetInvoicesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetInvoicesResult" type="tns:InvoiceResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="InvoiceResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Invoices" type="tns:Invoice" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetInvoiceDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="docID" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetInvoiceDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetInvoiceDetailResult" type="tns:InvoiceDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="InvoiceDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="DocID" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="DocIDInternal" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Items" type="tns:InvoiceItemDetail" />
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Branch" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="IssueDate" type="s:dateTime" />
+              <s:element minOccurs="1" maxOccurs="1" name="DocStatus" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="InvoiceNotes" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="InvoiceType" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipCompany" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipAddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipAddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipCity" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipState" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ShipZip" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingName" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingCompany" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingAddressLine1" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingAddressLine2" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingCity" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingState" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="BillingZip" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryStatus" type="s:int" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryDate" type="s:dateTime" />
+              <s:element minOccurs="0" maxOccurs="1" name="DeliveryRoute" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DQDelvStatus" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DeliveryNotes" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Taxable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Adjustments" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="CashAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CheckAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="BankcardAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CouponTaxable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="CouponPreTax" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="GiftCardAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="ChargeAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="BlueTarpAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="GSTax" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="GSTTaxable" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PSTTax" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="PSTTaxable" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ECommerceID" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Adders" type="tns:ArrayOfAdderDetails" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="InvoiceItemDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:InvoiceItem">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="ExtendedAmt" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="QuantityUM" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Comments" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="ECommerceImportSKU" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetTaxLocations">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="taxLocationFilter" type="tns:ArrayOfString" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTaxLocationsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTaxLocationsResult" type="tns:TaxLocationResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="TaxLocationResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="TaxLocationDetails" type="tns:TaxLocationDetail" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="TaxLocationDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalPercent" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="AlwaysExempt" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryUse" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="EmpireZone" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="CanadaHST" type="s:boolean" />
+              <s:element minOccurs="1" maxOccurs="1" name="GSTTaxRate" type="s:decimal" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetTaxLocationDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="taxLocation" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetTaxLocationDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetTaxLocationDetailResult" type="tns:TaxLocationDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPostalCodes">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfPostalCodeDetail">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="PostalCodeDetail" nillable="true" type="tns:PostalCodeDetail" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="PostalCodeDetail">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="PostalCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="StateProvinceCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="QuantityBranch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="SalesBranch" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetPostalCodesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPostalCodesResult" type="tns:PostalCodeResults" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="PostalCodeResults">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="PostalCodeDetails" type="tns:ArrayOfPostalCodeDetail" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GetPostalCodeDetail">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="postalCode" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetPostalCodeDetailResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetPostalCodeDetailResult" type="tns:PostalCodeDetail" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetGroups">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="groups" type="tns:ArrayOfGroup" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfGroup">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Group" nillable="true" type="tns:Group" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="Group">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="Group" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="unbounded" name="Sections" type="tns:Section" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:complexType name="Section">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Section" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetGroupsResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetGroupsResult" type="tns:ArrayOfGroup" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetDocumentSummaryInformation">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="docFilter" type="tns:DocumentFilter" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="DocumentFilter">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="Account" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="DocType" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocNumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Item" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="StartDate" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="EndDate" type="s:dateTime" />
+          <s:element minOccurs="1" maxOccurs="1" name="MinAmount" nillable="true" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="MaxAmount" nillable="true" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="RowStart" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="RowMaxCount" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="ECommerceRequestIDs" type="tns:ArrayOfString" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="DocumentInformation">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="DocumentNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="RegionalAmount" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CurrencyCode" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="CurrencyConversion" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Payments" type="tns:ArrayOfPaymentInformation" />
+          <s:element minOccurs="1" maxOccurs="1" name="Date" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="Account" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="JobName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Type" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryStatus" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryTime" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryTruck" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryNotes" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchName" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="OutstandingAmount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="ShipToAddress" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Purchaser" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DueDate" type="s:dateTime" />
+          <s:element minOccurs="0" maxOccurs="1" name="FulfillmentStatus" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="SourceOfOrigin" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CustomerPONumber" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="ECommerceID" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="Description" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfPaymentInformation">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="PaymentInformation" nillable="true" type="tns:PaymentInformation" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="PaymentInformation">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Type" type="s:string" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfDocumentInformation">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="DocumentInformation" nillable="true" type="tns:DocumentInformation" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetDocumentSummaryInformationResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetDocumentSummaryInformationResult" type="tns:Documents" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Documents">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RowTotalCount" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="Documents" type="tns:ArrayOfDocumentInformation" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalCount" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="CreatePDFDoc">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="documentID" type="s:string" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreatePDFDocResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreatePDFDocResult" type="tns:DocumentPDF" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="DocumentPDF">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="PDF" type="s:base64Binary" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="CreatePaymentRequest">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="paymentRequest" type="tns:PaymentRequest" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="PaymentRequest">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSource" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ImportSourceId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="CardOnFile" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentReference" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentToken" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CardName" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CardLast4" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CardExp" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="CardType" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="ConvenienceFeeAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="ConvenienceFeePercent" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="ConvenienceFeeDescription" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="ConvenienceFeeMessage" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="BalancePaymentAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="FinanceChargeAmount" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="PaymentDetails" type="tns:ArrayOfPaymentRequestDetail" />
+          <s:element minOccurs="1" maxOccurs="1" name="AutoProcess" type="s:boolean" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="ArrayOfPaymentRequestDetail">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="PaymentRequestDetail" nillable="true" type="tns:PaymentRequestDetail" />
+        </s:sequence>
+      </s:complexType>
+      <s:complexType name="PaymentRequestDetail">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="LineNumber" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="DocumentId" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="PaymentTypeId" type="s:int" />
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="FinanceChargeJob" nillable="true" type="s:int" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CreatePaymentRequestResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreatePaymentRequestResult" type="tns:PaymentRequestResult" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="PaymentRequestResult">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="1" maxOccurs="1" name="RequestId" type="s:int" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+      <s:element name="GenerateStatement">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="account" type="s:string" />
+            <s:element minOccurs="1" maxOccurs="1" name="job" nillable="true" type="s:int" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GenerateStatementResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GenerateStatementResult" type="tns:DocumentPDF" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CartVerify">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="apikey" type="s:string" />
+            <s:element minOccurs="0" maxOccurs="1" name="cart" type="tns:Cart" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Cart">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+          <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+          <s:element minOccurs="0" maxOccurs="1" name="DeliveryPostalCode" type="s:string" />
+          <s:element minOccurs="1" maxOccurs="1" name="DeliveryTotal" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountPercent" type="s:decimal" />
+          <s:element minOccurs="1" maxOccurs="1" name="DiscountAmount" type="s:decimal" />
+          <s:element minOccurs="0" maxOccurs="1" name="Items" type="tns:ArrayOfOrderRequestItem" />
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CartVerifyResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CartVerifyResult" type="tns:CartResponse" />
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="CartResponse">
+        <s:complexContent mixed="false">
+          <s:extension base="tns:BaseModel">
+            <s:sequence>
+              <s:element minOccurs="0" maxOccurs="1" name="AccountNumber" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="Job" type="s:int" />
+              <s:element minOccurs="0" maxOccurs="1" name="BranchId" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="DeliveryPostalCode" type="s:string" />
+              <s:element minOccurs="0" maxOccurs="1" name="TaxCode" type="s:string" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxRate" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Subtotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="SubtotalInclAdjustments" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="SubtotalInclDiscount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DiscountPercent" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DiscountAmount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="DeliveryTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotal" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalInclAdjustments" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalInclDiscount" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalGST" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalGSTInclAdjustments" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalGSTInclDiscounts" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalPST" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalPSTInclAdjustments" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TaxTotalPSTInclDiscounts" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="Total" type="s:decimal" />
+              <s:element minOccurs="1" maxOccurs="1" name="TotalInclDiscount" type="s:decimal" />
+              <s:element minOccurs="0" maxOccurs="1" name="Items" type="tns:ArrayOfOrderRequestItem" />
+            </s:sequence>
+          </s:extension>
+        </s:complexContent>
+      </s:complexType>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="GetAccountsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAccounts" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAccountsResponse" />
+  </wsdl:message>
+  <wsdl:message name="CreateAccountSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateAccount" />
+  </wsdl:message>
+  <wsdl:message name="CreateAccountSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateAccountResponse" />
+  </wsdl:message>
+  <wsdl:message name="UpdateAccountSoapIn">
+    <wsdl:part name="parameters" element="tns:UpdateAccount" />
+  </wsdl:message>
+  <wsdl:message name="UpdateAccountSoapOut">
+    <wsdl:part name="parameters" element="tns:UpdateAccountResponse" />
+  </wsdl:message>
+  <wsdl:message name="UpdateAccountJobSoapIn">
+    <wsdl:part name="parameters" element="tns:UpdateAccountJob" />
+  </wsdl:message>
+  <wsdl:message name="UpdateAccountJobSoapOut">
+    <wsdl:part name="parameters" element="tns:UpdateAccountJobResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAccount" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAccountResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAccountDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAccountDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountBalanceDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAccountBalanceDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountBalanceDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAccountBalanceDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountJobDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetAccountJobDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetAccountJobDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetAccountJobDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetBranchesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetBranches" />
+  </wsdl:message>
+  <wsdl:message name="GetBranchesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetBranchesResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItems" />
+  </wsdl:message>
+  <wsdl:message name="GetItemsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItemDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetItemDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemDetailAccountSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItemDetailAccount" />
+  </wsdl:message>
+  <wsdl:message name="GetItemDetailAccountSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemDetailAccountResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemQuantityChangesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItemQuantityChanges" />
+  </wsdl:message>
+  <wsdl:message name="GetItemQuantityChangesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemQuantityChangesResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetItemPriceChangesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetItemPriceChanges" />
+  </wsdl:message>
+  <wsdl:message name="GetItemPriceChangesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetItemPriceChangesResponse" />
+  </wsdl:message>
+  <wsdl:message name="CreateOrderRequestSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateOrderRequest" />
+  </wsdl:message>
+  <wsdl:message name="CreateOrderRequestSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateOrderRequestResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetOrderRequestStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderRequestStatus" />
+  </wsdl:message>
+  <wsdl:message name="GetOrderRequestStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderRequestStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPaymentRequestStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPaymentRequestStatus" />
+  </wsdl:message>
+  <wsdl:message name="GetPaymentRequestStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPaymentRequestStatusResponse" />
+  </wsdl:message>
+  <wsdl:message name="CancelOrderRequestSoapIn">
+    <wsdl:part name="parameters" element="tns:CancelOrderRequest" />
+  </wsdl:message>
+  <wsdl:message name="CancelOrderRequestSoapOut">
+    <wsdl:part name="parameters" element="tns:CancelOrderRequestResponse" />
+  </wsdl:message>
+  <wsdl:message name="CleanupOrderRequestsSoapIn">
+    <wsdl:part name="parameters" element="tns:CleanupOrderRequests" />
+  </wsdl:message>
+  <wsdl:message name="CleanupOrderRequestsSoapOut">
+    <wsdl:part name="parameters" element="tns:CleanupOrderRequestsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrders" />
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrdersResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetOrderDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetOrderDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetInvoicesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetInvoices" />
+  </wsdl:message>
+  <wsdl:message name="GetInvoicesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetInvoicesResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetInvoiceDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetInvoiceDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetInvoiceDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetInvoiceDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxLocationsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTaxLocations" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxLocationsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTaxLocationsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxLocationDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetTaxLocationDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetTaxLocationDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetTaxLocationDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPostalCodesSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPostalCodes" />
+  </wsdl:message>
+  <wsdl:message name="GetPostalCodesSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPostalCodesResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetPostalCodeDetailSoapIn">
+    <wsdl:part name="parameters" element="tns:GetPostalCodeDetail" />
+  </wsdl:message>
+  <wsdl:message name="GetPostalCodeDetailSoapOut">
+    <wsdl:part name="parameters" element="tns:GetPostalCodeDetailResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetGroupsSoapIn">
+    <wsdl:part name="parameters" element="tns:GetGroups" />
+  </wsdl:message>
+  <wsdl:message name="GetGroupsSoapOut">
+    <wsdl:part name="parameters" element="tns:GetGroupsResponse" />
+  </wsdl:message>
+  <wsdl:message name="GetDocumentSummaryInformationSoapIn">
+    <wsdl:part name="parameters" element="tns:GetDocumentSummaryInformation" />
+  </wsdl:message>
+  <wsdl:message name="GetDocumentSummaryInformationSoapOut">
+    <wsdl:part name="parameters" element="tns:GetDocumentSummaryInformationResponse" />
+  </wsdl:message>
+  <wsdl:message name="CreatePDFDocSoapIn">
+    <wsdl:part name="parameters" element="tns:CreatePDFDoc" />
+  </wsdl:message>
+  <wsdl:message name="CreatePDFDocSoapOut">
+    <wsdl:part name="parameters" element="tns:CreatePDFDocResponse" />
+  </wsdl:message>
+  <wsdl:message name="CreatePaymentRequestSoapIn">
+    <wsdl:part name="parameters" element="tns:CreatePaymentRequest" />
+  </wsdl:message>
+  <wsdl:message name="CreatePaymentRequestSoapOut">
+    <wsdl:part name="parameters" element="tns:CreatePaymentRequestResponse" />
+  </wsdl:message>
+  <wsdl:message name="GenerateStatementSoapIn">
+    <wsdl:part name="parameters" element="tns:GenerateStatement" />
+  </wsdl:message>
+  <wsdl:message name="GenerateStatementSoapOut">
+    <wsdl:part name="parameters" element="tns:GenerateStatementResponse" />
+  </wsdl:message>
+  <wsdl:message name="CartVerifySoapIn">
+    <wsdl:part name="parameters" element="tns:CartVerify" />
+  </wsdl:message>
+  <wsdl:message name="CartVerifySoapOut">
+    <wsdl:part name="parameters" element="tns:CartVerifyResponse" />
+  </wsdl:message>
+  <wsdl:portType name="ECommerceSoap">
+    <wsdl:operation name="GetAccounts">
+      <wsdl:input message="tns:GetAccountsSoapIn" />
+      <wsdl:output message="tns:GetAccountsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CreateAccount">
+      <wsdl:input message="tns:CreateAccountSoapIn" />
+      <wsdl:output message="tns:CreateAccountSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccount">
+      <wsdl:input message="tns:UpdateAccountSoapIn" />
+      <wsdl:output message="tns:UpdateAccountSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccountJob">
+      <wsdl:input message="tns:UpdateAccountJobSoapIn" />
+      <wsdl:output message="tns:UpdateAccountJobSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAccount">
+      <wsdl:input message="tns:GetAccountSoapIn" />
+      <wsdl:output message="tns:GetAccountSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountDetail">
+      <wsdl:input message="tns:GetAccountDetailSoapIn" />
+      <wsdl:output message="tns:GetAccountDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountBalanceDetail">
+      <wsdl:input message="tns:GetAccountBalanceDetailSoapIn" />
+      <wsdl:output message="tns:GetAccountBalanceDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountJobDetail">
+      <wsdl:input message="tns:GetAccountJobDetailSoapIn" />
+      <wsdl:output message="tns:GetAccountJobDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetBranches">
+      <wsdl:input message="tns:GetBranchesSoapIn" />
+      <wsdl:output message="tns:GetBranchesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <wsdl:input message="tns:GetItemsSoapIn" />
+      <wsdl:output message="tns:GetItemsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetail">
+      <wsdl:input message="tns:GetItemDetailSoapIn" />
+      <wsdl:output message="tns:GetItemDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetailAccount">
+      <wsdl:input message="tns:GetItemDetailAccountSoapIn" />
+      <wsdl:output message="tns:GetItemDetailAccountSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItemQuantityChanges">
+      <wsdl:input message="tns:GetItemQuantityChangesSoapIn" />
+      <wsdl:output message="tns:GetItemQuantityChangesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetItemPriceChanges">
+      <wsdl:input message="tns:GetItemPriceChangesSoapIn" />
+      <wsdl:output message="tns:GetItemPriceChangesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CreateOrderRequest">
+      <wsdl:input message="tns:CreateOrderRequestSoapIn" />
+      <wsdl:output message="tns:CreateOrderRequestSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderRequestStatus">
+      <wsdl:input message="tns:GetOrderRequestStatusSoapIn" />
+      <wsdl:output message="tns:GetOrderRequestStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPaymentRequestStatus">
+      <wsdl:input message="tns:GetPaymentRequestStatusSoapIn" />
+      <wsdl:output message="tns:GetPaymentRequestStatusSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CancelOrderRequest">
+      <wsdl:input message="tns:CancelOrderRequestSoapIn" />
+      <wsdl:output message="tns:CancelOrderRequestSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CleanupOrderRequests">
+      <wsdl:input message="tns:CleanupOrderRequestsSoapIn" />
+      <wsdl:output message="tns:CleanupOrderRequestsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <wsdl:input message="tns:GetOrdersSoapIn" />
+      <wsdl:output message="tns:GetOrdersSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderDetail">
+      <wsdl:input message="tns:GetOrderDetailSoapIn" />
+      <wsdl:output message="tns:GetOrderDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoices">
+      <wsdl:input message="tns:GetInvoicesSoapIn" />
+      <wsdl:output message="tns:GetInvoicesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoiceDetail">
+      <wsdl:input message="tns:GetInvoiceDetailSoapIn" />
+      <wsdl:output message="tns:GetInvoiceDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocations">
+      <wsdl:input message="tns:GetTaxLocationsSoapIn" />
+      <wsdl:output message="tns:GetTaxLocationsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocationDetail">
+      <wsdl:input message="tns:GetTaxLocationDetailSoapIn" />
+      <wsdl:output message="tns:GetTaxLocationDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodes">
+      <wsdl:input message="tns:GetPostalCodesSoapIn" />
+      <wsdl:output message="tns:GetPostalCodesSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodeDetail">
+      <wsdl:input message="tns:GetPostalCodeDetailSoapIn" />
+      <wsdl:output message="tns:GetPostalCodeDetailSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetGroups">
+      <wsdl:input message="tns:GetGroupsSoapIn" />
+      <wsdl:output message="tns:GetGroupsSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GetDocumentSummaryInformation">
+      <wsdl:input message="tns:GetDocumentSummaryInformationSoapIn" />
+      <wsdl:output message="tns:GetDocumentSummaryInformationSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CreatePDFDoc">
+      <wsdl:input message="tns:CreatePDFDocSoapIn" />
+      <wsdl:output message="tns:CreatePDFDocSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CreatePaymentRequest">
+      <wsdl:input message="tns:CreatePaymentRequestSoapIn" />
+      <wsdl:output message="tns:CreatePaymentRequestSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="GenerateStatement">
+      <wsdl:input message="tns:GenerateStatementSoapIn" />
+      <wsdl:output message="tns:GenerateStatementSoapOut" />
+    </wsdl:operation>
+    <wsdl:operation name="CartVerify">
+      <wsdl:input message="tns:CartVerifySoapIn" />
+      <wsdl:output message="tns:CartVerifySoapOut" />
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="ECommerceSoap" type="tns:ECommerceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="GetAccounts">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccounts" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateAccount">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreateAccount" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccount">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/UpdateAccount" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccountJob">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/UpdateAccountJob" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccount">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccount" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountBalanceDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountBalanceDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountJobDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountJobDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetBranches">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetBranches" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItems" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetailAccount">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemDetailAccount" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemQuantityChanges">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemQuantityChanges" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemPriceChanges">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemPriceChanges" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateOrderRequest">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreateOrderRequest" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderRequestStatus">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrderRequestStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPaymentRequestStatus">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPaymentRequestStatus" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CancelOrderRequest">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CancelOrderRequest" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CleanupOrderRequests">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CleanupOrderRequests" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrders" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrderDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoices">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetInvoices" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoiceDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetInvoiceDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocations">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetTaxLocations" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocationDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetTaxLocationDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodes">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPostalCodes" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodeDetail">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPostalCodeDetail" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetGroups">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetGroups" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDocumentSummaryInformation">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetDocumentSummaryInformation" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreatePDFDoc">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreatePDFDoc" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreatePaymentRequest">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreatePaymentRequest" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GenerateStatement">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GenerateStatement" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CartVerify">
+      <soap:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CartVerify" style="document" />
+      <wsdl:input>
+        <soap:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="ECommerceSoap12" type="tns:ECommerceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http" />
+    <wsdl:operation name="GetAccounts">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccounts" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateAccount">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreateAccount" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccount">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/UpdateAccount" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="UpdateAccountJob">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/UpdateAccountJob" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccount">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccount" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountBalanceDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountBalanceDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetAccountJobDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetAccountJobDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetBranches">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetBranches" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItems">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItems" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemDetailAccount">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemDetailAccount" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemQuantityChanges">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemQuantityChanges" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetItemPriceChanges">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetItemPriceChanges" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateOrderRequest">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreateOrderRequest" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderRequestStatus">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrderRequestStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPaymentRequestStatus">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPaymentRequestStatus" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CancelOrderRequest">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CancelOrderRequest" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CleanupOrderRequests">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CleanupOrderRequests" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrders" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetOrderDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoices">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetInvoices" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetInvoiceDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetInvoiceDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocations">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetTaxLocations" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetTaxLocationDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetTaxLocationDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodes">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPostalCodes" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetPostalCodeDetail">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetPostalCodeDetail" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetGroups">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetGroups" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetDocumentSummaryInformation">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GetDocumentSummaryInformation" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreatePDFDoc">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreatePDFDoc" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreatePaymentRequest">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CreatePaymentRequest" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GenerateStatement">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/GenerateStatement" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CartVerify">
+      <soap12:operation soapAction="http://SpruceWeb/WebServices/ECommerce/CartVerify" style="document" />
+      <wsdl:input>
+        <soap12:body use="literal" />
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal" />
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="ECommerce">
+    <wsdl:port name="ECommerceSoap" binding="tns:ECommerceSoap">
+      <soap:address location="https://apicrowllumberc3115.ecilbmh.com/api/ecommerce.asmx" />
+    </wsdl:port>
+    <wsdl:port name="ECommerceSoap12" binding="tns:ECommerceSoap12">
+      <soap12:address location="https://apicrowllumberc3115.ecilbmh.com/api/ecommerce.asmx" />
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* MD3 Dark Theme Defaults (Industrial Dark) */
+    --background: 230 20% 5%;
+    /* #0A0B10 Deep Space */
+    --foreground: 210 40% 98%;
+    /* White/98% */
+
+    /* Primary: Gable Green */
+    --primary: 158 100% 50%;
+    /* #00FFA3 */
+    --primary-foreground: 230 20% 5%;
+    --primary-container: 158 100% 10%;
+    --on-primary-container: 158 100% 80%;
+
+    /* Secondary: Slate/Blue Steel */
+    --secondary: 217 33% 17%;
+    /* #161821 Slate Steel */
+    --secondary-foreground: 210 40% 98%;
+    --secondary-container: 217 33% 25%;
+    --on-secondary-container: 210 40% 98%;
+
+    /* Tertiary: Blueprint Blue */
+    --tertiary: 199 95% 60%;
+    /* #38BDF8 */
+    --tertiary-foreground: 230 20% 5%;
+
+    /* Error/Destructive */
+    --destructive: 346 87% 60%;
+    /* #F43F5E Safety Red */
+    --destructive-foreground: 210 40% 98%;
+
+    /* Neutral Surfaces */
+    --card: 229 19% 11%;
+    /* #161821 */
+    --card-foreground: 210 40% 98%;
+    --popover: 229 19% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 158 100% 50%;
+    --accent-foreground: 230 20% 5%;
+
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 158 100% 50%;
+
+    --radius: 0.75rem;
+    /* 12px default radius */
+  }
+
+  .dark {
+    --background: 230 20% 5%;
+    --foreground: 210 40% 98%;
+    /* ... replicate root details if switching modes, 
+       but currently we are effectively dark-only */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  /* WCAG AA: Visible focus indicator */
+  *:focus-visible {
+    outline: 2px solid #00FFA3;
+    outline-offset: 2px;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-gable-green/30 selection:text-gable-green;
+  }
+}
+
+@layer utilities {
+
+  /* Glassmorphism Utilities */
+  .glass-card {
+    @apply bg-slate-steel/60 backdrop-blur-xl border border-white/5 shadow-elevation-1;
+  }
+
+  .glass-panel {
+    @apply bg-deep-space/80 backdrop-blur-2xl border-r border-white/5;
+  }
+
+  /* Text Styles */
+  .text-display-large {
+    @apply font-sans font-bold text-5xl tracking-tight;
+  }
+
+  .text-headline-medium {
+    @apply font-sans font-semibold text-2xl tracking-normal;
+  }
+
+  .text-body-large {
+    @apply font-sans font-normal text-lg tracking-wide;
+  }
+
+  .font-data {
+    @apply font-mono tracking-tight;
+  }
+
+  /* Animation Utilities */
+  .hover-lift {
+    @apply transition-transform duration-300 ease-out hover:-translate-y-1 hover:shadow-elevation-2;
+  }
+
+  .animate-enter {
+    @apply animate-fade-in animate-slide-up;
+  }
+}

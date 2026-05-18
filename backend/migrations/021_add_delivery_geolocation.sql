@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS deliveries_temp (id uuid); -- dummy execution
+
+ALTER TABLE deliveries
+ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
+ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;

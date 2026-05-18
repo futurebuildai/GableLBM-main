@@ -1,0 +1,138 @@
+{
+  "entities": [
+    {
+      "name": "invoices",
+      "description": "Customer invoices representing completed sales or shipped materials.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "description": "Primary Key"
+        },
+        {
+          "name": "invoice_number",
+          "type": "String",
+          "description": "Human readable invoice identifier"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "UNPAID, PAID, VOID, PARTIAL"
+        },
+        {
+          "name": "total_amount",
+          "type": "Decimal",
+          "description": "Total invoice value including tax in cents"
+        },
+        {
+          "name": "created_at",
+          "type": "DateTime",
+          "description": "Timestamp of creation"
+        },
+        {
+          "name": "customer_id",
+          "type": "UUID",
+          "description": "Foreign Key to customers"
+        },
+        {
+          "name": "customer_name",
+          "type": "String",
+          "description": "Denormalized customer name"
+        }
+      ],
+      "relations": [
+        {
+          "target_entity": "customers",
+          "type": "N:1",
+          "join_on": "customer_id = id"
+        }
+      ]
+    },
+    {
+      "name": "orders",
+      "description": "Customer orders representing committed sales not yet invoiced.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "description": "Primary Key"
+        },
+        {
+          "name": "order_number",
+          "type": "String",
+          "description": "Human readable order identifier"
+        },
+        {
+          "name": "status",
+          "type": "String",
+          "description": "OPEN, STAGED, COMPLETED"
+        },
+        {
+          "name": "total_amount",
+          "type": "Decimal",
+          "description": "Total order value in cents"
+        },
+        {
+          "name": "created_at",
+          "type": "DateTime",
+          "description": "Timestamp of creation"
+        },
+        {
+          "name": "customer_id",
+          "type": "UUID",
+          "description": "Foreign Key to customers"
+        },
+        {
+          "name": "customer_name",
+          "type": "String",
+          "description": "Denormalized customer name"
+        }
+      ],
+      "relations": [
+        {
+          "target_entity": "customers",
+          "type": "N:1",
+          "join_on": "customer_id = id"
+        }
+      ]
+    },
+    {
+      "name": "inventory",
+      "description": "Real-time product inventory levels by location.",
+      "fields": [
+        {
+          "name": "id",
+          "type": "UUID",
+          "description": "Primary Key"
+        },
+        {
+          "name": "product_id",
+          "type": "UUID",
+          "description": "Foreign Key to products"
+        },
+        {
+          "name": "product_name",
+          "type": "String",
+          "description": "Denormalized product name"
+        },
+        {
+          "name": "quantity",
+          "type": "Decimal",
+          "description": "Current stock level"
+        },
+        {
+          "name": "location_id",
+          "type": "UUID",
+          "description": "Foreign Key to locations"
+        }
+      ],
+      "relations": [
+        {
+          "target_entity": "products",
+          "type": "N:1",
+          "join_on": "product_id = id"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# NOTE: This file is unused for root-context Docker builds — see /.dockerignore instead
+node_modules
+dist
+.git
+.env
+*.log
+.DS_Store
