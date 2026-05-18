@@ -61,6 +61,15 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 	vendorID := uuid.New()
 	productID := uuid.New()
 	sku := "SPECIAL-" + productID.String()[:8]
+	vendorName := "Test Vendor " + vendorID.String()[:8]
+	// purchase_orders.vendor_id has a FK to vendors(id); insert a vendor row
+	// before triggering PO creation via CreateOrder.
+	_, err = db.Pool.Exec(context.Background(),
+		"INSERT INTO vendors (id, name) VALUES ($1, $2)",
+		vendorID, vendorName)
+	if err != nil {
+		t.Logf("Vendor insert error: %v", err)
+	}
 	// Insert dummy product
 	_, err = db.Pool.Exec(context.Background(), "INSERT INTO products (id, sku, description, uom_primary, base_price) VALUES ($1, $2, 'Special Item', 'EA', 100)", productID, sku)
 	if err != nil {
