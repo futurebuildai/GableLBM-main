@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -24,17 +25,27 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 	if po.Source == "" {
 		po.Source = SourceManual
 	}
+	// branch_id falls back to default when caller hasn't set one.
+	var branchArg any
+	if po.BranchID != uuid.Nil {
+		branchArg = po.BranchID
+	} else if bid := middleware.BranchIDForQuery(ctx); bid != nil {
+		branchArg = *bid
+		po.BranchID = *bid
+	}
 	query := `
-		INSERT INTO purchase_orders (id, vendor_id, status, source)
-		VALUES ($1, $2, $3, $4)
-		RETURNING created_at, updated_at
+		INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id)
+		VALUES ($1, $2, $3, $4,
+			COALESCE($5::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+		RETURNING created_at, updated_at, branch_id
 	`
 	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		po.ID,
 		po.VendorID,
 		po.Status,
 		po.Source,
-	).Scan(&po.CreatedAt, &po.UpdatedAt)
+		branchArg,
+	).Scan(&po.CreatedAt, &po.UpdatedAt, &po.BranchID)
 }
 
 func (r *Repository) AddPOLine(ctx context.Context, line *PurchaseOrderLine) error {
@@ -59,20 +70,23 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 		return nil, fmt.Errorf("vendor_id required lookup")
 	}
 
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
-		SELECT id, vendor_id, status, source, created_at, updated_at
+		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
 		FROM purchase_orders
 		WHERE vendor_id = $1 AND status = 'DRAFT'
+		  AND ($2::uuid IS NULL OR branch_id = $2)
 		LIMIT 1
 	`
 	var po PurchaseOrder
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID, branchID).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
 		&po.CreatedAt,
 		&po.UpdatedAt,
+		&po.BranchID,
 	)
 	if err != nil {
 		return nil, err
@@ -81,16 +95,18 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 }
 
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
-		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at,
+		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
 		       COUNT(pol.id) AS line_count,
 		       COALESCE(SUM(pol.quantity * pol.cost), 0) AS total_cost
 		FROM purchase_orders po
 		LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id
+		WHERE ($1::uuid IS NULL OR po.branch_id = $1)
 		GROUP BY po.id
 		ORDER BY po.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POs: %w", err)
 	}
@@ -106,6 +122,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 			&po.Source,
 			&po.CreatedAt,
 			&po.UpdatedAt,
+			&po.BranchID,
 			&po.LineCount,
 			&po.TotalCost,
 		); err != nil {
@@ -139,15 +156,17 @@ func (r *Repository) GetSourceSummary(ctx context.Context) (map[string]int, erro
 }
 
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
-	query := `SELECT id, vendor_id, status, source, created_at, updated_at FROM purchase_orders WHERE id = $1`
+	branchID := middleware.BranchIDForQuery(ctx)
+	query := `SELECT id, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
 	var po PurchaseOrder
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchID).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
 		&po.CreatedAt,
 		&po.UpdatedAt,
+		&po.BranchID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PO header: %w", err)

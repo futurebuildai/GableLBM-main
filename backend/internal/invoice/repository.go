@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -48,12 +49,21 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 	subtotalFloat := float64(inv.Subtotal) / 100.0
 	taxAmountFloat := float64(inv.TaxAmount) / 100.0
 
+	// branch_id falls back to default when caller hasn't set one.
+	var branchArg any
+	if inv.BranchID != uuid.Nil {
+		branchArg = inv.BranchID
+	} else if bid := middleware.BranchIDForQuery(ctx); bid != nil {
+		branchArg = *bid
+		inv.BranchID = *bid
+	}
 	queryInv := `
-		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount, payment_terms, due_date, paid_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount, payment_terms, due_date, paid_at, created_at, updated_at, branch_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+			COALESCE($14::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 	`
 	_, err := exec.Exec(ctx, queryInv,
-		inv.ID, inv.OrderID, inv.CustomerID, inv.Status, totalAmountFloat, subtotalFloat, inv.TaxRate, taxAmountFloat, inv.PaymentTerms, inv.DueDate, inv.PaidAt, inv.CreatedAt, inv.UpdatedAt,
+		inv.ID, inv.OrderID, inv.CustomerID, inv.Status, totalAmountFloat, subtotalFloat, inv.TaxRate, taxAmountFloat, inv.PaymentTerms, inv.DueDate, inv.PaidAt, inv.CreatedAt, inv.UpdatedAt, branchArg,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
@@ -85,22 +95,24 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 }
 
 func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	queryInv := `
 		SELECT i.id, i.order_id, i.customer_id, COALESCE(c.name, ''), i.status,
 		       i.total_amount, COALESCE(i.subtotal, i.total_amount), COALESCE(i.tax_rate, 0), COALESCE(i.tax_amount, 0),
 		       COALESCE(i.payment_terms, 'NET30'),
-		       i.due_date, i.paid_at, i.created_at, i.updated_at
+		       i.due_date, i.paid_at, i.created_at, i.updated_at, i.branch_id
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
 		WHERE i.id = $1
+		  AND ($2::uuid IS NULL OR i.branch_id = $2)
 	`
 	var inv Invoice
 	var totalAmountFloat, subtotalFloat, taxAmountFloat float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInv, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInv, id, branchID).Scan(
 		&inv.ID, &inv.OrderID, &inv.CustomerID, &inv.CustomerName, &inv.Status,
 		&totalAmountFloat, &subtotalFloat, &inv.TaxRate, &taxAmountFloat,
 		&inv.PaymentTerms,
-		&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt,
+		&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt, &inv.BranchID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -139,16 +151,18 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 }
 
 func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT i.id, i.order_id, i.customer_id, COALESCE(c.name, ''), i.status,
 		       i.total_amount, COALESCE(i.subtotal, i.total_amount), COALESCE(i.tax_rate, 0), COALESCE(i.tax_amount, 0),
 		       COALESCE(i.payment_terms, 'NET30'),
-		       i.due_date, i.paid_at, i.created_at, i.updated_at
+		       i.due_date, i.paid_at, i.created_at, i.updated_at, i.branch_id
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
+		WHERE ($1::uuid IS NULL OR i.branch_id = $1)
 		ORDER BY i.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list invoices: %w", err)
 	}
@@ -162,7 +176,7 @@ func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error
 			&inv.ID, &inv.OrderID, &inv.CustomerID, &inv.CustomerName, &inv.Status,
 			&totalAmountFloat, &subtotalFloat, &inv.TaxRate, &taxAmountFloat,
 			&inv.PaymentTerms,
-			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt,
+			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt, &inv.BranchID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan invoice: %w", err)
 		}
@@ -175,10 +189,11 @@ func (r *PostgresRepository) ListInvoices(ctx context.Context) ([]Invoice, error
 }
 
 func (r *PostgresRepository) ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	// Get total count
-	countQuery := `SELECT COUNT(*) FROM invoices`
+	countQuery := `SELECT COUNT(*) FROM invoices WHERE ($1::uuid IS NULL OR branch_id = $1)`
 	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, branchID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count invoices: %w", err)
 	}
 
@@ -186,13 +201,14 @@ func (r *PostgresRepository) ListInvoicesPaginated(ctx context.Context, limit, o
 		SELECT i.id, i.order_id, i.customer_id, COALESCE(c.name, ''), i.status,
 		       i.total_amount, COALESCE(i.subtotal, i.total_amount), COALESCE(i.tax_rate, 0), COALESCE(i.tax_amount, 0),
 		       COALESCE(i.payment_terms, 'NET30'),
-		       i.due_date, i.paid_at, i.created_at, i.updated_at
+		       i.due_date, i.paid_at, i.created_at, i.updated_at, i.branch_id
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
+		WHERE ($1::uuid IS NULL OR i.branch_id = $1)
 		ORDER BY i.created_at DESC
-		LIMIT $1 OFFSET $2
+		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list invoices: %w", err)
 	}
@@ -206,7 +222,7 @@ func (r *PostgresRepository) ListInvoicesPaginated(ctx context.Context, limit, o
 			&inv.ID, &inv.OrderID, &inv.CustomerID, &inv.CustomerName, &inv.Status,
 			&totalAmountFloat, &subtotalFloat, &inv.TaxRate, &taxAmountFloat,
 			&inv.PaymentTerms,
-			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt,
+			&inv.DueDate, &inv.PaidAt, &inv.CreatedAt, &inv.UpdatedAt, &inv.BranchID,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan invoice: %w", err)
 		}

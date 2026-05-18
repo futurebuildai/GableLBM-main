@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -46,30 +47,52 @@ func (r *PostgresRepository) CreateCustomer(ctx context.Context, c *Customer) er
 	c.CreatedAt = now
 	c.UpdatedAt = now
 
-	// Ensure multiplier logic or let DB handle it?
-	// DB defaults are good, but if we are passing struct, we should set defaults if not zero.
-
-	query := `
-		INSERT INTO customers (
-			id, name, account_number, email, phone, address, 
-			price_level_id, credit_limit, balance_due, is_active, 
-			tier,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
-		c.ID, c.Name, c.AccountNumber, c.Email, c.Phone, c.Address,
-		c.PriceLevelID, c.CreditLimit, c.BalanceDue, c.IsActive,
-		c.Tier,
-		c.CreatedAt, c.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create customer: %w", err)
+	// Resolve primary branch — explicit field, then request context, then the
+	// SQL-level COALESCE fallback to system_settings.default_branch_id.
+	var branchArg any
+	if c.PrimaryBranchID != uuid.Nil {
+		branchArg = c.PrimaryBranchID
+	} else if bid := branchctx.IDForQuery(ctx); bid != nil {
+		branchArg = *bid
+		c.PrimaryBranchID = *bid
 	}
-	return nil
+
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		exec := r.db.GetExecutor(txCtx)
+
+		query := `
+			INSERT INTO customers (
+				id, name, account_number, email, phone, address,
+				price_level_id, credit_limit, balance_due, is_active,
+				tier,
+				created_at, updated_at, primary_branch_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+				COALESCE($14::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+			RETURNING primary_branch_id
+		`
+		if err := exec.QueryRow(txCtx, query,
+			c.ID, c.Name, c.AccountNumber, c.Email, c.Phone, c.Address,
+			c.PriceLevelID, c.CreditLimit, c.BalanceDue, c.IsActive,
+			c.Tier,
+			c.CreatedAt, c.UpdatedAt, branchArg,
+		).Scan(&c.PrimaryBranchID); err != nil {
+			return fmt.Errorf("failed to create customer: %w", err)
+		}
+
+		// Mirror into customer_branches so list filters work uniformly.
+		_, err := exec.Exec(txCtx,
+			`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			c.ID, c.PrimaryBranchID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to associate customer branch: %w", err)
+		}
+		return nil
+	})
 }
 
 func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Customer, error) {
+	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
 			c.id, c.name, c.account_number, c.email, c.phone, c.address,
@@ -77,11 +100,14 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 			c.tier,
 			c.created_at, c.updated_at,
 			pl.id, pl.name, pl.multiplier,
-			c.salesperson_id, COALESCE(st.name, '')
+			c.salesperson_id, COALESCE(st.name, ''), c.primary_branch_id
 		FROM customers c
 		LEFT JOIN price_levels pl ON c.price_level_id = pl.id
 		LEFT JOIN sales_team st ON c.salesperson_id = st.id
 		WHERE c.id = $1
+		  AND ($2::uuid IS NULL OR EXISTS (
+		      SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2
+		  ))
 	`
 
 	var c Customer
@@ -90,13 +116,13 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 	var plName *string
 	var plMult *float64
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchID).Scan(
 		&c.ID, &c.Name, &c.AccountNumber, &c.Email, &c.Phone, &c.Address,
 		&c.PriceLevelID, &c.CreditLimit, &c.BalanceDue, &c.IsActive,
 		&c.Tier,
 		&c.CreatedAt, &c.UpdatedAt,
 		&plID, &plName, &plMult,
-		&c.SalespersonID, &c.SalespersonName,
+		&c.SalespersonID, &c.SalespersonName, &c.PrimaryBranchID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -120,6 +146,7 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 }
 
 func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email string) (*Customer, error) {
+	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
 			c.id, c.name, c.account_number, c.email, c.phone, c.address,
@@ -127,11 +154,14 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 			c.tier,
 			c.created_at, c.updated_at,
 			pl.id, pl.name, pl.multiplier,
-			c.salesperson_id, COALESCE(st.name, '')
+			c.salesperson_id, COALESCE(st.name, ''), c.primary_branch_id
 		FROM customers c
 		LEFT JOIN price_levels pl ON c.price_level_id = pl.id
 		LEFT JOIN sales_team st ON c.salesperson_id = st.id
 		WHERE c.email = $1
+		  AND ($2::uuid IS NULL OR EXISTS (
+		      SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2
+		  ))
 	`
 
 	var c Customer
@@ -140,13 +170,13 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 	var plName *string
 	var plMult *float64
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, email).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, email, branchID).Scan(
 		&c.ID, &c.Name, &c.AccountNumber, &c.Email, &c.Phone, &c.Address,
 		&c.PriceLevelID, &c.CreditLimit, &c.BalanceDue, &c.IsActive,
 		&c.Tier,
 		&c.CreatedAt, &c.UpdatedAt,
 		&plID, &plName, &plMult,
-		&c.SalespersonID, &c.SalespersonName,
+		&c.SalespersonID, &c.SalespersonName, &c.PrimaryBranchID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -170,6 +200,7 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 }
 
 func (r *PostgresRepository) ListCustomers(ctx context.Context) ([]Customer, error) {
+	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
 			c.id, c.name, c.account_number, c.email, c.phone, c.address,
@@ -177,14 +208,17 @@ func (r *PostgresRepository) ListCustomers(ctx context.Context) ([]Customer, err
 			c.tier,
 			c.created_at, c.updated_at,
 			pl.id, pl.name, pl.multiplier,
-			c.salesperson_id, COALESCE(st.name, '')
+			c.salesperson_id, COALESCE(st.name, ''), c.primary_branch_id
 		FROM customers c
 		LEFT JOIN price_levels pl ON c.price_level_id = pl.id
 		LEFT JOIN sales_team st ON c.salesperson_id = st.id
+		WHERE ($1::uuid IS NULL OR EXISTS (
+		    SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $1
+		))
 		ORDER BY c.name ASC
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list customers: %w", err)
 	}
@@ -204,7 +238,7 @@ func (r *PostgresRepository) ListCustomers(ctx context.Context) ([]Customer, err
 			&c.Tier,
 			&c.CreatedAt, &c.UpdatedAt,
 			&plID, &plName, &plMult,
-			&c.SalespersonID, &c.SalespersonName,
+			&c.SalespersonID, &c.SalespersonName, &c.PrimaryBranchID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan customer: %w", err)
 		}
@@ -226,10 +260,16 @@ func (r *PostgresRepository) ListCustomers(ctx context.Context) ([]Customer, err
 }
 
 func (r *PostgresRepository) ListCustomersPaginated(ctx context.Context, limit, offset int) ([]Customer, int, error) {
+	branchID := branchctx.IDForQuery(ctx)
 	// Get total count
-	countQuery := `SELECT COUNT(*) FROM customers`
+	countQuery := `
+		SELECT COUNT(*) FROM customers c
+		WHERE ($1::uuid IS NULL OR EXISTS (
+		    SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $1
+		))
+	`
 	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, branchID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count customers: %w", err)
 	}
 
@@ -240,15 +280,18 @@ func (r *PostgresRepository) ListCustomersPaginated(ctx context.Context, limit, 
 			c.tier,
 			c.created_at, c.updated_at,
 			pl.id, pl.name, pl.multiplier,
-			c.salesperson_id, COALESCE(st.name, '')
+			c.salesperson_id, COALESCE(st.name, ''), c.primary_branch_id
 		FROM customers c
 		LEFT JOIN price_levels pl ON c.price_level_id = pl.id
 		LEFT JOIN sales_team st ON c.salesperson_id = st.id
+		WHERE ($1::uuid IS NULL OR EXISTS (
+		    SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $1
+		))
 		ORDER BY c.name ASC
-		LIMIT $1 OFFSET $2
+		LIMIT $2 OFFSET $3
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list customers: %w", err)
 	}
@@ -268,7 +311,7 @@ func (r *PostgresRepository) ListCustomersPaginated(ctx context.Context, limit, 
 			&c.Tier,
 			&c.CreatedAt, &c.UpdatedAt,
 			&plID, &plName, &plMult,
-			&c.SalespersonID, &c.SalespersonName,
+			&c.SalespersonID, &c.SalespersonName, &c.PrimaryBranchID,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan customer: %w", err)
 		}

@@ -5,11 +5,12 @@ import { router } from '../../lib/router.ts';
 import '../ui/brand-logo.ts';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
+import './branch-switcher.ts';
 import { icon } from '../../lib/icons.ts';
 import {
   LayoutDashboard, LayoutGrid, Package, Truck, FileText,
   Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search,
-  ShoppingBag, Store, BookOpen
+  ShoppingBag, Store, BookOpen, Building2
 } from 'lucide';
 
 @customElement('gable-app-shell')
@@ -126,6 +127,7 @@ export class GableAppShell extends LitElement {
           <!-- Footer -->
           <div class="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
             ${this._navItem('/pricing', LayoutGrid, 'Pricing')}
+            ${this._navItem('/admin/branches', Building2, 'Branches')}
             ${this._navItem('/admin', Settings, 'Admin')}
           </div>
 
@@ -167,6 +169,7 @@ export class GableAppShell extends LitElement {
             </div>
 
             <div class="flex items-center gap-4">
+              <gable-branch-switcher></gable-branch-switcher>
               <div class="text-xs text-zinc-500 font-medium hidden lg:block bg-white/5 px-2 py-1 rounded border border-white/5">
                 ⌘K
               </div>

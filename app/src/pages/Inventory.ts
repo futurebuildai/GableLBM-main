@@ -4,6 +4,7 @@ import { icon } from '../lib/icons.ts';
 import { Plus, Search, Package } from 'lucide';
 import { ProductService } from '../services/product.service.ts';
 import type { Product } from '../types/product.ts';
+import { onBranchChanged } from '../lib/branch-listener.ts';
 
 // Side-effect imports: register child custom elements
 import '../components/inventory/InventoryTable.ts';
@@ -26,10 +27,20 @@ export class GableInventory extends LitElement {
     @state() private isTransferModalOpen = false;
     @state() private isMarginModalOpen = false;
     @state() private selectedProduct: Product | null = null;
+    private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
         super.connectedCallback();
         this.loadProducts();
+        this._unsubBranch = onBranchChanged(() => this.loadProducts());
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async loadProducts() {

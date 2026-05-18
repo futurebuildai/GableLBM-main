@@ -7,6 +7,7 @@ import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, Fi
 import { QuoteService } from '../../services/QuoteService.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import type { Quote, QuoteState } from '../../types/quote.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -58,9 +59,23 @@ export class GableQuoteList extends LitElement {
         EXPIRED: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
     };
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
         this.loadQuotes();
+        this._unsubBranch = onBranchChanged(() => {
+            this.loading = true;
+            this.loadQuotes();
+        });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async loadQuotes() {

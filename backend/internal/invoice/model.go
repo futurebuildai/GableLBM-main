@@ -18,6 +18,7 @@ const (
 
 type Invoice struct {
 	ID           uuid.UUID     `json:"id" db:"id"`
+	BranchID     uuid.UUID     `json:"branch_id" db:"branch_id"`
 	OrderID      uuid.UUID     `json:"order_id" db:"order_id"`
 	CustomerID   uuid.UUID     `json:"customer_id" db:"customer_id"`
 	CustomerName string        `json:"customer_name,omitempty"`

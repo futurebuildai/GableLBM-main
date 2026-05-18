@@ -24,12 +24,13 @@ type PriceLevel struct {
 }
 
 type Customer struct {
-	ID            uuid.UUID `json:"id"`
-	Name          string    `json:"name"`
-	AccountNumber string    `json:"account_number"`
-	Email         string    `json:"email,omitempty"`
-	Phone         string    `json:"phone,omitempty"`
-	Address       string    `json:"address,omitempty"`
+	ID              uuid.UUID `json:"id"`
+	PrimaryBranchID uuid.UUID `json:"primary_branch_id"`
+	Name            string    `json:"name"`
+	AccountNumber   string    `json:"account_number"`
+	Email           string    `json:"email,omitempty"`
+	Phone           string    `json:"phone,omitempty"`
+	Address         string    `json:"address,omitempty"`
 
 	Tier CustomerTier `json:"tier"`
 

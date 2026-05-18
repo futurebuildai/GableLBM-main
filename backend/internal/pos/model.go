@@ -20,6 +20,7 @@ const (
 // POSTransaction represents a retail point-of-sale transaction.
 type POSTransaction struct {
 	ID          uuid.UUID         `json:"id" db:"id"`
+	BranchID    uuid.UUID         `json:"branch_id" db:"branch_id"`
 	RegisterID  string            `json:"register_id" db:"register_id"`
 	CashierID   uuid.UUID         `json:"cashier_id" db:"cashier_id"`
 	CustomerID  *uuid.UUID        `json:"customer_id,omitempty" db:"customer_id"`
@@ -66,11 +67,12 @@ type POSTender struct {
 
 // POSRegister represents a physical or virtual POS register.
 type POSRegister struct {
-	ID         string    `json:"id" db:"id"`
-	LocationID uuid.UUID `json:"location_id" db:"location_id"`
-	Name       string    `json:"name" db:"name"`
-	IsActive   bool      `json:"is_active" db:"is_active"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	ID         string     `json:"id" db:"id"`
+	LocationID *uuid.UUID `json:"location_id,omitempty" db:"location_id"`
+	BranchID   *uuid.UUID `json:"branch_id,omitempty" db:"branch_id"` // Derived from locations.branch_id
+	Name       string     `json:"name" db:"name"`
+	IsActive   bool       `json:"is_active" db:"is_active"`
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 }
 
 // --- Request/Response Types ---

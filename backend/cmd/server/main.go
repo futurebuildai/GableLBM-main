@@ -143,6 +143,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 4b. Branch Context Middleware — enforces multi-branch scoping per
+	// the user_locations grant table. Controlled by system_settings keys
+	// `multi_branch_enabled` (kill switch) and `default_branch_required`.
+	branchMw := middleware.NewBranchMiddleware(db).Handler
+
+	// scoped composes a role guard with the branch middleware. Use this for
+	// any module group whose entities carry a branch_id.
+	scoped := func(roles ...string) func(http.Handler) http.Handler {
+		return middleware.Compose(middleware.RequireRole(roles...), branchMw)
+	}
+
 	// 5. Setup Router & Modules
 	mux := http.NewServeMux()
 
@@ -201,19 +212,29 @@ func main() {
 	pimHandler := pim.NewHandler(pimSvc)
 	pimHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	locationHandler := location.NewHandler(location.NewService(location.NewRepository(db)))
-	locationHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse"))
+	locationSvc := location.NewService(location.NewRepository(db))
+	locationUserRepo := location.NewUserRepository(db)
+	locationHandler := location.NewHandler(
+		locationSvc,
+		locationUserRepo,
+		middleware.RequireRole("admin", "owner"),
+	)
+	// Location routes are NOT branch-scoped at the middleware level: the
+	// branch switcher must be able to fetch /me/branches before a branch
+	// is selected, and branch CRUD endpoints don't operate on branch-scoped
+	// data.
+	locationHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
 
 	// Inventory Service needs to be shared to Order Service
 	inventoryRepo := inventory.NewRepository(db)
 	inventorySvc := inventory.NewService(inventoryRepo)
 	inventoryHandler := inventory.NewHandler(inventorySvc)
-	inventoryHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse"))
+	inventoryHandler.RegisterRoutes(mux, scoped("admin", "owner", "warehouse"))
 
 	customerRepo := customer.NewRepository(db)
 	customerSvc := customer.NewService(customerRepo)
 	customerHandler := customer.NewHandler(customerSvc)
-	customerHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	customerHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
 	// Sales Team Module
 	salesTeamRepo := salesteam.NewRepository(db)
@@ -234,7 +255,7 @@ func main() {
 	quoteRepo := quote.NewRepository(db)
 	quoteSvc := quote.NewService(quoteRepo)
 	quoteHandler := quote.NewHandler(quoteSvc)
-	quoteHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	quoteHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
@@ -248,7 +269,7 @@ func main() {
 	invoiceSvc := invoice.NewService(invoiceRepo, glSvc, accountSvc, db)
 	invoiceSvc.WithAuditLog(auditLog)
 	invoiceHandler := invoice.NewHandler(invoiceSvc)
-	invoiceHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
+	invoiceHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"))
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
@@ -306,7 +327,7 @@ func main() {
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
 		WithVelocityRepo(velocityRepo)
 	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
-	poHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
+	poHandler.RegisterRoutes(mux, scoped("admin", "owner", "purchasing"))
 
 	// Auto-reorder scheduler. Disabled by default; an operator activates it
 	// by setting reorder.enabled=true in system_settings. Stops in step 3.5
@@ -330,7 +351,7 @@ func main() {
 	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc, db)
 	orderSvc.WithAuditLog(auditLog)
 	orderHandler := order.NewHandler(orderSvc)
-	orderHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	orderHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -367,7 +388,7 @@ func main() {
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
 	posHandler := pos.NewHandler(posSvc)
-	posHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "cashier"))
+	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
 	// Accounts Payable Module
 	apRepo := ap.NewRepository(db)
@@ -484,7 +505,7 @@ func main() {
 	dashboardRepo := dashboard.NewRepository(db)
 	dashboardSvc := dashboard.NewService(dashboardRepo)
 	dashboardHandler := dashboard.NewHandler(dashboardSvc)
-	dashboardHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	dashboardHandler.RegisterRoutes(mux, scoped("admin", "owner", "finance"))
 
 	// Tech Admin Module
 	techAdminRepo := techadmin.NewRepository(db)

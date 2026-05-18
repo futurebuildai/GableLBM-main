@@ -4,6 +4,9 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/google/uuid"
 )
 
 // cache is a type-safe, TTL-based in-memory cache.
@@ -13,40 +16,55 @@ type cache[T any] struct {
 	valid     bool
 }
 
-// cacheStore holds all dashboard caches with a shared mutex for simplicity.
-type cacheStore struct {
-	mu              sync.RWMutex
-	ttl             time.Duration
-	summary         cache[*DashboardSummary]
-	inventoryAlerts cache[[]InventoryAlert]
-	topCustomers    cache[[]TopCustomer]
-	orderActivity   cache[*OrderActivity]
-	revenueTrend    cache[[]RevenueTrendPoint]
+// branchCache is a per-branch keyed cache. The zero uuid.UUID key is used for
+// the admin "all branches" variant.
+type branchCache[T any] struct {
+	mu      sync.RWMutex
+	entries map[uuid.UUID]*cache[T]
 }
 
-func newCacheStore(ttl time.Duration) *cacheStore {
-	return &cacheStore{ttl: ttl}
+func newBranchCache[T any]() *branchCache[T] {
+	return &branchCache[T]{entries: make(map[uuid.UUID]*cache[T])}
 }
 
-func getCache[T any](mu *sync.RWMutex, c *cache[T], ttl time.Duration) (T, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if c.valid && time.Since(c.timestamp) < ttl {
-		return c.data, true
+func (b *branchCache[T]) get(key uuid.UUID, ttl time.Duration) (T, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if e, ok := b.entries[key]; ok && e.valid && time.Since(e.timestamp) < ttl {
+		return e.data, true
 	}
 	var zero T
 	return zero, false
 }
 
-func setCache[T any](mu *sync.RWMutex, c *cache[T], data T) {
-	mu.Lock()
-	defer mu.Unlock()
-	c.data = data
-	c.timestamp = time.Now()
-	c.valid = true
+func (b *branchCache[T]) set(key uuid.UUID, data T) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.entries[key] = &cache[T]{data: data, timestamp: time.Now(), valid: true}
 }
 
-// Service provides dashboard business logic with type-safe caching.
+// cacheStore holds all dashboard caches, keyed by branch.
+type cacheStore struct {
+	ttl             time.Duration
+	summary         *branchCache[*DashboardSummary]
+	inventoryAlerts *branchCache[[]InventoryAlert]
+	topCustomers    *branchCache[[]TopCustomer]
+	orderActivity   *branchCache[*OrderActivity]
+	revenueTrend    *branchCache[[]RevenueTrendPoint]
+}
+
+func newCacheStore(ttl time.Duration) *cacheStore {
+	return &cacheStore{
+		ttl:             ttl,
+		summary:         newBranchCache[*DashboardSummary](),
+		inventoryAlerts: newBranchCache[[]InventoryAlert](),
+		topCustomers:    newBranchCache[[]TopCustomer](),
+		orderActivity:   newBranchCache[*OrderActivity](),
+		revenueTrend:    newBranchCache[[]RevenueTrendPoint](),
+	}
+}
+
+// Service provides dashboard business logic with type-safe per-branch caching.
 type Service struct {
 	repo  Repository
 	store *cacheStore
@@ -60,77 +78,92 @@ func NewService(repo Repository) *Service {
 	}
 }
 
+// branchKey returns the cache key for the request's branch context. A nil
+// branch (admin "all branches") is keyed as uuid.Nil.
+func branchKey(ctx context.Context) (uuid.UUID, *uuid.UUID) {
+	id := branchctx.IDForQuery(ctx)
+	if id == nil {
+		return uuid.Nil, nil
+	}
+	return *id, id
+}
+
 // GetSummary returns the dashboard summary with caching.
 func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
-	if cached, ok := getCache(&s.store.mu, &s.store.summary, s.store.ttl); ok {
+	key, branchID := branchKey(ctx)
+	if cached, ok := s.store.summary.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetDashboardSummary(ctx)
+	data, err := s.repo.GetDashboardSummary(ctx, branchID)
 	if err != nil {
 		return nil, err
 	}
 
-	setCache(&s.store.mu, &s.store.summary, data)
+	s.store.summary.set(key, data)
 	return data, nil
 }
 
 // GetInventoryAlerts returns inventory alerts with caching.
 func (s *Service) GetInventoryAlerts(ctx context.Context) ([]InventoryAlert, error) {
-	if cached, ok := getCache(&s.store.mu, &s.store.inventoryAlerts, s.store.ttl); ok {
+	key, branchID := branchKey(ctx)
+	if cached, ok := s.store.inventoryAlerts.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetInventoryAlerts(ctx, 10)
+	data, err := s.repo.GetInventoryAlerts(ctx, branchID, 10)
 	if err != nil {
 		return nil, err
 	}
 
-	setCache(&s.store.mu, &s.store.inventoryAlerts, data)
+	s.store.inventoryAlerts.set(key, data)
 	return data, nil
 }
 
 // GetTopCustomers returns top customers with caching.
 func (s *Service) GetTopCustomers(ctx context.Context) ([]TopCustomer, error) {
-	if cached, ok := getCache(&s.store.mu, &s.store.topCustomers, s.store.ttl); ok {
+	key, branchID := branchKey(ctx)
+	if cached, ok := s.store.topCustomers.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetTopCustomers(ctx, 5, 30)
+	data, err := s.repo.GetTopCustomers(ctx, branchID, 5, 30)
 	if err != nil {
 		return nil, err
 	}
 
-	setCache(&s.store.mu, &s.store.topCustomers, data)
+	s.store.topCustomers.set(key, data)
 	return data, nil
 }
 
 // GetOrderActivity returns order activity with caching.
 func (s *Service) GetOrderActivity(ctx context.Context) (*OrderActivity, error) {
-	if cached, ok := getCache(&s.store.mu, &s.store.orderActivity, s.store.ttl); ok {
+	key, branchID := branchKey(ctx)
+	if cached, ok := s.store.orderActivity.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetOrderActivity(ctx, 10)
+	data, err := s.repo.GetOrderActivity(ctx, branchID, 10)
 	if err != nil {
 		return nil, err
 	}
 
-	setCache(&s.store.mu, &s.store.orderActivity, data)
+	s.store.orderActivity.set(key, data)
 	return data, nil
 }
 
 // GetRevenueTrend returns revenue trend for chart.
 func (s *Service) GetRevenueTrend(ctx context.Context) ([]RevenueTrendPoint, error) {
-	if cached, ok := getCache(&s.store.mu, &s.store.revenueTrend, s.store.ttl); ok {
+	key, branchID := branchKey(ctx)
+	if cached, ok := s.store.revenueTrend.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
 
-	data, err := s.repo.GetRevenueTrend(ctx, 7)
+	data, err := s.repo.GetRevenueTrend(ctx, branchID, 7)
 	if err != nil {
 		return nil, err
 	}
 
-	setCache(&s.store.mu, &s.store.revenueTrend, data)
+	s.store.revenueTrend.set(key, data)
 	return data, nil
 }

@@ -18,6 +18,7 @@ const (
 
 type Order struct {
 	ID           uuid.UUID   `json:"id"`
+	BranchID     uuid.UUID   `json:"branch_id"`
 	CustomerID   uuid.UUID   `json:"customer_id"`
 	CustomerName string      `json:"customer_name,omitempty"`
 	QuoteID      *uuid.UUID  `json:"quote_id,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -56,6 +57,26 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 }
 
 func (s *Service) MoveStock(ctx context.Context, req StockMovementRequest) error {
+	// Cross-branch moves are not supported. Require both endpoints to share
+	// a branch_id (looked up from the locations table). A nil source location
+	// means "unassigned/legacy" which we treat as branch-unknown and reject
+	// unless the destination is also unassigned.
+	var fromBranch, toBranch *uuid.UUID
+	var err error
+	if req.FromLocationID != nil {
+		fromBranch, err = s.repo.LocationBranchID(ctx, *req.FromLocationID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve source branch: %w", err)
+		}
+	}
+	toBranch, err = s.repo.LocationBranchID(ctx, req.ToLocationID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination branch: %w", err)
+	}
+	if fromBranch != nil && toBranch != nil && *fromBranch != *toBranch {
+		return fmt.Errorf("cross-branch stock moves are not allowed: source=%s destination=%s", fromBranch, toBranch)
+	}
+
 	return s.repo.ExecuteInTx(ctx, func(ctx context.Context) error {
 		// Subtract from source
 		err := s.AdjustStock(ctx, StockAdjustmentRequest{
@@ -94,9 +115,10 @@ func (s *Service) Allocate(ctx context.Context, productID uuid.UUID, quantity fl
 	}
 
 	// 1. Find inventory with enough stock? Or just any stock.
-	// Simple strategy: Get all locations, pick one with most stock.
+	// Simple strategy: Get all locations within the active branch, pick one
+	// with most stock. A nil branch context means "all branches" (admin).
 
-	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to list inventory: %w", err)
 	}
@@ -131,7 +153,7 @@ func (s *Service) Release(ctx context.Context, productID uuid.UUID, quantity flo
 		return fmt.Errorf("release quantity must be positive")
 	}
 
-	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to list inventory: %w", err)
 	}
@@ -171,7 +193,7 @@ func (s *Service) Fulfill(ctx context.Context, productID uuid.UUID, quantity flo
 		return fmt.Errorf("quantity must be positive")
 	}
 
-	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to list inventory: %w", err)
 	}
@@ -211,7 +233,7 @@ func (s *Service) RevertFulfillment(ctx context.Context, productID uuid.UUID, qu
 		return fmt.Errorf("revert quantity must be positive")
 	}
 
-	items, err := s.repo.ListInventoryByProduct(ctx, productID)
+	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to list inventory: %w", err)
 	}

@@ -4,6 +4,7 @@ import { icon } from '../lib/icons.ts';
 import { RefreshCw, DollarSign, ShoppingCart, Truck, CreditCard, Calendar, AlertCircle } from 'lucide';
 import { DashboardService } from '../services/DashboardService.ts';
 import { ToastService } from '../lib/toast-service.ts';
+import { onBranchChanged } from '../lib/branch-listener.ts';
 import type {
     DashboardSummary,
     InventoryAlert,
@@ -37,11 +38,16 @@ export class GableDashboard extends LitElement {
     @state() private refreshing = false;
 
     private _interval: ReturnType<typeof setInterval> | null = null;
+    private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
         super.connectedCallback();
         this.fetchDashboardData();
         this._interval = setInterval(() => this.fetchDashboardData(), REFRESH_INTERVAL);
+        this._unsubBranch = onBranchChanged(() => {
+            this.loading = true;
+            this.fetchDashboardData();
+        });
     }
 
     disconnectedCallback() {
@@ -49,6 +55,10 @@ export class GableDashboard extends LitElement {
         if (this._interval) {
             clearInterval(this._interval);
             this._interval = null;
+        }
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
         }
     }
 

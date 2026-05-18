@@ -11,8 +11,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/middleware"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -163,7 +165,11 @@ func (ar *A2AReceiver) ReceiveWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	po, err := ar.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceA2A)
+	// A2A webhooks bypass the branch middleware. Resolve brain_inbound_branch_id
+	// (falling back to default_branch_id) and inject a BranchContext so the
+	// repository CreatePO call stamps the correct branch.
+	poCtx := ar.contextWithInboundBranch(r.Context())
+	po, err := ar.service.CreateManualPOFromHandler(poCtx, vendorID, lines, SourceA2A)
 	if err != nil {
 		ar.logger.Error("failed to create PO from A2A webhook",
 			"error", err,
@@ -255,6 +261,26 @@ func (ar *A2AReceiver) writeError(w http.ResponseWriter, status int, code, messa
 			"message": message,
 		},
 	})
+}
+
+// contextWithInboundBranch returns a context with a BranchContext set to the
+// brain_inbound_branch_id system setting, falling back to default_branch_id.
+// Returns ctx unchanged when neither setting is available (the repository
+// then falls back to the SQL-level COALESCE on default_branch_id).
+func (ar *A2AReceiver) contextWithInboundBranch(ctx context.Context) context.Context {
+	for _, key := range []string{"brain_inbound_branch_id", "default_branch_id"} {
+		var s string
+		if err := ar.pool.QueryRow(ctx,
+			`SELECT value FROM system_settings WHERE key = $1`, key).Scan(&s); err != nil {
+			continue
+		}
+		id, err := uuid.Parse(strings.TrimSpace(s))
+		if err != nil {
+			continue
+		}
+		return middleware.WithBranchContext(ctx, &middleware.BranchContext{BranchID: &id, IsAdmin: true})
+	}
+	return ctx
 }
 
 // --- Public key loading utility ---

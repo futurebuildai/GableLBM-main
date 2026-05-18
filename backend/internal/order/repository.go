@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -45,13 +46,23 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 	o.Status = StatusDraft // Default to draft if not set
 
 	// Insert Order — DB stores dollars as NUMERIC(19,4), model holds cents.
+	// branch_id falls back to system_settings.default_branch_id when the
+	// caller hasn't set one (single-branch mode or admin without header).
 	queryOrder := `
-		INSERT INTO orders (id, customer_id, quote_id, status, total_amount, salesperson_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO orders (id, customer_id, quote_id, status, total_amount, salesperson_id, created_at, updated_at, branch_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+			COALESCE($9::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 	`
 	totalDollars := float64(o.TotalAmount) / 100.0
+	var branchArg any
+	if o.BranchID != uuid.Nil {
+		branchArg = o.BranchID
+	} else if bid := middleware.BranchIDForQuery(ctx); bid != nil {
+		branchArg = *bid
+		o.BranchID = *bid
+	}
 	_, err := exec.Exec(ctx, queryOrder,
-		o.ID, o.CustomerID, o.QuoteID, o.Status, totalDollars, o.SalespersonID, o.CreatedAt, o.UpdatedAt,
+		o.ID, o.CustomerID, o.QuoteID, o.Status, totalDollars, o.SalespersonID, o.CreatedAt, o.UpdatedAt, branchArg,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert order: %w", err)
@@ -81,19 +92,21 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 }
 
 func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	queryOrder := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, '')
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
 		WHERE o.id = $1
+		  AND ($2::uuid IS NULL OR o.branch_id = $2)
 	`
 	var o Order
 	var totalAmountDB float64 // DB stores dollars as NUMERIC(19,4)
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryOrder, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryOrder, id, branchID).Scan(
 		&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-		&o.SalespersonID, &o.SalespersonName,
+		&o.SalespersonID, &o.SalespersonName, &o.BranchID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -147,15 +160,17 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 }
 
 func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, '')
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
+		WHERE ($1::uuid IS NULL OR o.branch_id = $1)
 		ORDER BY o.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list orders: %w", err)
 	}
@@ -167,7 +182,7 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 		var totalAmountDB float64
 		if err := rows.Scan(
 			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-			&o.SalespersonID, &o.SalespersonName,
+			&o.SalespersonID, &o.SalespersonName, &o.BranchID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
 		}
@@ -178,23 +193,25 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 }
 
 func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, offset int) ([]Order, int, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	// Get total count
-	countQuery := `SELECT COUNT(*) FROM orders`
+	countQuery := `SELECT COUNT(*) FROM orders WHERE ($1::uuid IS NULL OR branch_id = $1)`
 	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, branchID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count orders: %w", err)
 	}
 
 	query := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, '')
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
+		WHERE ($1::uuid IS NULL OR o.branch_id = $1)
 		ORDER BY o.created_at DESC
-		LIMIT $1 OFFSET $2
+		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list orders: %w", err)
 	}
@@ -206,7 +223,7 @@ func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, off
 		var totalAmountDB float64
 		if err := rows.Scan(
 			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-			&o.SalespersonID, &o.SalespersonName,
+			&o.SalespersonID, &o.SalespersonName, &o.BranchID,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan order: %w", err)
 		}
@@ -217,8 +234,9 @@ func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, off
 }
 
 func (r *PostgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status OrderStatus) error {
-	query := `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, id)
+	branchID := middleware.BranchIDForQuery(ctx)
+	query := `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 AND ($3::uuid IS NULL OR branch_id = $3)`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, status, id, branchID)
 	if err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}

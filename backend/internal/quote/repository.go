@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -52,18 +53,26 @@ func (r *PostgresRepository) CreateQuote(ctx context.Context, q *Quote) error {
 	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
 		exec := r.db.GetExecutor(txCtx)
 
-		// Insert Header
+		// Insert Header — branch_id falls back to default when caller hasn't set one.
+		var branchArg any
+		if q.BranchID != uuid.Nil {
+			branchArg = q.BranchID
+		} else if bid := middleware.BranchIDForQuery(txCtx); bid != nil {
+			branchArg = *bid
+			q.BranchID = *bid
+		}
 		queryHeader := `
 			INSERT INTO quotes (
 				id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at,
 				margin_total, source, original_file, original_filename, original_content_type, parse_map,
-				delivery_type, freight_amount, vehicle_id
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+				delivery_type, freight_amount, vehicle_id, branch_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+				COALESCE($18::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 		`
 		_, err := exec.Exec(txCtx, queryHeader,
 			q.ID, q.CustomerID, q.JobID, q.State, q.TotalAmount, q.ExpiresAt, q.CreatedAt, q.UpdatedAt,
 			q.MarginTotal, q.Source, q.OriginalFile, q.OriginalFilename, q.OriginalContentType, q.ParseMap,
-			q.DeliveryType, q.FreightAmount, q.VehicleID,
+			q.DeliveryType, q.FreightAmount, q.VehicleID, branchArg,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert quote header: %w", err)
@@ -101,21 +110,23 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	q := &Quote{}
 
 	// Get Header
+	branchID := middleware.BranchIDForQuery(ctx)
 	queryHeader := `
 		SELECT q.id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state, q.total_amount, q.expires_at, q.created_at, q.updated_at,
 			q.sent_at, q.accepted_at, q.rejected_at, COALESCE(q.margin_total, 0), COALESCE(q.source, 'manual'),
 			COALESCE(q.original_filename, ''), COALESCE(q.original_content_type, ''), q.parse_map,
-			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, '')
+			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, ''), q.branch_id
 		FROM quotes q
 		LEFT JOIN customers c ON c.id = q.customer_id
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
 		WHERE q.id = $1
+		  AND ($2::uuid IS NULL OR q.branch_id = $2)
 	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id, branchID).Scan(
 		&q.ID, &q.CustomerID, &q.CustomerName, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
 		&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
 		&q.OriginalFilename, &q.OriginalContentType, &q.ParseMap,
-		&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName,
+		&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName, &q.BranchID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -229,16 +240,18 @@ func (r *PostgresRepository) UpdateQuoteWithLines(ctx context.Context, q *Quote)
 }
 
 func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT q.id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state, q.total_amount, q.expires_at, q.created_at, q.updated_at,
 			q.sent_at, q.accepted_at, q.rejected_at, COALESCE(q.margin_total, 0), COALESCE(q.source, 'manual'),
-			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, '')
+			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, ''), q.branch_id
 		FROM quotes q
 		LEFT JOIN customers c ON c.id = q.customer_id
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
+		WHERE ($1::uuid IS NULL OR q.branch_id = $1)
 		ORDER BY q.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -250,7 +263,7 @@ func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
 		if err := rows.Scan(
 			&q.ID, &q.CustomerID, &q.CustomerName, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
 			&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
-			&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName,
+			&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName, &q.BranchID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan quote: %w", err)
 		}
@@ -260,24 +273,26 @@ func (r *PostgresRepository) ListQuotes(ctx context.Context) ([]Quote, error) {
 }
 
 func (r *PostgresRepository) ListQuotesPaginated(ctx context.Context, limit, offset int) ([]Quote, int, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	// Get total count
-	countQuery := `SELECT COUNT(*) FROM quotes`
+	countQuery := `SELECT COUNT(*) FROM quotes WHERE ($1::uuid IS NULL OR branch_id = $1)`
 	var total int
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery).Scan(&total); err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, countQuery, branchID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count quotes: %w", err)
 	}
 
 	query := `
 		SELECT q.id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state, q.total_amount, q.expires_at, q.created_at, q.updated_at,
 			q.sent_at, q.accepted_at, q.rejected_at, COALESCE(q.margin_total, 0), COALESCE(q.source, 'manual'),
-			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, '')
+			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, ''), q.branch_id
 		FROM quotes q
 		LEFT JOIN customers c ON c.id = q.customer_id
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
+		WHERE ($1::uuid IS NULL OR q.branch_id = $1)
 		ORDER BY q.created_at DESC
-		LIMIT $1 OFFSET $2
+		LIMIT $2 OFFSET $3
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, offset)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -289,7 +304,7 @@ func (r *PostgresRepository) ListQuotesPaginated(ctx context.Context, limit, off
 		if err := rows.Scan(
 			&q.ID, &q.CustomerID, &q.CustomerName, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
 			&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
-			&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName,
+			&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName, &q.BranchID,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan quote: %w", err)
 		}
@@ -299,13 +314,15 @@ func (r *PostgresRepository) ListQuotesPaginated(ctx context.Context, limit, off
 }
 
 func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerID uuid.UUID) ([]Quote, error) {
+	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
-		SELECT id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at
+		SELECT id, customer_id, job_id, state, total_amount, expires_at, created_at, updated_at, branch_id
 		FROM quotes
 		WHERE customer_id = $1
+		  AND ($2::uuid IS NULL OR branch_id = $2)
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID, branchID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quotes: %w", err)
 	}
@@ -315,7 +332,7 @@ func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerI
 	for rows.Next() {
 		var q Quote
 		if err := rows.Scan(
-			&q.ID, &q.CustomerID, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt,
+			&q.ID, &q.CustomerID, &q.JobID, &q.State, &q.TotalAmount, &q.ExpiresAt, &q.CreatedAt, &q.UpdatedAt, &q.BranchID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan quote: %w", err)
 		}

@@ -41,6 +41,16 @@ export async function fetchWithAuth(
     }
   }
 
+  // Inject the currently selected branch for multi-branch installs.
+  // We read straight from localStorage to avoid a circular import with the
+  // BranchContext singleton, which itself uses fetchWithAuth at init time.
+  if (!headers.has('X-Branch-Id')) {
+    const branchId = localStorage.getItem('gable_current_branch_id');
+    if (branchId) {
+      headers.set('X-Branch-Id', branchId);
+    }
+  }
+
   // Ensure Content-Type is set for JSON requests
   if (!headers.has('Content-Type') && fetchOpts.body && typeof fetchOpts.body === 'string') {
     headers.set('Content-Type', 'application/json');

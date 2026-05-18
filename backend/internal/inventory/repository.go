@@ -14,6 +14,8 @@ type Repository interface {
 	UpdateInventory(ctx context.Context, inv *Inventory) error
 	CreateInventory(ctx context.Context, inv *Inventory) error
 	ListInventoryByProduct(ctx context.Context, productID uuid.UUID) ([]Inventory, error)
+	ListInventoryByProductAndBranch(ctx context.Context, productID uuid.UUID, branchID *uuid.UUID) ([]Inventory, error)
+	LocationBranchID(ctx context.Context, locationID uuid.UUID) (*uuid.UUID, error)
 	AllocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	DeallocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
 	FulfillStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error
@@ -114,6 +116,52 @@ func (r *PostgresRepository) ListInventoryByProduct(ctx context.Context, product
 		items = append(items, i)
 	}
 	return items, nil
+}
+
+// ListInventoryByProductAndBranch returns inventory rows for a product, optionally
+// scoped to a branch via the joined location row's branch_id. When branchID is
+// nil, all branches are returned (admin "all branches" semantic).
+func (r *PostgresRepository) ListInventoryByProductAndBranch(ctx context.Context, productID uuid.UUID, branchID *uuid.UUID) ([]Inventory, error) {
+	query := `
+        SELECT i.id, i.product_id, i.location_id,
+               COALESCE(l.path, i.location, '') as location_name,
+               i.quantity, i.allocated, i.updated_at
+        FROM inventory i
+        LEFT JOIN locations l ON i.location_id = l.id
+        WHERE i.product_id = $1
+          AND ($2::uuid IS NULL OR l.branch_id = $2)
+    `
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, productID, branchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Inventory
+	for rows.Next() {
+		var i Inventory
+		if err := rows.Scan(&i.ID, &i.ProductID, &i.LocationID, &i.Location, &i.Quantity, &i.Allocated, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	return items, nil
+}
+
+// LocationBranchID returns the branch_id for a given location row, or nil if
+// the location does not have one assigned (e.g. legacy rows or branch rows
+// where branch_id is the location itself — caller handles both).
+func (r *PostgresRepository) LocationBranchID(ctx context.Context, locationID uuid.UUID) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM locations WHERE id = $1`, locationID).Scan(&branch)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to resolve location branch: %w", err)
+	}
+	return branch, nil
 }
 
 func (r *PostgresRepository) AllocateStock(ctx context.Context, inventoryID uuid.UUID, delta float64) error {

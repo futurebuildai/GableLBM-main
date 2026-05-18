@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -48,15 +49,32 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	}
 	tx.CreatedAt = time.Now()
 
+	// Derive the register's branch_id (via its assigned location).
+	var registerBranch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT l.branch_id
+		 FROM pos_registers r
+		 LEFT JOIN locations l ON l.id = r.location_id
+		 WHERE r.id = $1`, tx.RegisterID).Scan(&registerBranch)
+	if err != nil {
+		return fmt.Errorf("failed to resolve register branch: %w", err)
+	}
+
+	// Reject if the caller's branch context disagrees with the register's branch.
+	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
+		return fmt.Errorf("register %s belongs to a different branch than the request", tx.RegisterID)
+	}
+
 	query := `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at, branch_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+		RETURNING branch_id
 	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt,
-	)
+		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch,
+	).Scan(&tx.BranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create POS transaction: %w", err)
 	}
@@ -132,16 +150,17 @@ func (r *PostgresRepository) LogSyncBatch(ctx context.Context, batchID, register
 
 func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error) {
 	query := `
-		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, completed_at, created_at
+		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, completed_at, created_at, branch_id
 		FROM pos_transactions
 		WHERE id = $1
+		  AND ($2::uuid IS NULL OR branch_id = $2)
 	`
 	var tx POSTransaction
 	var subtotal, taxAmount, total float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchctx.IDForQuery(ctx)).Scan(
 		&tx.ID, &tx.RegisterID, &tx.CashierID, &tx.CustomerID,
 		&subtotal, &taxAmount, &total,
-		&tx.Status, &tx.CompletedAt, &tx.CreatedAt,
+		&tx.Status, &tx.CompletedAt, &tx.CreatedAt, &tx.BranchID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get POS transaction: %w", err)
@@ -157,11 +176,12 @@ func (r *PostgresRepository) UpdateTransaction(ctx context.Context, tx *POSTrans
 		UPDATE pos_transactions
 		SET subtotal = $2, tax_amount = $3, total = $4, status = $5, completed_at = $6, customer_id = $7
 		WHERE id = $1
+		  AND ($8::uuid IS NULL OR branch_id = $8)
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		tx.ID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CompletedAt, tx.CustomerID,
+		tx.Status, tx.CompletedAt, tx.CustomerID, branchctx.IDForQuery(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update POS transaction: %w", err)
@@ -176,12 +196,13 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, registerID st
 		FROM pos_transactions t
 		WHERE ($1 = '' OR t.register_id = $1)
 		  AND t.created_at >= $2 AND t.created_at < $3
+		  AND ($4::uuid IS NULL OR t.branch_id = $4)
 		ORDER BY t.created_at DESC
 	`
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, registerID, startOfDay, endOfDay)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, registerID, startOfDay, endOfDay, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POS transactions: %w", err)
 	}

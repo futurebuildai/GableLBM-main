@@ -20,6 +20,7 @@ const (
 
 type Quote struct {
 	ID           uuid.UUID  `json:"id"`
+	BranchID     uuid.UUID  `json:"branch_id"`
 	CustomerID   uuid.UUID  `json:"customer_id"`
 	CustomerName string     `json:"customer_name,omitempty"`
 	JobID        *uuid.UUID `json:"job_id,omitempty"`

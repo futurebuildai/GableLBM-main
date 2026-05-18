@@ -7,6 +7,7 @@ import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 
 const statusColors: Record<string, string> = {
     DRAFT: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
@@ -38,10 +39,23 @@ export class PurchaseOrderList extends LitElement {
     @state() private alerts: ReorderAlert[] = [];
     @state() private loading = true;
     @state() private sourceSummary: POSourceSummary = {};
+    private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
         super.connectedCallback();
         this._loadData();
+        this._unsubBranch = onBranchChanged(() => {
+            this.loading = true;
+            this._loadData();
+        });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async _loadData() {

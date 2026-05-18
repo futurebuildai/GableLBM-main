@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { router } from '../../lib/router.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import type { Invoice } from '../../types/invoice.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 
 @customElement('gable-invoice-list')
 export class GableInvoiceList extends LitElement {
@@ -11,10 +12,20 @@ export class GableInvoiceList extends LitElement {
     @state() private invoices: Invoice[] = [];
     @state() private loading = true;
     @state() private error: string | null = null;
+    private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
         super.connectedCallback();
         this.loadInvoices();
+        this._unsubBranch = onBranchChanged(() => this.loadInvoices());
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async loadInvoices() {

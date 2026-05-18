@@ -6,6 +6,7 @@ import { ArrowRight } from 'lucide';
 import { OrderService } from '../../services/OrderService.ts';
 import { type Order, getStatusColor } from '../../types/order.ts';
 import type { OrderStatus } from '../../types/order.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 
 @customElement('gable-order-list')
 export class GableOrderList extends LitElement {
@@ -14,10 +15,23 @@ export class GableOrderList extends LitElement {
     @state() private orders: Order[] = [];
     @state() private loading = true;
     @state() private error: string | null = null;
+    private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
         super.connectedCallback();
         this.loadOrders();
+        this._unsubBranch = onBranchChanged(() => {
+            this.loading = true;
+            this.loadOrders();
+        });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     private async loadOrders() {

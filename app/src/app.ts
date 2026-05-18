@@ -105,6 +105,8 @@ export class GableApp extends LitElement {
       '/governance/new': 'gable-new-rfc',
       '/governance/:id': 'gable-rfc-detail',
       '/admin': 'gable-tech-admin',
+      '/admin/branches': 'gable-admin-branches',
+      '/admin/branches/:id/users': 'gable-admin-branch-users',
       '/pricing': 'gable-pricing-matrix',
       '/accounts': 'gable-accounts-page',
       '/accounts/:id': 'gable-account-detail',
