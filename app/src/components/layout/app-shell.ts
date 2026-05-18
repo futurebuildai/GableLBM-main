@@ -9,7 +9,7 @@ import { icon } from '../../lib/icons.ts';
 import {
   LayoutDashboard, LayoutGrid, Package, Truck, FileText,
   Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search,
-  ShoppingBag, Store, BookOpen
+  ShoppingBag, Store, BookOpen, TrendingUp, ShieldAlert, Activity
 } from 'lucide';
 
 @customElement('gable-app-shell')
@@ -105,6 +105,7 @@ export class GableAppShell extends LitElement {
             </div>
 
             ${this._navItem('/quotes', FileText, 'Quotes')}
+            ${this._navItem('/quotes/exposure', TrendingUp, 'Quote Exposure')}
             ${this._navItem('/orders', FileText, 'Orders')}
             ${this._navItem('/purchasing', ShoppingBag, 'Purchasing')}
             ${this._navItem('/purchasing/vendors', Store, 'Vendors')}
@@ -113,6 +114,7 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/dispatch', Truck, 'Logistics')}
             ${this._navItem('/fleet', Settings, 'Fleet')}
             ${this._navItem('/reports/daily-till', LayoutDashboard, 'Daily Till')}
+            ${this._navItem('/reports/exposure', ShieldAlert, 'Exposure Report')}
 
             <div class="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
               ${this._sidebarOpen ? 'Accounting' : nothing}
@@ -126,6 +128,7 @@ export class GableAppShell extends LitElement {
           <!-- Footer -->
           <div class="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
             ${this._navItem('/pricing', LayoutGrid, 'Pricing')}
+            ${this._navItem('/admin/market-indices', Activity, 'Market Indices')}
             ${this._navItem('/admin', Settings, 'Admin')}
           </div>
 

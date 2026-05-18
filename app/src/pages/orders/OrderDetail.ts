@@ -7,7 +7,10 @@ import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import { type Order, getStatusColor } from '../../types/order.ts';
 import type { OrderStatus } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
+import type { UnresolvedExposurePayload } from '../../types/exposure.ts';
 import { Truck, Check, Printer, User, DollarSign, Mail, Phone } from 'lucide';
+import '../../components/orders/block-modal.ts';
+import '../../components/quotes/acknowledgment-modal.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -22,6 +25,10 @@ export class GableOrderDetail extends LitElement {
     @state() private loading = true;
     @state() private error = false;
     @state() private processing = false;
+
+    // Price-protection block modal state — opened when ConfirmOrder returns 409
+    @state() private blockedExposure: UnresolvedExposurePayload | null = null;
+    @state() private ackModalOpen = false;
 
     connectedCallback() {
         super.connectedCallback();
@@ -65,9 +72,62 @@ export class GableOrderDetail extends LitElement {
             await OrderService.confirmOrder(this.order.id);
             await this.loadOrder(this.order.id);
         } catch (error) {
-            ToastService.show('Failed to confirm order: ' + (error instanceof Error ? error.message : error), 'error');
+            // Price-protection pre-ship gate: backend returned 409 with the
+            // structured exposure payload. Open the block modal instead of a
+            // generic toast.
+            const ue = (error as { unresolvedExposure?: UnresolvedExposurePayload }).unresolvedExposure;
+            if (ue && ue.code === 'UNRESOLVED_EXPOSURE') {
+                this.blockedExposure = ue;
+            } else {
+                ToastService.show('Failed to confirm order: ' + (error instanceof Error ? error.message : error), 'error');
+            }
         } finally {
             this.processing = false;
+        }
+    }
+
+    private async handleBlockAction(e: CustomEvent) {
+        const action = e.detail?.action as string;
+        if (action === 'ack-now') {
+            this.ackModalOpen = true;
+        } else if (action === 'request-ack' || action === 'override') {
+            // Reload the order — exposure state may have changed (e.g., override
+            // succeeded). Block modal already closed itself.
+            this.blockedExposure = null;
+            if (this.order) await this.loadOrder(this.order.id);
+        }
+    }
+
+    private async handleAcknowledged() {
+        this.ackModalOpen = false;
+        this.blockedExposure = null;
+        if (this.order) await this.loadOrder(this.order.id);
+        // Retry the confirmation now that exposure is acknowledged.
+        await this.handleConfirm();
+    }
+
+    private _currentUserRole(): string {
+        // Read from JWT in localStorage. Token shape mirrors backend
+        // middleware.UserClaims — single "role" string + optional roles[]
+        // array.
+        try {
+            const token = localStorage.getItem('jwt') || localStorage.getItem('token') || '';
+            if (!token) return '';
+            const payload = JSON.parse(atob(token.split('.')[1] || ''));
+            return payload.role || (payload.roles && payload.roles[0]) || '';
+        } catch {
+            return '';
+        }
+    }
+
+    private _currentUserId(): string {
+        try {
+            const token = localStorage.getItem('jwt') || localStorage.getItem('token') || '';
+            if (!token) return '';
+            const payload = JSON.parse(atob(token.split('.')[1] || ''));
+            return payload.sub || '';
+        } catch {
+            return '';
         }
     }
 
@@ -108,6 +168,25 @@ export class GableOrderDetail extends LitElement {
 
         return html`
             <div class="space-y-6 max-w-5xl mx-auto">
+                <gable-block-modal
+                    ?is-open=${!!this.blockedExposure}
+                    .exposure=${this.blockedExposure?.exposure}
+                    current-user-role=${this._currentUserRole()}
+                    current-user-id=${this._currentUserId()}
+                    @close=${() => { this.blockedExposure = null; }}
+                    @block-action=${(e: CustomEvent) => this.handleBlockAction(e)}>
+                </gable-block-modal>
+
+                <gable-acknowledgment-modal
+                    ?is-open=${this.ackModalOpen}
+                    quote-id=${this.blockedExposure?.exposure?.quote_id || ''}
+                    customer-name=${this.order?.customer_name || ''}
+                    .exposureDollars=${this.blockedExposure?.exposure?.exposure_dollars || 0}
+                    indexes=${(this.blockedExposure?.exposure?.indexes || []).join(', ')}
+                    @close=${() => { this.ackModalOpen = false; }}
+                    @acknowledged=${() => this.handleAcknowledged()}>
+                </gable-acknowledgment-modal>
+
                 <!-- Header -->
                 <div class="flex items-center justify-between pb-6 border-b border-white/10">
                     <div>

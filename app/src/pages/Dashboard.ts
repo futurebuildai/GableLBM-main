@@ -1,8 +1,10 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
-import { RefreshCw, DollarSign, ShoppingCart, Truck, CreditCard, Calendar, AlertCircle } from 'lucide';
+import { RefreshCw, DollarSign, ShoppingCart, Truck, CreditCard, Calendar, AlertCircle, TrendingUp, ShieldAlert } from 'lucide';
+import { router } from '../lib/router.ts';
 import { DashboardService } from '../services/DashboardService.ts';
+import { ExposureService } from '../services/ExposureService.ts';
 import { ToastService } from '../lib/toast-service.ts';
 import type {
     DashboardSummary,
@@ -11,6 +13,7 @@ import type {
     OrderActivity,
     RevenueTrendPoint,
 } from '../types/dashboard.ts';
+import type { ExposureSummary, PortfolioSummary } from '../types/exposure.ts';
 
 // Side-effect imports: register child custom elements
 import '../components/dashboard/KPICard.ts';
@@ -35,6 +38,10 @@ export class GableDashboard extends LitElement {
     @state() private error: string | null = null;
     @state() private lastRefresh: Date = new Date();
     @state() private refreshing = false;
+
+    // Price-protection KPIs (best-effort; failures hide the tiles)
+    @state() private exposureSummary: ExposureSummary | null = null;
+    @state() private portfolioSummary: PortfolioSummary | null = null;
 
     private _interval: ReturnType<typeof setInterval> | null = null;
 
@@ -69,6 +76,18 @@ export class GableDashboard extends LitElement {
             this.revenueTrend = trendData;
             this.lastRefresh = new Date();
             this.error = null;
+
+            // Price-protection KPIs run in parallel as best-effort. Failures
+            // (e.g., user role lacking access to /api/v1/reports/exposure)
+            // silently hide the tiles rather than breaking the dashboard.
+            void Promise.allSettled([
+                ExposureService.listExposureSummary('me')
+                    .then(s => { this.exposureSummary = s; })
+                    .catch(() => { this.exposureSummary = null; }),
+                ExposureService.reportExposure({ summary: true })
+                    .then(s => { this.portfolioSummary = s; })
+                    .catch(() => { this.portfolioSummary = null; }),
+            ]);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'An unexpected error occurred';
             console.error('Failed to fetch dashboard data:', err);
@@ -182,6 +201,30 @@ export class GableDashboard extends LitElement {
                         ?loading=${this.loading}
                         valueColor="text-amber-400"
                     ></gable-kpi-card>
+                    ${this.exposureSummary && this.exposureSummary.count > 0 ? html`
+                        <div @click=${() => router.navigate('/quotes/exposure')}
+                             class="cursor-pointer transition hover:-translate-y-0.5">
+                            <gable-kpi-card
+                                card-title="Your At-Risk Quotes"
+                                .value=${String(this.exposureSummary.count)}
+                                .subValue=${`$${this.exposureSummary.total_dollars.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} exposure`}
+                                .iconHtml=${icon(TrendingUp, 20, 'w-5 h-5')}
+                                valueColor="text-safety-red"
+                            ></gable-kpi-card>
+                        </div>
+                    ` : nothing}
+                    ${this.portfolioSummary && this.portfolioSummary.total_exposure_dollars > 0 ? html`
+                        <div @click=${() => router.navigate('/reports/exposure')}
+                             class="cursor-pointer transition hover:-translate-y-0.5">
+                            <gable-kpi-card
+                                card-title="Open Quote Exposure"
+                                .value=${`$${this.portfolioSummary.total_exposure_dollars.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                .subValue=${`${this.portfolioSummary.total_quotes} quote${this.portfolioSummary.total_quotes === 1 ? '' : 's'} · ${this.portfolioSummary.total_customers} customer${this.portfolioSummary.total_customers === 1 ? '' : 's'}`}
+                                .iconHtml=${icon(ShieldAlert, 20, 'w-5 h-5')}
+                                valueColor="text-blueprint-blue"
+                            ></gable-kpi-card>
+                        </div>
+                    ` : nothing}
                 </div>
 
                 <!-- Charts Row -->

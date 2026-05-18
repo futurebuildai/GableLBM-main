@@ -43,6 +43,24 @@ export const OrderService = {
         });
 
         if (!response.ok) {
+            // Price-protection pre-ship gate: backend returns 409 with a
+            // structured payload (code "UNRESOLVED_EXPOSURE") so the UI can
+            // open the block modal. Detach a typed error that carries the
+            // payload through to the caller.
+            if (response.status === 409) {
+                try {
+                    const body = await response.json();
+                    if (body?.code === 'UNRESOLVED_EXPOSURE') {
+                        const err = new Error(body.error || 'Unresolved exposure') as Error & { unresolvedExposure?: unknown };
+                        err.unresolvedExposure = body;
+                        throw err;
+                    }
+                    throw new Error(body?.error || 'Conflict');
+                } catch (parseOrThrow) {
+                    if (parseOrThrow instanceof Error) throw parseOrThrow;
+                    throw new Error('Conflict');
+                }
+            }
             const errorText = await response.text();
             throw new Error(errorText || 'Failed to confirm order');
         }

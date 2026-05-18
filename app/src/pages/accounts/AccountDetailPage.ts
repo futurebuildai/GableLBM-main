@@ -13,6 +13,7 @@ import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users,
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
 import './ActivityFeed.ts';
+import '../../components/customers/policy-section.ts';
 
 @customElement('gable-account-detail')
 export class GableAccountDetail extends LitElement {
@@ -275,6 +276,9 @@ export class GableAccountDetail extends LitElement {
                         <div class="mt-2 text-xs text-zinc-500">Total approved credit line</div>
                     </div>
                 </div>
+
+                <!-- Price Escalation Policy -->
+                <gable-customer-policy-section customer-id=${customer.id}></gable-customer-policy-section>
 
                 <!-- Tabs & Content -->
                 <div class="space-y-4">

@@ -7,6 +7,10 @@ import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, 
 import { QuoteService } from '../../services/QuoteService.ts';
 import type { Quote, QuoteState, ParseMapItem } from '../../types/quote.ts';
 import { OrderService } from '../../services/OrderService.ts';
+import { ExposureService } from '../../services/ExposureService.ts';
+import type { QuoteExposureDetail } from '../../types/exposure.ts';
+import '../../components/quotes/exposure-banner.ts';
+import '../../components/quotes/acknowledgment-modal.ts';
 
 type Tab = 'details' | 'original' | 'mapping';
 
@@ -20,6 +24,10 @@ export class GableQuoteDetail extends LitElement {
     @state() private loading = true;
     @state() private processing = false;
     @state() private activeTab: Tab = 'details';
+
+    // Price-protection exposure state, loaded alongside the quote
+    @state() private exposure: QuoteExposureDetail | null = null;
+    @state() private ackModalOpen = false;
 
     private stateColors: Record<string, string> = {
         DRAFT: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
@@ -45,12 +53,39 @@ export class GableQuoteDetail extends LitElement {
         try {
             const data = await QuoteService.getQuote(quoteId);
             this.quote = data;
+            // Load exposure for SENT/ACCEPTED quotes only — DRAFT quotes don't
+            // have snapshots yet. Failure is non-fatal: banner just doesn't render.
+            if (data && (data.state === 'SENT' || data.state === 'ACCEPTED')) {
+                try {
+                    this.exposure = await ExposureService.getQuoteExposure(quoteId);
+                } catch (err) {
+                    console.warn('Failed to load exposure for quote', quoteId, err);
+                }
+            }
         } catch (error) {
             console.error(error);
             ToastService.show('Failed to load quote', 'error');
         } finally {
             this.loading = false;
         }
+    }
+
+    private handleExposureAction(e: CustomEvent) {
+        const action = e.detail?.action as string;
+        if (!this.quote) return;
+        if (action === 'requote') {
+            router.navigate(`/quotes/${this.quote.id}/edit`);
+        } else if (action === 'acknowledge' || action === 'request-ack') {
+            this.ackModalOpen = true;
+        } else if (action === 'view-audit') {
+            // Stay on the page; the events tab/list could be expanded in a future iteration.
+            ToastService.show('Audit trail visible in the events section below', 'info');
+        }
+    }
+
+    private async handleAcknowledged() {
+        this.ackModalOpen = false;
+        if (this.quote) await this.loadQuote(this.quote.id);
     }
 
     private async handleStateChange(state: QuoteState) {
@@ -416,8 +451,35 @@ export class GableQuoteDetail extends LitElement {
             { id: 'mapping', label: 'AI Mapping', iconData: Map, show: quote.source === 'ai' && !!(quote.parse_map?.length) },
         ];
 
+        const exp = this.exposure;
+        const indexList = exp?.indexes?.join(', ') || '';
+        // Max delta% across events for this quote (approximation — server-side
+        // ExposureRow has max_delta_pct; here we synthesize from events).
+        const maxDelta = exp?.events?.reduce((acc, ev) => Math.max(acc, Math.abs(ev.delta_pct ?? 0)), 0) || 0;
+
         return html`
             <div class="space-y-6 max-w-6xl mx-auto">
+                ${exp && exp.exposure_state !== 'OK' ? html`
+                    <gable-exposure-banner
+                        quote-id=${quote.id}
+                        state=${exp.exposure_state}
+                        .exposureDollars=${exp.exposure_dollars}
+                        indexes=${indexList}
+                        .maxDeltaPct=${maxDelta}
+                        @exposure-action=${(e: CustomEvent) => this.handleExposureAction(e)}>
+                    </gable-exposure-banner>
+                ` : nothing}
+
+                <gable-acknowledgment-modal
+                    ?is-open=${this.ackModalOpen}
+                    quote-id=${quote.id}
+                    customer-name=${quote.customer_name || ''}
+                    .exposureDollars=${exp?.exposure_dollars || 0}
+                    indexes=${indexList}
+                    @close=${() => { this.ackModalOpen = false; }}
+                    @acknowledged=${() => this.handleAcknowledged()}>
+                </gable-acknowledgment-modal>
+
                 <!-- Header -->
                 <div class="flex items-center justify-between pb-6 border-b border-white/10">
                     <div>
