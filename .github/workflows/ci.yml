@@ -55,6 +55,10 @@ jobs:
         working-directory: backend
         run: go build ./...
 
+      - name: Migrate test database
+        working-directory: backend
+        run: go run ./cmd/migrate
+
       - name: Test
         working-directory: backend
         run: go test -race ./...
