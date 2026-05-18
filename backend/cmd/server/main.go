@@ -301,9 +301,20 @@ func main() {
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(claudeClient)
-	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc)
+	velocityRepo := purchase_order.NewVelocityRepository(db)
+	poSvc.WithVelocityRepo(velocityRepo)
+	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
+		WithVelocityRepo(velocityRepo)
 	poHandler := purchase_order.NewHandler(poSvc, poRecSvc)
 	poHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
+
+	// Auto-reorder scheduler. Disabled by default; an operator activates it
+	// by setting reorder.enabled=true in system_settings. Stops in step 3.5
+	// of graceful shutdown (before DB pool close).
+	reorderScheduler := purchase_order.NewScheduler(db, poSvc)
+	if err := reorderScheduler.Start(context.Background()); err != nil {
+		logger.Error("reorder scheduler failed to start", "error", err)
+	}
 
 	// Auto-PO: wire quote service to create POs when quotes are accepted
 	quoteSvc.WithAutoPO(&autoPOAdapter{poSvc: poSvc, productSvc: productSvc})
@@ -716,6 +727,13 @@ func main() {
 	// Step 3: Drain audit logger (wait for in-flight audit writes)
 	slog.Info("draining audit logger")
 	auditLog.Drain()
+
+	// Step 3.5: Stop the auto-reorder cron scheduler so no new jobs tick
+	// against a draining DB pool. In-flight jobs continue to completion;
+	// their reorder_runs row is finalized before the pool closes.
+	logger.Info("Shutdown step 3.5/4: stopping reorder scheduler...")
+	reorderScheduler.Stop()
+	logger.Info("Shutdown step 3.5/4: reorder scheduler stopped")
 
 	// Step 4: Close database connection pool
 	logger.Info("Shutdown step 4/4: closing database pool...")

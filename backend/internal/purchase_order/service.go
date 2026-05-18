@@ -20,6 +20,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// salesVelocityLister is the narrow read interface RefreshReorderTargets needs.
+// Sized to one method so unit tests can supply a fake without spinning up pgx.
+type salesVelocityLister interface {
+	ListSalesVelocity(ctx context.Context, lookbackDays int) ([]SalesVelocity, error)
+}
+
 type Service struct {
 	repo         *Repository
 	db           *database.DB
@@ -28,10 +34,18 @@ type Service struct {
 	productSvc   *product.Service
 	vendorSvc    *vendor.Service
 	aiClient     *ai.Client
+	velocityRepo salesVelocityLister
 }
 
 func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
 	return &Service{repo: repo, db: db, edi: ediSvc, inventorySvc: inventorySvc, productSvc: productSvc, vendorSvc: vendorSvc}
+}
+
+// WithVelocityRepo wires the sales-velocity reader used by both
+// RefreshReorderTargets and the recommendation engine.
+func (s *Service) WithVelocityRepo(v salesVelocityLister) *Service {
+	s.velocityRepo = v
+	return s
 }
 
 // WithAIClient sets the AI client for freight invoice extraction.
@@ -737,6 +751,124 @@ func (s *Service) GetFreightCharges(ctx context.Context, poID uuid.UUID) ([]Frei
 	return charges, nil
 }
 
+
+// ReorderTargetProposal records the before/after of a single product's
+// recomputed reorder target. Surfaced in dry-run mode so an operator can
+// inspect proposed changes before flipping reorder.dry_run to false.
+type ReorderTargetProposal struct {
+	ProductID uuid.UUID `json:"product_id"`
+	SKU       string    `json:"sku"`
+	OldPoint  float64   `json:"old_point"`
+	NewPoint  float64   `json:"new_point"`
+	OldQty    float64   `json:"old_qty"`
+	NewQty    float64   `json:"new_qty"`
+	AvgDaily  float64   `json:"avg_daily"`
+}
+
+// RefreshResult is the JSON shape returned by RefreshReorderTargets and the
+// manual-trigger HTTP endpoint.
+type RefreshResult struct {
+	DryRun          bool                    `json:"dry_run"`
+	ProductsUpdated int                     `json:"products_updated"`
+	ProductsSkipped int                     `json:"products_skipped"`
+	Proposals       []ReorderTargetProposal `json:"proposals"`
+}
+
+// maxProposalsPreview caps the dry-run response so a large catalog doesn't
+// produce a megabyte response body. The aggregate counts are still accurate.
+const maxProposalsPreview = 100
+
+// RefreshReorderTargets recomputes reorder_point and reorder_qty for every
+// product with non-zero velocity over the configured lookback window. If
+// dryRun is true, no writes happen; the caller gets a preview of what would
+// change. Skips products with zero velocity (we don't auto-zero a slow
+// seasonal SKU mid-summer). Falls back to DefaultLeadTimeDays when neither
+// the product nor its vendor exposes a lead time.
+//
+// Formula:
+//
+//	avg_daily      = units_sold_in_lookback / lookback_days
+//	reorder_point  = ceil(avg_daily * lead_time_days * 1.5)   // 1.5 safety
+//	reorder_qty    = ceil(avg_daily * 30)                     // 30-day cover
+func (s *Service) RefreshReorderTargets(ctx context.Context, dryRun bool, lookbackDays int) (*RefreshResult, error) {
+	if s.velocityRepo == nil {
+		return nil, fmt.Errorf("velocity repository not configured")
+	}
+	if s.productSvc == nil {
+		return nil, fmt.Errorf("product service not configured")
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = DefaultRecommendationConfig().LookbackDays
+	}
+	leadTime := DefaultRecommendationConfig().DefaultLeadTimeDays
+
+	velocity, err := s.velocityRepo.ListSalesVelocity(ctx, lookbackDays)
+	if err != nil {
+		return nil, fmt.Errorf("list sales velocity: %w", err)
+	}
+	velByProduct := make(map[uuid.UUID]float64, len(velocity))
+	for _, v := range velocity {
+		velByProduct[v.ProductID] = v.UnitsSold
+	}
+
+	products, err := s.productSvc.ListProducts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list products: %w", err)
+	}
+
+	res := &RefreshResult{DryRun: dryRun}
+	lookbackFloat := float64(lookbackDays)
+	for _, p := range products {
+		units, ok := velByProduct[p.ID]
+		if !ok || units <= 0 {
+			res.ProductsSkipped++
+			continue
+		}
+		avgDaily := units / lookbackFloat
+		newPoint := math.Ceil(avgDaily * leadTime * 1.5)
+		newQty := math.Ceil(avgDaily * 30)
+		if newPoint == p.ReorderPoint && newQty == p.ReorderQty {
+			res.ProductsSkipped++
+			continue
+		}
+
+		if len(res.Proposals) < maxProposalsPreview {
+			res.Proposals = append(res.Proposals, ReorderTargetProposal{
+				ProductID: p.ID,
+				SKU:       p.SKU,
+				OldPoint:  p.ReorderPoint,
+				NewPoint:  newPoint,
+				OldQty:    p.ReorderQty,
+				NewQty:    newQty,
+				AvgDaily:  math.Round(avgDaily*100) / 100,
+			})
+		}
+
+		if !dryRun {
+			if err := s.productSvc.UpdateReorderTargets(ctx, p.ID, newPoint, newQty); err != nil {
+				return nil, fmt.Errorf("update reorder targets for %s: %w", p.ID, err)
+			}
+		}
+		res.ProductsUpdated++
+	}
+	return res, nil
+}
+
+// ListReorderRuns surfaces the last N rows from reorder_runs for the
+// operator dashboard.
+func (s *Service) ListReorderRuns(ctx context.Context, limit int) ([]ReorderRun, error) {
+	return s.repo.ListReorderRuns(ctx, limit)
+}
+
+// StartReorderRun and FinishReorderRun are exposed for the scheduler to
+// instrument each cron tick. Direct repository pass-throughs.
+func (s *Service) StartReorderRun(ctx context.Context, job string, dryRun bool) (uuid.UUID, error) {
+	return s.repo.StartReorderRun(ctx, job, dryRun)
+}
+
+func (s *Service) FinishReorderRun(ctx context.Context, id uuid.UUID, status string, posCreated, productsUpdated, productsSkipped int, errMsg string) error {
+	return s.repo.FinishReorderRun(ctx, id, status, posCreated, productsUpdated, productsSkipped, errMsg)
+}
 
 // groupAlertsByVendor partitions reorder alerts by canonical vendor_id. Any
 // alert whose VendorID is nil is bucketed under a single sentinel vendor

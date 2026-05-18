@@ -42,6 +42,9 @@ func (f *fakeProductRepo) UpdateAverageCost(_ context.Context, _ uuid.UUID, _ fl
 func (f *fakeProductRepo) UpdateMarginRules(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
 	return nil
 }
+func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
+	return nil
+}
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }

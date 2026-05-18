@@ -88,3 +88,9 @@ func (s *Service) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost f
 func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
 	return s.repo.UpdateMarginRules(ctx, id, targetMargin, commissionRate)
 }
+
+// UpdateReorderTargets writes new reorder_point and reorder_qty for a product.
+// Used by the purchase_order package's RefreshReorderTargets job.
+func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
+	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
+}

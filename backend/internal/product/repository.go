@@ -18,6 +18,7 @@ type Repository interface {
 	ListBelowReorder(ctx context.Context) ([]ReorderAlert, error)
 	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
+	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 }
 
@@ -276,5 +277,13 @@ func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID
 func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error {
 	query := `UPDATE products SET target_margin = $1, commission_rate = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, targetMargin, commissionRate, id)
+	return err
+}
+
+// UpdateReorderTargets writes the recomputed reorder_point and reorder_qty
+// produced by the auto-reorder scheduler's RefreshReorderTargets job.
+func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
+	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
 	return err
 }

@@ -37,6 +37,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /purchase-orders/{id}/submit", guard(h.HandleSubmitPO))
 	mux.HandleFunc("POST /purchase-orders/{id}/receive", guard(h.HandleReceivePO))
 	mux.HandleFunc("POST /purchase-orders/reorder-check", guard(h.HandleCreateReorders))
+	mux.HandleFunc("POST /purchase-orders/refresh-reorder-targets", guard(h.HandleRefreshReorderTargets))
+	mux.HandleFunc("GET /purchase-orders/reorder-runs", guard(h.HandleListReorderRuns))
 	mux.HandleFunc("POST /purchase-orders/{id}/freight", guard(h.HandleUploadFreight))
 	mux.HandleFunc("POST /purchase-orders/{id}/freight/{freightId}/apply", guard(h.HandleApplyFreight))
 	mux.HandleFunc("GET /purchase-orders/{id}/freight", guard(h.HandleListFreight))
@@ -187,6 +189,44 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"count":  count,
 	})
+}
+
+// HandleRefreshReorderTargets manually triggers the reorder-target recompute
+// (the same logic the scheduler runs on cron). Body: {"dry_run": bool,
+// "lookback_days": int} — both optional. Defaults to dry_run=true so the
+// curl-once-and-look workflow can't accidentally rewrite the catalog.
+func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DryRun       *bool `json:"dry_run"`
+		LookbackDays int   `json:"lookback_days"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	dryRun := true
+	if req.DryRun != nil {
+		dryRun = *req.DryRun
+	}
+	result, err := h.service.RefreshReorderTargets(r.Context(), dryRun, req.LookbackDays)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to refresh reorder targets", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// HandleListReorderRuns returns the most recent reorder-cron executions
+// (refresh_targets and create_reorders) for the operator dashboard.
+func (h *Handler) HandleListReorderRuns(w http.ResponseWriter, r *http.Request) {
+	runs, err := h.service.ListReorderRuns(r.Context(), 50)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list reorder runs", http.StatusInternalServerError, err)
+		return
+	}
+	if runs == nil {
+		runs = []ReorderRun{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(runs)
 }
 
 // HandleSourceSummary returns PO counts grouped by source so the purchasing

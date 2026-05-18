@@ -81,6 +81,7 @@ type RecommendationService struct {
 	inventorySvc *inventory.Service
 	productSvc   *product.Service
 	vendorSvc    *vendor.Service
+	velocityRepo salesVelocityLister
 	config       RecommendationConfig
 }
 
@@ -103,6 +104,15 @@ func NewRecommendationService(
 // WithConfig overrides the default recommendation configuration.
 func (rs *RecommendationService) WithConfig(cfg RecommendationConfig) *RecommendationService {
 	rs.config = cfg
+	return rs
+}
+
+// WithVelocityRepo wires the real sales-velocity reader; when set,
+// GenerateRecommendations pulls demand from order_lines instead of using the
+// synthetic reorder-point proxy. Falls back to the synthetic estimate per-SKU
+// when a product has zero sales history in the lookback window.
+func (rs *RecommendationService) WithVelocityRepo(v salesVelocityLister) *RecommendationService {
+	rs.velocityRepo = v
 	return rs
 }
 
@@ -187,6 +197,20 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 		}
 	}
 
+	// 2.5. Pull real sales velocity from order_lines once for the whole
+	// catalog. Indexed by product UUID for an O(1) per-product lookup below.
+	// If the velocity repo isn't wired (older test harness), the map is
+	// empty and every product falls through to the synthetic estimate.
+	velByProduct := make(map[uuid.UUID]float64)
+	if rs.velocityRepo != nil {
+		velocity, vErr := rs.velocityRepo.ListSalesVelocity(ctx, rs.config.LookbackDays)
+		if vErr == nil {
+			for _, v := range velocity {
+				velByProduct[v.ProductID] = v.UnitsSold
+			}
+		}
+	}
+
 	var recommendations []PurchaseRecommendation
 	totalEstCost := 0.0
 
@@ -202,9 +226,10 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 			currentStock += inv.Quantity - inv.Allocated
 		}
 
-		// 4. Compute sales velocity using product reorder point as proxy.
-		// In production this would query order_lines for the lookback period.
-		avgDailySales := rs.estimateDailySales(p)
+		// 4. Compute sales velocity. Prefer real order_lines velocity; fall
+		// back to the synthetic reorder-point proxy when a new SKU has no
+		// sales history yet so brand-new products still surface in the list.
+		avgDailySales := rs.dailySalesFor(p, velByProduct)
 		stdDevSales := avgDailySales * 0.3 // 30% coefficient of variation
 
 		if avgDailySales <= 0 {
@@ -316,8 +341,27 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 	return summary, nil
 }
 
-// estimateDailySales provides a deterministic sales velocity estimate.
-// In production, this queries order history. For demo, we use product attributes.
+// dailySalesFor returns avg daily sales for a product. Prefers the real
+// velocity map (units sold / lookback days); falls back to the synthetic
+// estimator for products with no sales history. The synthetic fallback is
+// preserved so a brand-new SKU still gets a usable estimate before the
+// first sale, and so the recommendation engine works in test harnesses
+// that don't wire the velocity repo.
+func (rs *RecommendationService) dailySalesFor(p product.Product, velByProduct map[uuid.UUID]float64) float64 {
+	if units, ok := velByProduct[p.ID]; ok && units > 0 {
+		lookback := float64(rs.config.LookbackDays)
+		if lookback <= 0 {
+			lookback = 90
+		}
+		return units / lookback
+	}
+	return rs.estimateDailySales(p)
+}
+
+// estimateDailySales provides a deterministic synthetic sales velocity for
+// products with no sales history in the lookback window. Used by
+// dailySalesFor as a fallback so new SKUs don't drop out of the
+// recommendation list before they've had their first sale.
 func (rs *RecommendationService) estimateDailySales(p product.Product) float64 {
 	// Use reorder point as a proxy for sales velocity
 	if p.ReorderPoint > 0 {

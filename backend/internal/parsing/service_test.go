@@ -42,6 +42,10 @@ func (m *mockProductRepo) UpdateMarginRules(ctx context.Context, id uuid.UUID, t
 	return nil
 }
 
+func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _ float64, _ float64) error {
+	return nil
+}
+
 func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }

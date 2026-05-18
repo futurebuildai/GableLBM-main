@@ -3,6 +3,7 @@ package purchase_order
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -193,4 +194,83 @@ func (r *Repository) UpdateLineReceived(ctx context.Context, lineID uuid.UUID, q
 	query := `UPDATE purchase_order_lines SET qty_received = $1 WHERE id = $2`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, qtyReceived, lineID)
 	return err
+}
+
+// ReorderRun records one execution of an auto-reorder scheduler job.
+// Lifecycle: insert with status=RUNNING on entry; update with finished_at,
+// status, counts, and error_message on exit. See migration 056.
+type ReorderRun struct {
+	ID              uuid.UUID  `json:"id"`
+	Job             string     `json:"job"`
+	StartedAt       time.Time  `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	DryRun          bool       `json:"dry_run"`
+	Status          string     `json:"status"`
+	POsCreated      int        `json:"pos_created"`
+	ProductsUpdated int        `json:"products_updated"`
+	ProductsSkipped int        `json:"products_skipped"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
+}
+
+// StartReorderRun inserts a row with status='RUNNING' and returns the row id.
+// The scheduler later calls FinishReorderRun to stamp the outcome.
+func (r *Repository) StartReorderRun(ctx context.Context, job string, dryRun bool) (uuid.UUID, error) {
+	const q = `
+		INSERT INTO reorder_runs (job, dry_run, status)
+		VALUES ($1, $2, 'RUNNING')
+		RETURNING id
+	`
+	var id uuid.UUID
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, q, job, dryRun).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("insert reorder_runs: %w", err)
+	}
+	return id, nil
+}
+
+// FinishReorderRun stamps the outcome of a reorder-run row.
+func (r *Repository) FinishReorderRun(ctx context.Context, id uuid.UUID, status string, posCreated, productsUpdated, productsSkipped int, errMsg string) error {
+	const q = `
+		UPDATE reorder_runs
+		SET finished_at = now(),
+		    status = $2,
+		    pos_created = $3,
+		    products_updated = $4,
+		    products_skipped = $5,
+		    error_message = NULLIF($6, '')
+		WHERE id = $1
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, q, id, status, posCreated, productsUpdated, productsSkipped, errMsg)
+	return err
+}
+
+// ListReorderRuns returns the most recent N rows for the operator dashboard.
+func (r *Repository) ListReorderRuns(ctx context.Context, limit int) ([]ReorderRun, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	const q = `
+		SELECT id, job, started_at, finished_at, dry_run, status,
+		       pos_created, products_updated, products_skipped,
+		       COALESCE(error_message, '')
+		FROM reorder_runs
+		ORDER BY started_at DESC
+		LIMIT $1
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query reorder_runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ReorderRun
+	for rows.Next() {
+		var rr ReorderRun
+		if err := rows.Scan(&rr.ID, &rr.Job, &rr.StartedAt, &rr.FinishedAt,
+			&rr.DryRun, &rr.Status, &rr.POsCreated, &rr.ProductsUpdated,
+			&rr.ProductsSkipped, &rr.ErrorMessage); err != nil {
+			return nil, fmt.Errorf("scan reorder_run: %w", err)
+		}
+		out = append(out, rr)
+	}
+	return out, nil
 }
