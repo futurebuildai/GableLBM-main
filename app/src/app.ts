@@ -73,7 +73,9 @@ export class GableApp extends LitElement {
 
   private _pathToTag(path: string): string {
     const tagMap: Record<string, string> = {
-      '/': 'gable-dashboard',
+      '/': import.meta.env.DEV ? 'gable-local-test-hub' : 'gable-dashboard',
+      '/local-test': 'gable-local-test-hub',
+      '/dashboard': 'gable-dashboard',
       '/pos': 'gable-pos-terminal',
       '/inventory': 'gable-inventory',
       '/inventory/:id': 'gable-product-detail',
@@ -172,13 +174,13 @@ export class GableApp extends LitElement {
 
     switch (layout) {
       case 'erp':
-        return html`<gable-app-shell>${pageHtml}</gable-app-shell><gable-toast-container></gable-toast-container>`;
+        return html`<gable-app-shell .pageContent=${pageHtml}></gable-app-shell><gable-toast-container></gable-toast-container>`;
       case 'portal':
-        return html`<gable-portal-layout>${pageHtml}</gable-portal-layout><gable-toast-container></gable-toast-container>`;
+        return html`<gable-portal-layout .pageContent=${pageHtml}></gable-portal-layout><gable-toast-container></gable-toast-container>`;
       case 'driver':
-        return html`<gable-driver-layout>${pageHtml}</gable-driver-layout><gable-toast-container></gable-toast-container>`;
+        return html`<gable-driver-layout .pageContent=${pageHtml}></gable-driver-layout><gable-toast-container></gable-toast-container>`;
       case 'yard':
-        return html`<gable-yard-layout>${pageHtml}</gable-yard-layout><gable-toast-container></gable-toast-container>`;
+        return html`<gable-yard-layout .pageContent=${pageHtml}></gable-yard-layout><gable-toast-container></gable-toast-container>`;
       case 'none':
       default:
         return html`${pageHtml}<gable-toast-container></gable-toast-container>`;

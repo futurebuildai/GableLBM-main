@@ -77,5 +77,17 @@ export const routes: RouteConfig[] = [
   { path: '/accounting/chart-of-accounts', load: () => import('./pages/accounting/ChartOfAccounts.ts'), layout: 'erp' },
   { path: '/accounting/journal-entries', load: () => import('./pages/accounting/JournalEntries.ts'), layout: 'erp' },
   { path: '/accounting/trial-balance', load: () => import('./pages/accounting/TrialBalance.ts'), layout: 'erp' },
-  { path: '/', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
+  // Always-available ERP dashboard (linked from the local-dev surface picker).
+  { path: '/dashboard', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
+  // Local dev surface picker — only mounted at `/` when running `vite dev`.
+  // Production builds (Railway → community/staging/master) keep `/` on the
+  // ERP dashboard.
+  ...(import.meta.env.DEV
+    ? [
+        { path: '/local-test', load: () => import('./pages/LocalTestHub.ts'), layout: 'none' as const },
+        { path: '/', load: () => import('./pages/LocalTestHub.ts'), layout: 'none' as const },
+      ]
+    : [
+        { path: '/', load: () => import('./pages/Dashboard.ts'), layout: 'erp' as const },
+      ]),
 ];

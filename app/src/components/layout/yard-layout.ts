@@ -1,5 +1,5 @@
-import { LitElement, html } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, nothing } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { icon } from '../../lib/icons.ts';
@@ -14,6 +14,8 @@ const navItems = [
 @customElement('gable-yard-layout')
 export class GableYardLayout extends LitElement {
   createRenderRoot() { return this; }
+
+  @property({ attribute: false }) pageContent: unknown = nothing;
 
   private _boundRouteChanged = () => { this.requestUpdate(); };
 
@@ -42,7 +44,7 @@ export class GableYardLayout extends LitElement {
         </header>
 
         <main class="flex-1 pb-20 overflow-y-auto">
-          <slot></slot>
+          ${this.pageContent}
         </main>
 
         <!-- Bottom Tab Navigation -->

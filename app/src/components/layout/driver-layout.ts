@@ -1,9 +1,11 @@
-import { LitElement, html } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, nothing } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
 
 @customElement('gable-driver-layout')
 export class GableDriverLayout extends LitElement {
   createRenderRoot() { return this; }
+
+  @property({ attribute: false }) pageContent: unknown = nothing;
 
   render() {
     return html`
@@ -17,7 +19,7 @@ export class GableDriverLayout extends LitElement {
           </div>
         </header>
         <main class="pb-8">
-          <slot></slot>
+          ${this.pageContent}
         </main>
       </div>
     `;

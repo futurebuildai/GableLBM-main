@@ -1,5 +1,5 @@
 import { LitElement, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { clearToken } from '../../services/PortalService.ts';
@@ -11,6 +11,8 @@ import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, Ch
 @customElement('gable-portal-layout')
 export class GablePortalLayout extends LitElement {
   createRenderRoot() { return this; }
+
+  @property({ attribute: false }) pageContent: unknown = nothing;
 
   @state() private _sidebarOpen = window.innerWidth >= 768;
 
@@ -165,7 +167,7 @@ export class GablePortalLayout extends LitElement {
           </header>
 
           <div class="flex-1 p-4 md:p-8 overflow-auto">
-            <slot></slot>
+            ${this.pageContent}
           </div>
         </main>
       </div>

@@ -1,5 +1,5 @@
 import { LitElement, html, nothing } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import '../ui/brand-logo.ts';
@@ -16,6 +16,8 @@ import {
 @customElement('gable-app-shell')
 export class GableAppShell extends LitElement {
   createRenderRoot() { return this; }
+
+  @property({ attribute: false }) pageContent: unknown = nothing;
 
   @state() private _sidebarOpen = true;
   @state() private _shortcutsOpen = false;
@@ -96,7 +98,7 @@ export class GableAppShell extends LitElement {
           <!-- Navigation -->
           <nav aria-label="Main navigation" class="flex-1 p-3 space-y-1 overflow-y-auto no-scrollbar">
             <div class="mb-6">
-              ${this._navItem('/', LayoutDashboard, 'Dashboard')}
+              ${this._navItem('/dashboard', LayoutDashboard, 'Dashboard')}
               ${this._navItem('/inventory', Package, 'Inventory')}
               ${this._navItem('/accounts', LayoutDashboard, 'Accounts')}
             </div>
@@ -188,7 +190,7 @@ export class GableAppShell extends LitElement {
 
           <!-- Page Content -->
           <div id="main-content" class="p-6 md:p-8 max-w-[1600px] w-full animate-fade-in">
-            <slot></slot>
+            ${this.pageContent}
           </div>
         </main>
 

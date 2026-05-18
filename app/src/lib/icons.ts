@@ -5,6 +5,7 @@
  *   import { Package } from 'lucide';
  *   html`${icon(Package)}`
  */
+import { html } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { createElement } from 'lucide';
 
@@ -13,6 +14,10 @@ import { createElement } from 'lucide';
  * @param iconData  The icon import from 'lucide' (e.g. `Package`, `Truck`)
  * @param size      Pixel size (default 20)
  * @param cls       Extra CSS classes
+ *
+ * Returns a TemplateResult so the value is safe to pass through property
+ * bindings (e.g. `.iconHtml=${icon(...)}`) — `unsafeHTML()` alone may only
+ * be used in child bindings.
  */
 export function icon(
   iconData: Parameters<typeof createElement>[0],
@@ -23,5 +28,5 @@ export function icon(
   el.setAttribute('width', String(size));
   el.setAttribute('height', String(size));
   if (cls) el.setAttribute('class', cls);
-  return unsafeHTML(el.outerHTML);
+  return html`${unsafeHTML(el.outerHTML)}`;
 }
