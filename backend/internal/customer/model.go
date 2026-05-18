@@ -43,6 +43,16 @@ type Customer struct {
 	BalanceDue  float64 `json:"balance_due"`
 	IsActive    bool    `json:"is_active"`
 
+	// Price-escalation policy — what to do when a market index moves above
+	// the threshold during an open quote's validity window. Per migration 054.
+	// PriceEscalationPolicy is one of FLAG_FOR_REQUOTE (default), AUTO_ESCALATE,
+	// REQUIRE_ACK. AUTO_ESCALATE requires a signed agreement (enforced at the
+	// DB level via CHECK constraint).
+	PriceEscalationPolicy       string     `json:"price_escalation_policy"`
+	EscalationThresholdPct      float64    `json:"escalation_threshold_pct"`
+	EscalationAgreementSignedAt *time.Time `json:"escalation_agreement_signed_at,omitempty"`
+	EscalationAgreementRef      string     `json:"escalation_agreement_ref,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

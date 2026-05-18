@@ -17,29 +17,41 @@ const (
 // MarketIndex represents a lumber market index (e.g., Random Lengths).
 type MarketIndex struct {
 	ID            uuid.UUID `json:"id"`
+	IndexCode     string    `json:"index_code"`
 	Name          string    `json:"name"`
 	Source        string    `json:"source"`
 	CurrentValue  float64   `json:"current_value"`
 	PreviousValue *float64  `json:"previous_value,omitempty"`
 	Unit          string    `json:"unit"`
+	CommodityKind string    `json:"commodity_kind,omitempty"`
+	Description   string    `json:"description,omitempty"`
+	IsActive      bool      `json:"is_active"`
 	LastUpdatedAt time.Time `json:"last_updated_at"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// PriceEscalator links a quote line to an escalation strategy.
+// PriceEscalator links a quote line to an escalation strategy. The snapshot
+// fields (PolicyAtSnapshot, ThresholdPctAtSnapshot, BaseIndexRecordedAt) are
+// frozen at quote-send time so later customer-policy changes don't retroactively
+// alter exposure semantics on already-sent quotes.
 type PriceEscalator struct {
-	ID             uuid.UUID      `json:"id"`
-	QuoteLineID    *uuid.UUID     `json:"quote_line_id,omitempty"`
-	MarketIndexID  *uuid.UUID     `json:"market_index_id,omitempty"`
-	EscalationType EscalationType `json:"escalation_type"`
-	EscalationRate float64        `json:"escalation_rate"`
-	BasePrice      float64        `json:"base_price"`
-	BaseIndexValue *float64       `json:"base_index_value,omitempty"`
-	EffectiveDate  time.Time      `json:"effective_date"`
-	ExpirationDate time.Time      `json:"expiration_date"`
-	IsActive       bool           `json:"is_active"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID                     uuid.UUID      `json:"id"`
+	QuoteLineID            *uuid.UUID     `json:"quote_line_id,omitempty"`
+	MarketIndexID          *uuid.UUID     `json:"market_index_id,omitempty"`
+	EscalationType         EscalationType `json:"escalation_type"`
+	EscalationRate         float64        `json:"escalation_rate"`
+	BasePrice              float64        `json:"base_price"`
+	BaseIndexValue         *float64       `json:"base_index_value,omitempty"`
+	BaseIndexRecordedAt    *time.Time     `json:"base_index_recorded_at,omitempty"`
+	LastCheckedAt          *time.Time     `json:"last_checked_at,omitempty"`
+	CurrentState           string         `json:"current_state"`
+	PolicyAtSnapshot       string         `json:"policy_at_snapshot,omitempty"`
+	ThresholdPctAtSnapshot float64        `json:"threshold_pct_at_snapshot,omitempty"`
+	EffectiveDate          time.Time      `json:"effective_date"`
+	ExpirationDate         time.Time      `json:"expiration_date"`
+	IsActive               bool           `json:"is_active"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
 }
 
 // EscalationRequest is the payload for the calculate-escalation endpoint.

@@ -45,6 +45,13 @@ type Product struct {
 	AverageUnitCost float64  `json:"average_unit_cost"`
 	TargetMargin    float64  `json:"target_margin"`
 	CommissionRate  float64  `json:"commission_rate"`
+
+	// Index-aware quote price protection (migration 054).
+	// MarketIndexID is a per-SKU override of the category-level default;
+	// IsCommodity gates whether a snapshot is taken at quote-send time.
+	MarketIndexID *uuid.UUID `json:"market_index_id,omitempty"`
+	IsCommodity   bool       `json:"is_commodity"`
+
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

@@ -44,6 +44,14 @@ type Quote struct {
 	MarginTotal float64 `json:"margin_total"`
 	Source      string  `json:"source"` // "manual" or "ai"
 
+	// Exposure rollup — denormalized from price_escalators + quote_exposure_events
+	// for fast list-view filtering. Maintained by pricing.ExposureScanner and the
+	// snapshot service. exposure_state is one of OK | FLAGGED | ESCALATED |
+	// ACK_REQUIRED | ACKNOWLEDGED | BLOCKED | OVERRIDDEN.
+	ExposureState         string     `json:"exposure_state"`
+	ExposureDollars       float64    `json:"exposure_dollars"`
+	ExposureLastCheckedAt *time.Time `json:"exposure_last_checked_at,omitempty"`
+
 	// Original upload (only for AI-sourced quotes)
 	OriginalFile        []byte `json:"-"`                                    // not serialized in list responses
 	OriginalFilename    string `json:"original_filename,omitempty"`
