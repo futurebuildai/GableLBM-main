@@ -67,6 +67,49 @@ func (m *MockEscalatorRepository) GetEscalatorByQuoteLine(_ context.Context, quo
 	return nil, nil
 }
 
+// Extended interface methods for price protection (migration 054).
+// The existing tests don't exercise these paths; mock returns safe defaults.
+
+func (m *MockEscalatorRepository) GetMarketIndexByCode(_ context.Context, code string) (*MarketIndex, error) {
+	for _, idx := range m.indices {
+		if idx.IndexCode == code {
+			cp := idx
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockEscalatorRepository) UpdateMarketIndexMetadata(_ context.Context, id uuid.UUID, name, description string, isActive bool) error {
+	idx, ok := m.indices[id]
+	if !ok {
+		return nil
+	}
+	if name != "" {
+		idx.Name = name
+	}
+	idx.Description = description
+	idx.IsActive = isActive
+	m.indices[id] = idx
+	return nil
+}
+
+func (m *MockEscalatorRepository) SnapshotEscalators(_ context.Context, escalators []PriceEscalator) error {
+	for i := range escalators {
+		esc := &escalators[i]
+		if esc.ID == uuid.Nil {
+			esc.ID = uuid.New()
+		}
+		m.escalators[esc.ID] = *esc
+	}
+	return nil
+}
+
+func (m *MockEscalatorRepository) ListEscalatorsForQuote(_ context.Context, quoteID uuid.UUID) ([]PriceEscalator, error) {
+	_ = quoteID
+	return nil, nil
+}
+
 func TestCalculateEscalation_Percentage(t *testing.T) {
 	repo := newMockEscalatorRepo()
 	svc := NewEscalatorService(repo)
