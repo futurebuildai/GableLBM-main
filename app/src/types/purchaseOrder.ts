@@ -1,16 +1,25 @@
 export type POStatus = 'DRAFT' | 'SENT' | 'PARTIAL' | 'RECEIVED' | 'CANCELLED';
 
+// POSource — must stay in sync with the CHECK constraint in
+// backend/migrations/055_po_source.sql.
+export type POSource = 'MANUAL' | 'REORDER' | 'SPECIAL_ORDER' | 'A2A';
+
 export interface PurchaseOrder {
     id: string;
     vendor_id?: string;
     vendor_name?: string;
     status: POStatus;
+    source: POSource;
     created_at: string;
     updated_at: string;
     lines?: PurchaseOrderLine[];
     line_count?: number;
     total_cost?: number;
 }
+
+// Response shape for GET /api/v1/purchase-orders/source-summary —
+// a map of source value to PO count. Some sources may be absent if no rows.
+export type POSourceSummary = Partial<Record<POSource, number>>;
 
 export interface PurchaseOrderLine {
     id: string;

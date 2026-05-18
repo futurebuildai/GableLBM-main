@@ -4,7 +4,7 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
-import type { PurchaseOrder } from '../../types/purchaseOrder';
+import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 
@@ -16,6 +16,20 @@ const statusColors: Record<string, string> = {
     CANCELLED: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
 };
 
+const sourceColors: Record<string, string> = {
+    MANUAL: 'text-zinc-300 bg-zinc-500/10 border-zinc-500/20',
+    REORDER: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20',
+    SPECIAL_ORDER: 'text-blueprint-blue bg-sky-500/10 border-sky-500/20',
+    A2A: 'text-fuchsia-300 bg-fuchsia-500/10 border-fuchsia-500/20',
+};
+
+const sourceLabels: Record<string, string> = {
+    MANUAL: 'Manual',
+    REORDER: 'Reorder',
+    SPECIAL_ORDER: 'Special',
+    A2A: 'A2A',
+};
+
 @customElement('gable-purchase-order-list')
 export class PurchaseOrderList extends LitElement {
     createRenderRoot() { return this; }
@@ -23,6 +37,7 @@ export class PurchaseOrderList extends LitElement {
     @state() private pos: PurchaseOrder[] = [];
     @state() private alerts: ReorderAlert[] = [];
     @state() private loading = true;
+    @state() private sourceSummary: POSourceSummary = {};
 
     connectedCallback() {
         super.connectedCallback();
@@ -31,18 +46,32 @@ export class PurchaseOrderList extends LitElement {
 
     private async _loadData() {
         try {
-            const [poData, alertData] = await Promise.all([
+            const [poData, alertData, summary] = await Promise.all([
                 PurchaseOrderService.listPOs(),
                 PurchaseOrderService.getReorderAlerts(),
+                PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
             ]);
             this.pos = poData || [];
             this.alerts = alertData || [];
+            this.sourceSummary = summary || {};
         } catch (err) {
             console.error(err);
             ToastService.show('Failed to load purchasing data', 'error');
         } finally {
             this.loading = false;
         }
+    }
+
+    // _automationPct returns the share of POs that were created via REORDER
+    // out of MANUAL + REORDER + SPECIAL_ORDER. A2A POs are excluded because
+    // they represent inbound orders from Brain, not replenishment automation.
+    private get _automationPct(): number | null {
+        const r = this.sourceSummary.REORDER ?? 0;
+        const m = this.sourceSummary.MANUAL ?? 0;
+        const so = this.sourceSummary.SPECIAL_ORDER ?? 0;
+        const denom = r + m + so;
+        if (denom === 0) return null;
+        return Math.round((r / denom) * 100);
     }
 
     private async _handleGenerateReorders() {
@@ -76,6 +105,27 @@ export class PurchaseOrderList extends LitElement {
                     New Purchase Order
                 </button>
             </div>
+
+            ${this._automationPct !== null ? html`
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                    <div class="backdrop-blur-md bg-white/5 border border-emerald-500/20 rounded-xl p-4">
+                        <p class="text-xs uppercase tracking-wider text-zinc-500">% Automated</p>
+                        <p class="text-2xl font-bold text-emerald-300 font-mono">${this._automationPct}%</p>
+                    </div>
+                    <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl p-4">
+                        <p class="text-xs uppercase tracking-wider text-zinc-500">Reorder POs</p>
+                        <p class="text-2xl font-bold text-white font-mono">${this.sourceSummary.REORDER ?? 0}</p>
+                    </div>
+                    <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl p-4">
+                        <p class="text-xs uppercase tracking-wider text-zinc-500">Manual POs</p>
+                        <p class="text-2xl font-bold text-white font-mono">${this.sourceSummary.MANUAL ?? 0}</p>
+                    </div>
+                    <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl p-4">
+                        <p class="text-xs uppercase tracking-wider text-zinc-500">Special / A2A</p>
+                        <p class="text-2xl font-bold text-white font-mono">${(this.sourceSummary.SPECIAL_ORDER ?? 0) + (this.sourceSummary.A2A ?? 0)}</p>
+                    </div>
+                </div>
+            ` : nothing}
 
             ${this.alerts.length > 0 ? html`
                 <div class="backdrop-blur-md bg-white/5 border border-amber-500/20 rounded-xl mb-6">
@@ -133,6 +183,7 @@ export class PurchaseOrderList extends LitElement {
                                 <tr>
                                     <th class="px-6 py-4">PO #</th>
                                     <th class="px-6 py-4">Status</th>
+                                    <th class="px-6 py-4">Source</th>
                                     <th class="px-6 py-4 text-right">Lines</th>
                                     <th class="px-6 py-4 text-right">Total Cost</th>
                                     <th class="px-6 py-4">Created</th>
@@ -150,6 +201,11 @@ export class PurchaseOrderList extends LitElement {
                                         <td class="px-6 py-4">
                                             <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border ${statusColors[po.status] || statusColors.DRAFT}">
                                                 ${po.status}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border ${sourceColors[po.source] || sourceColors.MANUAL}">
+                                                ${sourceLabels[po.source] || po.source || 'Manual'}
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 text-right font-mono text-zinc-300">

@@ -78,13 +78,16 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	for vendorID, items := range byVendor {
 		vid := vendorID // local copy for pointer
 
-		// Reuse an existing DRAFT PO for this vendor if one exists.
+		// Reuse an existing DRAFT PO for this vendor if one exists. Note we
+		// intentionally do NOT overwrite the source of a reused PO — if an
+		// operator manually created a DRAFT for this vendor, it stays MANUAL.
 		po, err := s.repo.GetDraftPOByVendor(ctx, &vid)
 		if err != nil || po == nil {
 			po = &PurchaseOrder{
 				ID:       uuid.New(),
 				VendorID: &vid,
 				Status:   StatusDraft,
+				Source:   SourceReorder,
 			}
 			if err := s.repo.CreatePO(ctx, po); err != nil {
 				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
@@ -123,6 +126,12 @@ func (s *Service) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 	return s.repo.ListPOs(ctx)
 }
 
+// GetSourceSummary returns PO counts grouped by source. Used by the
+// purchasing dashboard's "% replenishments automated" widget.
+func (s *Service) GetSourceSummary(ctx context.Context) (map[string]int, error) {
+	return s.repo.GetSourceSummary(ctx)
+}
+
 func (s *Service) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
 	return s.repo.GetPO(ctx, id)
 }
@@ -138,6 +147,7 @@ func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines 
 		ID:       uuid.New(),
 		VendorID: &vendorID,
 		Status:   StatusDraft,
+		Source:   SourceManual,
 	}
 
 	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -175,12 +185,19 @@ func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines 
 	return po, nil
 }
 
-// CreateManualPOFromHandler is a convenience wrapper using the handler's request types
-func (s *Service) CreateManualPOFromHandler(ctx context.Context, vendorID uuid.UUID, lines []CreatePOLineInput) (*PurchaseOrder, error) {
+// CreateManualPOFromHandler is a convenience wrapper using the handler's request types.
+// The source parameter records how the PO got here — the HTTP handler passes
+// SourceManual, the A2A receiver passes SourceA2A. An empty source defaults
+// to MANUAL at the repository layer.
+func (s *Service) CreateManualPOFromHandler(ctx context.Context, vendorID uuid.UUID, lines []CreatePOLineInput, source string) (*PurchaseOrder, error) {
+	if source == "" {
+		source = SourceManual
+	}
 	po := &PurchaseOrder{
 		ID:       uuid.New(),
 		VendorID: &vendorID,
 		Status:   StatusDraft,
+		Source:   source,
 	}
 
 	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
@@ -240,6 +257,7 @@ func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, vend
 			ID:       uuid.New(),
 			VendorID: vendorId,
 			Status:   StatusDraft,
+			Source:   SourceSpecialOrder,
 		}
 		if err := s.repo.CreatePO(ctx, newPO); err != nil {
 			return fmt.Errorf("failed to create PO: %w", err)

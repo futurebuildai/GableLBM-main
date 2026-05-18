@@ -32,6 +32,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /purchase-orders", guard(h.HandleListPOs))
 	mux.HandleFunc("POST /purchase-orders", guard(h.HandleCreatePO))
 	mux.HandleFunc("GET /purchase-orders/recommendations", guard(h.HandleGetRecommendations))
+	mux.HandleFunc("GET /purchase-orders/source-summary", guard(h.HandleSourceSummary))
 	mux.HandleFunc("GET /purchase-orders/{id}", guard(h.HandleGetPO))
 	mux.HandleFunc("POST /purchase-orders/{id}/submit", guard(h.HandleSubmitPO))
 	mux.HandleFunc("POST /purchase-orders/{id}/receive", guard(h.HandleReceivePO))
@@ -86,7 +87,7 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines)
+	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceManual)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to create purchase order", http.StatusInternalServerError, err)
 		return
@@ -186,6 +187,18 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"count":  count,
 	})
+}
+
+// HandleSourceSummary returns PO counts grouped by source so the purchasing
+// dashboard can render the "% replenishments automated" KPI.
+func (h *Handler) HandleSourceSummary(w http.ResponseWriter, r *http.Request) {
+	counts, err := h.service.GetSourceSummary(r.Context())
+	if err != nil {
+		httputil.RespondError(w, r, "failed to load PO source summary", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(counts)
 }
 
 // HandleGetRecommendations returns AI-driven purchasing recommendations

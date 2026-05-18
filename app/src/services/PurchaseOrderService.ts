@@ -1,4 +1,4 @@
-import type { PurchaseOrder, CreatePORequest, ReceivePORequest, RecommendationSummary, FreightCharge, FreightUploadResponse } from '../types/purchaseOrder';
+import type { PurchaseOrder, CreatePORequest, ReceivePORequest, RecommendationSummary, FreightCharge, FreightUploadResponse, POSourceSummary } from '../types/purchaseOrder';
 import type { ReorderAlert } from '../types/product';
 import { fetchWithAuth } from './fetchClient';
 
@@ -66,6 +66,12 @@ export const PurchaseOrderService = {
     async getRecommendations(): Promise<RecommendationSummary> {
         const response = await fetchWithAuth(`${API_URL}/purchase-orders/recommendations`);
         if (!response.ok) throw new Error('Failed to fetch purchasing recommendations');
+        return response.json();
+    },
+
+    async getSourceSummary(): Promise<POSourceSummary> {
+        const response = await fetchWithAuth(`${API_URL}/purchase-orders/source-summary`);
+        if (!response.ok) throw new Error('Failed to fetch PO source summary');
         return response.json();
     },
 

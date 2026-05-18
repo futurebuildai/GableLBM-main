@@ -163,7 +163,7 @@ func (ar *A2AReceiver) ReceiveWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	po, err := ar.service.CreateManualPOFromHandler(r.Context(), vendorID, lines)
+	po, err := ar.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceA2A)
 	if err != nil {
 		ar.logger.Error("failed to create PO from A2A webhook",
 			"error", err,

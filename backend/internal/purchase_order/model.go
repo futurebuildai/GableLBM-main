@@ -11,6 +11,7 @@ type PurchaseOrder struct {
 	VendorID       *uuid.UUID          `json:"vendor_id,omitempty"`
 	VendorName     string              `json:"vendor_name,omitempty"`
 	Status         string              `json:"status"`
+	Source         string              `json:"source"`
 	CreatedAt      time.Time           `json:"created_at"`
 	UpdatedAt      time.Time           `json:"updated_at"`
 	Lines          []PurchaseOrderLine `json:"lines,omitempty"`
@@ -36,4 +37,13 @@ const (
 	StatusPartialReceive = "PARTIAL"
 	StatusReceived       = "RECEIVED"
 	StatusCancelled      = "CANCELLED"
+)
+
+// PO source constants — must stay in sync with the CHECK constraint in
+// migration 055_po_source.sql.
+const (
+	SourceManual       = "MANUAL"
+	SourceReorder      = "REORDER"
+	SourceSpecialOrder = "SPECIAL_ORDER"
+	SourceA2A          = "A2A"
 )

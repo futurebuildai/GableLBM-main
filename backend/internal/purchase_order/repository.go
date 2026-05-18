@@ -17,15 +17,22 @@ func NewRepository(db *database.DB) *Repository {
 }
 
 func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
+	// Default to MANUAL if the caller didn't stamp a source. This keeps any
+	// pre-existing call site (or future test) safe even before #8 is fully
+	// rolled out everywhere.
+	if po.Source == "" {
+		po.Source = SourceManual
+	}
 	query := `
-		INSERT INTO purchase_orders (id, vendor_id, status)
-		VALUES ($1, $2, $3)
+		INSERT INTO purchase_orders (id, vendor_id, status, source)
+		VALUES ($1, $2, $3, $4)
 		RETURNING created_at, updated_at
 	`
 	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		po.ID,
 		po.VendorID,
 		po.Status,
+		po.Source,
 	).Scan(&po.CreatedAt, &po.UpdatedAt)
 }
 
@@ -52,7 +59,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 	}
 
 	query := `
-		SELECT id, vendor_id, status, created_at, updated_at
+		SELECT id, vendor_id, status, source, created_at, updated_at
 		FROM purchase_orders
 		WHERE vendor_id = $1 AND status = 'DRAFT'
 		LIMIT 1
@@ -62,6 +69,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
+		&po.Source,
 		&po.CreatedAt,
 		&po.UpdatedAt,
 	)
@@ -73,7 +81,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 	query := `
-		SELECT po.id, po.vendor_id, po.status, po.created_at, po.updated_at,
+		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at,
 		       COUNT(pol.id) AS line_count,
 		       COALESCE(SUM(pol.quantity * pol.cost), 0) AS total_cost
 		FROM purchase_orders po
@@ -94,6 +102,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 			&po.ID,
 			&po.VendorID,
 			&po.Status,
+			&po.Source,
 			&po.CreatedAt,
 			&po.UpdatedAt,
 			&po.LineCount,
@@ -106,13 +115,36 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 	return pos, nil
 }
 
+// GetSourceSummary returns a count of POs grouped by source. Drives the
+// "% of replenishments automated" KPI on the purchasing dashboard.
+func (r *Repository) GetSourceSummary(ctx context.Context) (map[string]int, error) {
+	query := `SELECT source, COUNT(*) FROM purchase_orders GROUP BY source`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query source summary: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var source string
+		var count int
+		if err := rows.Scan(&source, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan source summary row: %w", err)
+		}
+		out[source] = count
+	}
+	return out, nil
+}
+
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
-	query := `SELECT id, vendor_id, status, created_at, updated_at FROM purchase_orders WHERE id = $1`
+	query := `SELECT id, vendor_id, status, source, created_at, updated_at FROM purchase_orders WHERE id = $1`
 	var po PurchaseOrder
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
+		&po.Source,
 		&po.CreatedAt,
 		&po.UpdatedAt,
 	)

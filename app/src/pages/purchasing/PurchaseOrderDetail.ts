@@ -180,7 +180,12 @@ export class PurchaseOrderDetail extends LitElement {
                 </button>
                 <div class="flex-1">
                     <h1 class="text-2xl font-bold text-white">PO #${this.po.id.slice(0, 8)}</h1>
-                    <p class="text-sm text-zinc-400">Status: <span class="font-bold uppercase">${this.po.status}</span></p>
+                    <p class="text-sm text-zinc-400 flex items-center gap-2">
+                        <span>Status: <span class="font-bold uppercase">${this.po.status}</span></span>
+                        <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border border-white/10 bg-white/5">
+                            ${this.po.source || 'MANUAL'}
+                        </span>
+                    </p>
                 </div>
                 <div class="flex gap-3">
                     ${canSubmit ? html`
