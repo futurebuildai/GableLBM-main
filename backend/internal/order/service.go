@@ -14,14 +14,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// ExposureChecker is the narrow sync interface implemented by the pricing
+// module's price-protection gate. Injected via SetExposureChecker so the
+// order module never imports the pricing package.
+type ExposureChecker interface {
+	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
+}
+
 type Service struct {
-	repo         Repository
-	db           *database.DB
-	inventorySvc *inventory.Service
-	invoiceSvc   *invoice.Service
-	customerSvc  *customer.Service
-	poSvc        *purchase_order.Service
-	auditLog     *audit.Logger
+	repo            Repository
+	db              *database.DB
+	inventorySvc    *inventory.Service
+	invoiceSvc      *invoice.Service
+	customerSvc     *customer.Service
+	poSvc           *purchase_order.Service
+	auditLog        *audit.Logger
+	exposureChecker ExposureChecker
 }
 
 func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *invoice.Service, customerSvc *customer.Service, poSvc *purchase_order.Service, db ...*database.DB) *Service {
@@ -42,6 +50,13 @@ func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *in
 func (s *Service) WithAuditLog(l *audit.Logger) *Service {
 	s.auditLog = l
 	return s
+}
+
+// SetExposureChecker injects the price-protection pre-ship gate. When set,
+// ConfirmOrder calls RequireClearForOrder before any side effects. Callers
+// that don't configure a checker get the previous behaviour (no gate).
+func (s *Service) SetExposureChecker(c ExposureChecker) {
+	s.exposureChecker = c
 }
 
 func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Order, error) {
@@ -139,6 +154,15 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 
 	if o.Status != StatusDraft {
 		return fmt.Errorf("cannot confirm order in status %s", o.Status)
+	}
+
+	// 1.25 Pre-ship gate: if the source quote has unresolved index exposure
+	// (ACK_REQUIRED or BLOCKED state), surface the typed error so the handler
+	// can translate it into a 409 with the structured payload the UI needs.
+	if s.exposureChecker != nil {
+		if err := s.exposureChecker.RequireClearForOrder(ctx, id); err != nil {
+			return err
+		}
 	}
 
 	// 1.5 Check Credit Limit

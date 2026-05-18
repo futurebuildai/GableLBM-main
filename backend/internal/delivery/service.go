@@ -10,11 +10,19 @@ import (
 )
 
 type Service struct {
-	repo       Repository
-	mapsClient *MapsClient // nil if Google Maps not configured
-	notifier   DeliveryNotifierInterface
-	invoiceSvc InvoiceServiceInterface // nil if invoice service not wired
-	logger     *slog.Logger
+	repo            Repository
+	mapsClient      *MapsClient // nil if Google Maps not configured
+	notifier        DeliveryNotifierInterface
+	invoiceSvc      InvoiceServiceInterface // nil if invoice service not wired
+	exposureChecker ExposureChecker         // nil if price protection not wired
+	logger          *slog.Logger
+}
+
+// ExposureChecker is the narrow sync interface implemented by the pricing
+// module's price-protection gate. Injected via SetExposureChecker so the
+// delivery module never imports the pricing package.
+type ExposureChecker interface {
+	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
 }
 
 // InvoiceServiceInterface auto-creates invoices from orders on delivery completion.
@@ -57,6 +65,12 @@ func (s *Service) WithNotifier(n DeliveryNotifierInterface) {
 // WithInvoiceService sets the invoice service for auto-invoicing on delivery completion.
 func (s *Service) WithInvoiceService(invoiceSvc InvoiceServiceInterface) {
 	s.invoiceSvc = invoiceSvc
+}
+
+// SetExposureChecker injects the price-protection pre-ship gate. When set,
+// AssignOrderToRoute calls RequireClearForOrder before any side effects.
+func (s *Service) SetExposureChecker(c ExposureChecker) {
+	s.exposureChecker = c
 }
 
 // Fleet Management
@@ -282,6 +296,15 @@ func (s *Service) DispatchRoute(ctx context.Context, id uuid.UUID) error {
 // Delivery Management
 
 func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest) (*Delivery, *CapacityWarning, error) {
+	// Pre-ship gate: if the order's source quote has unresolved index
+	// exposure, block route assignment. Caller (dispatch handler) translates
+	// the typed *pricing.ErrUnresolvedExposure to HTTP 409.
+	if s.exposureChecker != nil {
+		if err := s.exposureChecker.RequireClearForOrder(ctx, req.OrderID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Verify route exists and get vehicle info
 	route, err := s.repo.GetRoute(ctx, req.RouteID)
 	if err != nil {

@@ -28,6 +28,10 @@ type Repository interface {
 	ListContactsByCustomer(ctx context.Context, customerID uuid.UUID) ([]Contact, error)
 	UpdateContact(ctx context.Context, c *Contact) error
 	DeleteContact(ctx context.Context, id uuid.UUID) error
+
+	// Price-escalation policy (migration 054)
+	GetPolicy(ctx context.Context, id uuid.UUID) (*EscalationPolicy, error)
+	UpdatePolicy(ctx context.Context, id uuid.UUID, p EscalationPolicy) error
 }
 
 type PostgresRepository struct {
