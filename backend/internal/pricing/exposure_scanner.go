@@ -24,10 +24,21 @@ type ExposureNotifier interface {
 	NotifyCleared(ctx context.Context, ev ClearedEvent) error
 }
 
+// AuditEntry mirrors pkg/audit.Entry. Re-declared in pricing to avoid the
+// pricing package depending on pkg/audit (which would risk import cycles
+// when pkg/audit grows). main.go's adapter bridges the two.
+type AuditEntry struct {
+	Action     string
+	EntityType string
+	EntityID   string
+	UserID     string
+	Changes    map[string]any
+}
+
 // AuditWriter is the narrow interface for audit_log inserts. Implemented by
-// pkg/audit; injected so tests can substitute a fake.
+// an adapter over pkg/audit.Logger in cmd/server/main.go.
 type AuditWriter interface {
-	Write(ctx context.Context, tableName, recordID, action, changedBy string, oldData, newData any) error
+	LogEntry(ctx context.Context, e AuditEntry)
 }
 
 // ExposureScanner evaluates open quote lines against an updated market index
@@ -385,9 +396,21 @@ func (s *ExposureScanner) writeAudit(ctx context.Context, ev *QuoteExposureEvent
 	if ev.EventType == EventDetected {
 		return
 	}
-	if err := s.audit.Write(ctx, "quote_exposure_events", ev.ID.String(), string(ev.EventType), ev.ActorUserID, nil, ev); err != nil {
-		s.logger.Warn("scanner: audit write failed", "event_id", ev.ID, "err", err)
-	}
+	s.audit.LogEntry(ctx, AuditEntry{
+		Action:     string(ev.EventType),
+		EntityType: "quote_exposure_event",
+		EntityID:   ev.ID.String(),
+		UserID:     ev.ActorUserID,
+		Changes: map[string]any{
+			"quote_id":         ev.QuoteID,
+			"quote_line_id":    ev.QuoteLineID,
+			"market_index_id":  ev.MarketIndexID,
+			"event_type":       ev.EventType,
+			"delta_pct":        ev.DeltaPct,
+			"exposure_dollars": ev.ExposureDollars,
+			"policy":           ev.Policy,
+		},
+	})
 }
 
 func (s *ExposureScanner) notify(

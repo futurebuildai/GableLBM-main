@@ -59,6 +59,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/robfig/cron/v3"
 )
 
 func main() {
@@ -435,6 +436,57 @@ func main() {
 	// Wire invoice service for auto-invoicing on delivery POD
 	deliverySvc.WithInvoiceService(&invoiceServiceAdapter{invoiceSvc: invoiceSvc, orderSvc: orderSvc})
 
+	// Lumber Index-Aware Quote Price Protection (migration 054).
+	// Order of wiring: repository → notifier (with adapter) → scanner →
+	// service → snapshot service → checker → handlers → cross-module
+	// dependency injection into order/delivery/quote.
+	exposureRepo := pricing.NewExposureRepository(db)
+	exposureNotifierImpl := notification.NewExposureNotifier(smsSvc, emailSvc, logger)
+	exposureNotifier := &exposureNotifierAdapter{notifier: exposureNotifierImpl}
+	exposureAuditWriter := &auditAdapter{logger: auditLog}
+	exposureScanner := pricing.NewExposureScanner(exposureRepo, escalatorRepo, quoteRepo, exposureNotifier, exposureAuditWriter, logger)
+	exposureChecker := pricing.NewExposureChecker(db)
+	exposureSvc := pricing.NewExposureService(exposureRepo, escalatorRepo, quoteRepo, exposureNotifier, exposureAuditWriter, exposureChecker, logger)
+	snapshotSvc := pricing.NewSnapshotService(escalatorRepo, exposureRepo, quoteRepo, logger)
+
+	// HTTP handlers
+	exposureHandler := pricing.NewExposureHandler(exposureScanner, exposureChecker, exposureRepo, exposureSvc)
+	exposureHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
+
+	indexAdminHandler := pricing.NewIndexAdminHandler(escalatorRepo, exposureRepo, exposureScanner)
+	indexAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
+
+	categoryDefaultHandler := pricing.NewCategoryDefaultHandler(exposureRepo)
+	categoryDefaultHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
+
+	// Inject the pre-ship gate into the order and delivery services so
+	// ConfirmOrder and AssignOrderToRoute refuse to proceed on unresolved
+	// exposure. ExposureChecker conforms to both modules' narrow interfaces.
+	orderSvc.SetExposureChecker(exposureChecker)
+	deliverySvc.SetExposureChecker(exposureChecker)
+
+	// Inject the snapshot service into quote so DRAFT → SENT transitions
+	// snapshot the per-line baseline market-index value automatically.
+	quoteSvc.SetSnapshotService(snapshotSvc)
+
+	// Nightly safety-net exposure scan at 02:00 local time. Recovers any
+	// events that the synchronous scanner missed (e.g., due to a transient
+	// notifier failure or process restart between an index update and the
+	// scan kickoff).
+	cronScheduler := cron.New()
+	if _, err := cronScheduler.AddFunc("0 2 * * *", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := exposureScanner.RunSafetyNet(ctx); err != nil {
+			logger.Error("safety-net exposure scan failed", "err", err)
+		}
+	}); err != nil {
+		logger.Error("cron: register safety-net scan failed", "err", err)
+	} else {
+		cronScheduler.Start()
+		logger.Info("cron: safety-net exposure scan registered (02:00 daily)")
+	}
+
 	// Millwork Module
 	millworkRepo := millwork.NewRepository(db)
 	millworkSvc := millwork.NewService(millworkRepo)
@@ -758,6 +810,100 @@ func (a *deliveryNotifierAdapter) Notify(ctx context.Context, event delivery.Del
 		CustomerEmail: event.CustomerEmail,
 		ETA:           event.ETA,
 		ReceiptURL:    event.ReceiptURL,
+	})
+}
+
+// exposureNotifierAdapter bridges pricing.ExposureNotifier to
+// notification.ExposureNotifier. The notification package defines its own
+// ExposureEvent struct so it stays self-contained; this adapter translates
+// the pricing-side event payloads into that shape. Mirrors the pattern
+// used by deliveryNotifierAdapter above.
+type exposureNotifierAdapter struct {
+	notifier *notification.ExposureNotifier
+}
+
+func (a *exposureNotifierAdapter) NotifyFlagged(ctx context.Context, ev pricing.FlaggedEvent) error {
+	a.notifier.Notify(ctx, notification.ExposureEvent{
+		EventType:       notification.ExposureEventFlagged,
+		QuoteID:         ev.QuoteID.String(),
+		QuoteShortID:    ev.QuoteShortID,
+		SalespersonID:   uuidPtrStr(ev.SalespersonID),
+		SalespersonName: ev.SalespersonName,
+		CustomerName:    ev.CustomerName,
+		ExposureDollars: ev.ExposureDollars,
+		IndexCode:       ev.IndexCode,
+		DeltaPct:        ev.DeltaPct,
+	})
+	return nil
+}
+
+func (a *exposureNotifierAdapter) NotifyEscalated(ctx context.Context, ev pricing.EscalatedEvent) error {
+	a.notifier.Notify(ctx, notification.ExposureEvent{
+		EventType:       notification.ExposureEventEscalated,
+		QuoteID:         ev.QuoteID.String(),
+		QuoteShortID:    ev.QuoteShortID,
+		SalespersonID:   uuidPtrStr(ev.SalespersonID),
+		SalespersonName: ev.SalespersonName,
+		CustomerName:    ev.CustomerName,
+		CustomerEmail:   ev.CustomerEmail,
+		IndexCode:       ev.IndexCode,
+		OldPrice:        ev.OldPrice,
+		NewPrice:        ev.NewPrice,
+	})
+	return nil
+}
+
+func (a *exposureNotifierAdapter) NotifyAckRequired(ctx context.Context, ev pricing.AckRequiredEvent) error {
+	a.notifier.Notify(ctx, notification.ExposureEvent{
+		EventType:       notification.ExposureEventAckRequired,
+		QuoteID:         ev.QuoteID.String(),
+		QuoteShortID:    ev.QuoteShortID,
+		SalespersonID:   uuidPtrStr(ev.SalespersonID),
+		SalespersonName: ev.SalespersonName,
+		CustomerName:    ev.CustomerName,
+		ExposureDollars: ev.ExposureDollars,
+		IndexCode:       ev.IndexCode,
+	})
+	return nil
+}
+
+func (a *exposureNotifierAdapter) NotifyCleared(ctx context.Context, ev pricing.ClearedEvent) error {
+	a.notifier.Notify(ctx, notification.ExposureEvent{
+		EventType:       notification.ExposureEventCleared,
+		QuoteID:         ev.QuoteID.String(),
+		QuoteShortID:    ev.QuoteShortID,
+		SalespersonID:   uuidPtrStr(ev.SalespersonID),
+		SalespersonName: ev.SalespersonName,
+		CustomerName:    ev.CustomerName,
+	})
+	return nil
+}
+
+func uuidPtrStr(p *uuid.UUID) string {
+	if p == nil {
+		return ""
+	}
+	return p.String()
+}
+
+// auditAdapter bridges pricing.AuditWriter (LogEntry on a small projection)
+// to pkg/audit.Logger (Log on audit.Entry). The pricing package re-declares
+// the entry shape to stay decoupled from pkg/audit.
+type auditAdapter struct {
+	logger *audit.Logger
+}
+
+func (a *auditAdapter) LogEntry(ctx context.Context, e pricing.AuditEntry) {
+	if a == nil || a.logger == nil {
+		return
+	}
+	entityID, _ := uuid.Parse(e.EntityID)
+	a.logger.Log(ctx, audit.Entry{
+		Action:     e.Action,
+		EntityType: e.EntityType,
+		EntityID:   entityID,
+		UserID:     e.UserID,
+		Changes:    e.Changes,
 	})
 }
 

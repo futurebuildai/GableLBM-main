@@ -274,9 +274,19 @@ func (s *ExposureService) writeAudit(ev *QuoteExposureEvent) {
 	// Audit writes on a fresh context so callers' cancellation doesn't drop
 	// the audit trail mid-flight.
 	ctx := context.Background()
-	if err := s.audit.Write(ctx, "quote_exposure_events", ev.ID.String(), string(ev.EventType), ev.ActorUserID, nil, ev); err != nil {
-		s.logger.Warn("exposure_service: audit write failed", "event_id", ev.ID, "err", err)
-	}
+	s.audit.LogEntry(ctx, AuditEntry{
+		Action:     string(ev.EventType),
+		EntityType: "quote_exposure_event",
+		EntityID:   ev.ID.String(),
+		UserID:     ev.ActorUserID,
+		Changes: map[string]any{
+			"quote_id":      ev.QuoteID,
+			"event_type":    ev.EventType,
+			"method":        ev.Method,
+			"actor_role":    ev.ActorRole,
+			"notes":         ev.Notes,
+		},
+	})
 }
 
 // userEventKey builds a deterministic-but-unique idempotency key for a
