@@ -211,6 +211,9 @@ func (s *ExposureService) EscalateNowPreview(ctx context.Context, quoteID uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("escalate-now: load quote: %w", err)
 	}
+	if q == nil {
+		return &EscalateNowResult{QuoteID: quoteID}, nil
+	}
 
 	// Index escalators by line id for quick lookup.
 	byLine := map[uuid.UUID]PriceEscalator{}
