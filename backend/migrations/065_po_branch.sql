@@ -24,8 +24,7 @@ END $$;
 
 -- Brain agent-to-agent inbound POs land here. Default the inbound branch
 -- to the same default as everyone else; admins can override later.
-INSERT INTO system_settings (key, value, description)
+INSERT INTO system_settings (key, value)
 VALUES ('brain_inbound_branch_id',
-        (SELECT value FROM system_settings WHERE key = 'default_branch_id'),
-        'Branch to assign to inbound A2A purchase orders from the Brain.')
+        (SELECT value FROM system_settings WHERE key = 'default_branch_id'))
 ON CONFLICT (key) DO NOTHING;
