@@ -5,6 +5,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What Is This?
 GableLBM is an open-source ERP platform purpose-built for lumber and building materials (LBM) dealers. It replaces legacy systems like Epicor BisTrack, ECI Spruce, and DMSi Agility.
 
+## Branches & Deployment
+
+| Branch | Auto-deploys to | Notes |
+|---|---|---|
+| `master` | **nothing** | Pristine, fork-ready trunk. No demo seed runs. Devs `make seed` locally. |
+| `staging` | https://staging.gablelbm.com | Digital Ocean App Platform, db `gable_staging`. Internal demos. |
+| `community` | https://demo.gablelbm.com | Digital Ocean App Platform, db `gable_demo`. Community PRs target this branch. |
+
+Both deployed environments run with `AUTH_MODE=dev` — the seeded `demo@gable.com` user is treated as full admin/owner via the dev-mode pass-through in `backend/pkg/middleware/auth.go`. This is intentional and safe (demo data is non-confidential) but must **never** propagate to a future `master` production deploy. Manifests live in `.do/app-demo.yaml` and `.do/app-staging.yaml`; operational notes in `.do/README.md`.
+
 ## Repo Structure
 ```
 app/          → Lit 3 frontend (Vite + TypeScript + Tailwind)

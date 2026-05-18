@@ -10,8 +10,13 @@ RUN go mod download
 # Copy the source code
 COPY backend/ .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o main ./cmd/server/main.go
+# Build the application binaries. `main` is the API server (CMD), and
+# `migrate` / `seed` are bundled so DO App Platform post-deploy jobs can
+# invoke them against the production image without needing a separate
+# build step.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o main ./cmd/server/main.go && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o seed ./cmd/seed
 
 # Run stage
 FROM alpine:3.20
@@ -21,8 +26,10 @@ RUN apk --no-cache add ca-certificates curl && \
 
 WORKDIR /app
 
-# Copy the pre-built binary from the builder stage
+# Copy the pre-built binaries from the builder stage.
 COPY --from=builder /app/main .
+COPY --from=builder /app/migrate ./migrate
+COPY --from=builder /app/seed ./seed
 
 # Copy migrations for runtime use
 COPY --from=builder /app/migrations ./migrations

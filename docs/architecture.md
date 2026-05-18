@@ -8,15 +8,37 @@
 - **Federated Governance:** The platform supports a distributed contribution model, where industry partners (Co-ops) can propose core changes via a dedicated AI-mediated portal.
 
 ## 2. Technology Stack
-- **Backend:** Go (Golang) 1.24+
+- **Backend:** Go (Golang) 1.25+
 - **Database:** PostgreSQL 16+
     - Extensions: `pgvector` (AI embeddings), `postgis` (Geospatial/Delivery).
-- **Messaging:** NATS JetStream (embedded or external) for Event Bus.
+- **Messaging:** NATS JetStream is **aspirational / not yet wired** — the
+  `nats` container in `docker-compose.yml` is unused, no NATS client is
+  imported in Go code. All inter-module writes currently go through
+  synchronous Go interface calls. Treat the event-bus sections below as
+  forward-looking design, not current behaviour.
 - **Frontend:**
-    - **Core:** React 19 + TypeScript 5.9 + Vite 7.
-    - **UI Library:** Shadcn/UI (Tailwind).
-    - **Animation:** Framer Motion 12.
-    - **Charts:** Recharts 3, React Leaflet 5 (maps).
+    - **Core:** Lit 3 Web Components + TypeScript 5.9 + Vite 7.
+    - **Styling:** Tailwind CSS 3.4 + custom design tokens (no Shadcn).
+    - **Charts:** Chart.js 4. **Maps:** Leaflet.
+    - **Components:** Light DOM (`createRenderRoot() { return this; }`) so
+      Tailwind classes apply directly.
+
+## 2a. Hosting
+
+Non-production environments are hosted on **Digital Ocean App Platform**
+(PaaS, Dockerfile-based). A single DO Managed Postgres 16 cluster
+(`gable-pg`) hosts two logical databases:
+
+| Environment | Branch | URL | Logical DB |
+|---|---|---|---|
+| Demo | `community` | https://demo.gablelbm.com | `gable_demo` |
+| Staging | `staging` | https://staging.gablelbm.com | `gable_staging` |
+
+`master` / production is **not** deployed by this repo. App Platform specs
+are version-controlled at `.do/app-demo.yaml` and `.do/app-staging.yaml`;
+operational notes live in `.do/README.md`. Both apps share the backend
+Docker image — the same image runs `main` (API server) as a service and
+`migrate && seed` as a post-deploy job.
 
 ## 3. Module Boundaries
 

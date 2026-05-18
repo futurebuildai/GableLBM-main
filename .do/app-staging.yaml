@@ -1,0 +1,107 @@
+# Digital Ocean App Platform spec — STAGING environment.
+#
+# Tracks the `staging` branch of github.com/futurebuild/GableLBM and
+# auto-deploys to https://staging.gablelbm.com on push. Shares the
+# DO Managed Postgres cluster (`gable-pg`) with demo but uses a
+# separate logical DB (`gable_staging`) so a botched demo seed cannot
+# poison staging and vice-versa.
+#
+# AUTH_MODE=dev is intentional here too — staging is for FutureBuild
+# internal demos, not for prod hardening. Production (`master`) is
+# explicitly NOT deployed.
+#
+# Apply with: doctl apps create --spec .do/app-staging.yaml  (first time)
+#             doctl apps update <app-id> --spec .do/app-staging.yaml
+name: gablelbm-staging
+region: tor1
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+domains:
+  - domain: staging.gablelbm.com
+    type: PRIMARY
+
+services:
+  - name: backend
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuild/GableLBM
+      branch: staging
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    health_check:
+      http_path: /healthz/live
+      initial_delay_seconds: 15
+      period_seconds: 30
+      failure_threshold: 3
+    routes:
+      - path: /api
+      - path: /health
+      - path: /healthz
+      - path: /metrics
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: AUTH_MODE
+        value: dev
+      - key: CORS_ORIGINS
+        value: https://staging.gablelbm.com
+      - key: GABLELBM_BRANCH
+        value: staging
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+  - name: frontend
+    dockerfile_path: app/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuild/GableLBM
+      branch: staging
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    build_command: ""
+    envs:
+      - key: VITE_API_URL
+        value: https://staging.gablelbm.com
+        scope: BUILD_TIME
+      - key: BACKEND_URL
+        value: ${backend.PRIVATE_URL}
+        scope: RUN_TIME
+    routes:
+      - path: /
+
+jobs:
+  - name: migrate-and-seed
+    kind: POST_DEPLOY
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuild/GableLBM
+      branch: staging
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    run_command: "./migrate && ./seed"
+    envs:
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
+      - key: GABLELBM_BRANCH
+        value: staging
+
+databases:
+  - name: gable-pg
+    engine: PG
+    version: "16"
+    production: false
+    cluster_name: gable-pg
+    db_name: gable_staging
+    db_user: gable_user

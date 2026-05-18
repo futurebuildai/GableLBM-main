@@ -535,20 +535,26 @@ func main() {
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
 	if strings.EqualFold(cfg.AuthMode, "dev") {
-		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting demo customer claims")
-		// Query first customer from DB for demo claims
+		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting Kelbrook demo customer claims")
+		// Look up the Kelbrook Construction demo account; fall back to the
+		// first customer in the table so a non-Kelowna fork can still boot.
 		var demoCustomerID uuid.UUID
-		row := db.Pool.QueryRow(context.Background(), "SELECT id FROM customers LIMIT 1")
+		row := db.Pool.QueryRow(context.Background(),
+			"SELECT id FROM customers WHERE account_number = 'KELBROOK-001' LIMIT 1")
 		if err := row.Scan(&demoCustomerID); err != nil {
-			logger.Error("Failed to load demo customer", "error", err)
-			demoCustomerID = uuid.New() // Fallback
+			logger.Warn("Kelbrook demo customer not found, falling back to first customer", "error", err)
+			fallback := db.Pool.QueryRow(context.Background(), "SELECT id FROM customers LIMIT 1")
+			if err := fallback.Scan(&demoCustomerID); err != nil {
+				logger.Error("Failed to load demo customer", "error", err)
+				demoCustomerID = uuid.New() // Last-resort fallback
+			}
 		}
 		portalMw = func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				claims := &middleware.PortalClaims{
 					CustomerID: demoCustomerID,
-					Email:      "demo@gable.com",
-					Name:       "Demo Contractor",
+					Email:      "demo@kelbrook.ca",
+					Name:       "Sam Kelbrook",
 				}
 				ctx := context.WithValue(r.Context(), middleware.PortalClaimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
