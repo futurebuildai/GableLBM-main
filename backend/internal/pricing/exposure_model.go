@@ -113,6 +113,12 @@ type ExposureStatus struct {
 // ErrUnresolvedExposure is returned by ExposureChecker.RequireClearForOrder
 // when the linked quote has ACK_REQUIRED or BLOCKED state. Callers (the order
 // handler) translate this into HTTP 409 with code "UNRESOLVED_EXPOSURE".
+//
+// To avoid forcing other packages to import pricing, the error exposes its
+// payload via the UnresolvedExposurePayload() method. Consumers do:
+//
+//	var ue interface{ UnresolvedExposurePayload() map[string]any }
+//	if errors.As(err, &ue) { ... write 409 with ue.UnresolvedExposurePayload() ... }
 type ErrUnresolvedExposure struct {
 	Status ExposureStatus
 }
@@ -120,6 +126,27 @@ type ErrUnresolvedExposure struct {
 func (e *ErrUnresolvedExposure) Error() string {
 	return fmt.Sprintf("unresolved index exposure on source quote %s (state=%s, $%.2f)",
 		e.Status.QuoteID, e.Status.State, e.Status.ExposureDollars)
+}
+
+// UnresolvedExposurePayload returns the JSON-serializable body that the order
+// handler renders on a 409. Method-based interface keeps the pricing → order
+// dependency from inverting.
+func (e *ErrUnresolvedExposure) UnresolvedExposurePayload() map[string]any {
+	return map[string]any{
+		"error": "unresolved index exposure on source quote",
+		"code":  "UNRESOLVED_EXPOSURE",
+		"exposure": map[string]any{
+			"quote_id":          e.Status.QuoteID,
+			"quote_short_id":    e.Status.QuoteShortID,
+			"state":             e.Status.State,
+			"exposure_dollars":  e.Status.ExposureDollars,
+			"indexes":           e.Status.Indexes,
+			"salesperson_id":    e.Status.SalespersonID,
+			"salesperson_name":  e.Status.SalespersonName,
+			"required_action":   e.Status.RequiredAction,
+			"last_checked_at":   e.Status.LastCheckedAt,
+		},
+	}
 }
 
 // ExposureRow is one row of the salesperson at-risk-quotes table.

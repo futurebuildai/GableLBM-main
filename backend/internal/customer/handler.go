@@ -31,6 +31,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /customers/{id}", guard(h.HandleGetCustomer))
 	mux.HandleFunc("POST /customers", guard(h.HandleCreateCustomer))
 	mux.HandleFunc("PATCH /customers/{id}/salesperson", guard(h.HandleUpdateSalesperson))
+	mux.HandleFunc("GET /customers/{id}/escalation-policy", guard(h.HandleGetEscalationPolicy))
+	mux.HandleFunc("PUT /customers/{id}/escalation-policy", guard(h.HandleUpdateEscalationPolicy))
 	mux.HandleFunc("GET /price_levels", guard(h.HandleListPriceLevels))
 
 	// Contact routes
@@ -234,4 +236,52 @@ func (h *Handler) HandleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleGetEscalationPolicy returns a customer's price-escalation policy.
+func (h *Handler) HandleGetEscalationPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
+		return
+	}
+	p, err := h.service.GetPolicy(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to load policy", http.StatusInternalServerError, err)
+		return
+	}
+	if p == nil {
+		httputil.RespondError(w, r, "customer not found", http.StatusNotFound, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(p)
+}
+
+// HandleUpdateEscalationPolicy updates a customer's price-escalation policy.
+// AUTO_ESCALATE requires escalation_agreement_signed_at and
+// escalation_agreement_ref (enforced both at the service layer and via DB
+// CHECK constraint).
+func (h *Handler) HandleUpdateEscalationPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
+		return
+	}
+	var body EscalationPolicy
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if err := h.service.UpdatePolicy(r.Context(), id, body); err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
+	updated, err := h.service.GetPolicy(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "policy updated but reload failed", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updated)
 }

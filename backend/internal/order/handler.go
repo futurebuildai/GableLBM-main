@@ -2,6 +2,7 @@ package order
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -100,6 +101,17 @@ func (h *Handler) HandleConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ConfirmOrder(r.Context(), id); err != nil {
+		// Pre-ship gate: unresolved price-protection exposure on the source
+		// quote. The pricing module's ErrUnresolvedExposure exposes its
+		// payload via UnresolvedExposurePayload() so the order handler
+		// renders 409 without importing pricing.
+		var ue interface{ UnresolvedExposurePayload() map[string]any }
+		if errors.As(err, &ue) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(ue.UnresolvedExposurePayload())
+			return
+		}
 		httputil.RespondError(w, r, "failed to confirm order", http.StatusInternalServerError, err)
 		return
 	}
