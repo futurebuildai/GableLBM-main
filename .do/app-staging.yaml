@@ -27,7 +27,7 @@ services:
     dockerfile_path: backend/Dockerfile
     source_dir: /
     github:
-      repo: futurebuild/GableLBM
+      repo: futurebuildai/GableLBM-main
       branch: staging
       deploy_on_push: true
     instance_count: 1
@@ -61,7 +61,7 @@ services:
     dockerfile_path: app/Dockerfile
     source_dir: /
     github:
-      repo: futurebuild/GableLBM
+      repo: futurebuildai/GableLBM-main
       branch: staging
       deploy_on_push: true
     instance_count: 1
@@ -84,7 +84,7 @@ jobs:
     dockerfile_path: backend/Dockerfile
     source_dir: /
     github:
-      repo: futurebuild/GableLBM
+      repo: futurebuildai/GableLBM-main
       branch: staging
     instance_count: 1
     instance_size_slug: basic-xxs
