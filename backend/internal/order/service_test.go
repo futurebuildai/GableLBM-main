@@ -36,7 +36,13 @@ func TestSpecialOrder_POCreation(t *testing.T) {
 	// Create dummy customer
 	custID := uuid.New()
 	accountNum := "TEST-" + custID.String()[:8]
-	_, err = db.Pool.Exec(context.Background(), "INSERT INTO customers (id, name, account_number) VALUES ($1, 'Test Customer', $2)", custID, accountNum)
+	// customers.primary_branch_id is NOT NULL post-migration 067; resolve
+	// the default branch from system_settings (seeded by migration 059).
+	_, err = db.Pool.Exec(context.Background(),
+		`INSERT INTO customers (id, name, account_number, primary_branch_id)
+		 VALUES ($1, 'Test Customer', $2,
+		         (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'))`,
+		custID, accountNum)
 	if err != nil {
 		t.Logf("Customer error: %v", err)
 	}
