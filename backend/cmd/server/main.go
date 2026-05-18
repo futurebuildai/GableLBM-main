@@ -453,7 +453,7 @@ func main() {
 	exposureHandler := pricing.NewExposureHandler(exposureScanner, exposureChecker, exposureRepo, exposureSvc)
 	exposureHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
-	indexAdminHandler := pricing.NewIndexAdminHandler(escalatorRepo, exposureRepo, exposureScanner)
+	indexAdminHandler := pricing.NewIndexAdminHandler(escalatorRepo, exposureRepo, exposureScanner, db, logger)
 	indexAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
 
 	categoryDefaultHandler := pricing.NewCategoryDefaultHandler(exposureRepo)

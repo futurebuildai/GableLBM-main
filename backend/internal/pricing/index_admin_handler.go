@@ -1,11 +1,15 @@
 package pricing
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
 )
@@ -17,10 +21,15 @@ type IndexAdminHandler struct {
 	escalators EscalatorRepository
 	exposure   ExposureRepository
 	scanner    *ExposureScanner
+	db         *database.DB
+	logger     *slog.Logger
 }
 
-func NewIndexAdminHandler(escalators EscalatorRepository, exposure ExposureRepository, scanner *ExposureScanner) *IndexAdminHandler {
-	return &IndexAdminHandler{escalators: escalators, exposure: exposure, scanner: scanner}
+func NewIndexAdminHandler(escalators EscalatorRepository, exposure ExposureRepository, scanner *ExposureScanner, db *database.DB, logger *slog.Logger) *IndexAdminHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &IndexAdminHandler{escalators: escalators, exposure: exposure, scanner: scanner, db: db, logger: logger}
 }
 
 func (h *IndexAdminHandler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -73,41 +82,51 @@ func (h *IndexAdminHandler) HandleRefresh(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Update market_indices.current_value (and shift previous).
+	// Update market_indices.current_value (and shift previous) atomically with
+	// the market_index_history insert. If either fails, neither commits —
+	// preventing "the current value moved but no audit row records why."
+	// Scanner kickoff runs AFTER commit (it has its own idempotency).
 	prev := idx.CurrentValue
 	idx.PreviousValue = &prev
 	idx.CurrentValue = req.NewValue
-	if err := h.escalators.UpdateMarketIndex(r.Context(), idx); err != nil {
-		httputil.RespondError(w, r, "failed to update market index", http.StatusInternalServerError, err)
-		return
-	}
-
 	hist := &MarketIndexHistory{
 		MarketIndexID: indexID,
 		Value:         req.NewValue,
 		Source:        req.Source,
 		RecordedBy:    userIDString(r),
 	}
-	if err := h.exposure.InsertHistory(r.Context(), hist); err != nil {
-		httputil.RespondError(w, r, "failed to write history", http.StatusInternalServerError, err)
+	if err := h.db.RunInTx(r.Context(), func(txCtx context.Context) error {
+		if err := h.escalators.UpdateMarketIndex(txCtx, idx); err != nil {
+			return fmt.Errorf("update market index: %w", err)
+		}
+		if err := h.exposure.InsertHistory(txCtx, hist); err != nil {
+			return fmt.Errorf("insert history: %w", err)
+		}
+		return nil
+	}); err != nil {
+		httputil.RespondError(w, r, "failed to apply index update", http.StatusInternalServerError, err)
 		return
 	}
 
-	// Kick the scanner synchronously. Notes from req are not propagated yet —
-	// add to the history.notes column in a follow-up if needed.
+	// Kick the scanner outside the transaction. Notes from req are not
+	// propagated yet — add to the history.notes column in a follow-up if needed.
+	scanFailed := false
 	if h.scanner != nil {
 		if err := h.scanner.OnMarketIndexUpdated(r.Context(), indexID, hist.ID); err != nil {
-			// Don't fail the request — the history row is written and the
-			// safety-net cron will re-evaluate. Log via stdlib slog default.
-			httputil.RespondError(w, r, "scan kicked but had errors", http.StatusOK, err)
-			return
+			// Don't fail the whole request — the value + history are
+			// committed and the safety-net cron will re-evaluate. Log it,
+			// and surface to the caller via scan_kicked=false so the UI can
+			// flag the user.
+			h.logger.Warn("index refresh: scanner failed; safety-net cron will recover",
+				"index_id", indexID, "history_id", hist.ID, "err", err)
+			scanFailed = true
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"market_index": idx,
 		"history_id":   hist.ID,
-		"scan_kicked":  true,
+		"scan_kicked":  !scanFailed,
 	})
 }
 

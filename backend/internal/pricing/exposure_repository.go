@@ -39,7 +39,7 @@ type ExposureRepository interface {
 	ResolveIndexForProduct(ctx context.Context, productID uuid.UUID) (*uuid.UUID, error)
 
 	// Read projections for the salesperson + owner views
-	ListExposureForOwner(ctx context.Context, salespersonID *uuid.UUID, states []string, limit, offset int) ([]ExposureRow, error)
+	ListExposureForOwner(ctx context.Context, filter ExposureFilter) ([]ExposureRow, error)
 	PortfolioRollup(ctx context.Context, salespersonFilter *uuid.UUID) (*PortfolioSummary, error)
 }
 
@@ -346,10 +346,25 @@ func (r *PostgresExposureRepository) ResolveIndexForProduct(ctx context.Context,
 
 // ---------- Read projections ----------
 
+// ExposureFilter narrows ListExposureForOwner. Zero-valued fields are
+// ignored; non-empty fields add WHERE clauses. CustomerID and IndexCode are
+// optional; MinDollars is applied against the denormalized
+// quotes.exposure_dollars column.
+type ExposureFilter struct {
+	SalespersonID *uuid.UUID
+	States        []string
+	CustomerID    *uuid.UUID
+	IndexCode     string
+	MinDollars    float64
+	Limit         int
+	Offset        int
+}
+
 // ListExposureForOwner returns the salesperson at-risk-quotes table. When
-// salespersonID is nil, returns across all owners (caller must enforce role).
-// states defaults to all non-OK states if empty.
-func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, salespersonID *uuid.UUID, states []string, limit, offset int) ([]ExposureRow, error) {
+// SalespersonID is nil, returns across all owners (caller must enforce role).
+// States defaults to all non-OK states if empty.
+func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, f ExposureFilter) ([]ExposureRow, error) {
+	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
 	}
@@ -357,23 +372,44 @@ func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, s
 	clauses := []string{"q.state IN ('SENT','ACCEPTED')"}
 	args := []any{}
 	idx := 1
-	if salespersonID != nil {
+	if f.SalespersonID != nil {
 		clauses = append(clauses, fmt.Sprintf("c.salesperson_id = $%d", idx))
-		args = append(args, *salespersonID)
+		args = append(args, *f.SalespersonID)
 		idx++
 	}
-	if len(states) == 0 {
+	if len(f.States) == 0 {
 		clauses = append(clauses, "q.exposure_state <> 'OK'")
 	} else {
 		placeholders := []string{}
-		for _, s := range states {
+		for _, s := range f.States {
 			placeholders = append(placeholders, fmt.Sprintf("$%d", idx))
 			args = append(args, s)
 			idx++
 		}
 		clauses = append(clauses, fmt.Sprintf("q.exposure_state IN (%s)", strings.Join(placeholders, ",")))
 	}
-	args = append(args, limit, offset)
+	if f.CustomerID != nil {
+		clauses = append(clauses, fmt.Sprintf("q.customer_id = $%d", idx))
+		args = append(args, *f.CustomerID)
+		idx++
+	}
+	if f.IndexCode != "" {
+		// Subquery: only quotes that have an active escalator tagged to the
+		// given index_code. Faster than joining at the top level.
+		clauses = append(clauses, fmt.Sprintf(`q.id IN (
+			SELECT ql.quote_id FROM price_escalators pe
+			JOIN quote_lines ql ON ql.id = pe.quote_line_id
+			JOIN market_indices mi ON mi.id = pe.market_index_id
+			WHERE pe.is_active AND mi.index_code = $%d)`, idx))
+		args = append(args, f.IndexCode)
+		idx++
+	}
+	if f.MinDollars > 0 {
+		clauses = append(clauses, fmt.Sprintf("q.exposure_dollars >= $%d", idx))
+		args = append(args, f.MinDollars)
+		idx++
+	}
+	args = append(args, limit, f.Offset)
 
 	q := fmt.Sprintf(`
 		SELECT

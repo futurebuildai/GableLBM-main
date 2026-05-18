@@ -112,7 +112,7 @@ func (s *ExposureService) Acknowledge(ctx context.Context, quoteID uuid.UUID, re
 		return ev, fmt.Errorf("acknowledge: flip escalators: %w", err)
 	}
 
-	s.writeAudit(ev)
+	s.writeAudit(ctx, ev)
 	return ev, nil
 }
 
@@ -138,26 +138,45 @@ func (s *ExposureService) RequestAck(ctx context.Context, quoteID uuid.UUID, act
 		return nil, fmt.Errorf("request-ack: insert event: %w", err)
 	}
 
-	// Notify the salesperson — best-effort.
+	// Notify the salesperson — best-effort. Populate IndexCode (first applicable
+	// from the quote's active indexes) so the notifier's per-(salesperson, index)
+	// rate limiter can actually engage and prevent ping floods.
 	if s.notifier != nil {
+		indexCode := ""
+		if len(status.Indexes) > 0 {
+			indexCode = status.Indexes[0]
+		}
 		_ = s.notifier.NotifyAckRequired(ctx, AckRequiredEvent{
 			QuoteID:         quoteID,
 			QuoteShortID:    status.QuoteShortID,
 			SalespersonID:   status.SalespersonID,
 			SalespersonName: status.SalespersonName,
 			ExposureDollars: status.ExposureDollars,
+			IndexCode:       indexCode,
 		})
 	}
 
-	s.writeAudit(ev)
+	s.writeAudit(ctx, ev)
 	return ev, nil
 }
 
-// Override is the owner-only emergency unblock. Requires notes ≥ 10 chars.
+// Override is the owner-only emergency unblock. Requires notes ≥ 10 chars
+// and that the quote actually has unresolved exposure to override —
+// overriding an OK/ACKNOWLEDGED/OVERRIDDEN quote is rejected to prevent
+// spurious audit entries and accidental escalator-state flips.
 // Role enforcement is at the handler layer; service trusts the role string.
 func (s *ExposureService) Override(ctx context.Context, quoteID uuid.UUID, req OverrideRequest, actor, role string) (*QuoteExposureEvent, error) {
 	if len(strings.TrimSpace(req.Notes)) < 10 {
 		return nil, errNotesTooShort
+	}
+
+	status, err := s.checker.CheckQuoteExposure(ctx, quoteID)
+	if err != nil {
+		return nil, err
+	}
+	switch status.State {
+	case ExposureStateOK, ExposureStateAcknowledged, ExposureStateOverridden:
+		return nil, errAlreadyCleared
 	}
 
 	now := time.Now()
@@ -177,11 +196,14 @@ func (s *ExposureService) Override(ctx context.Context, quoteID uuid.UUID, req O
 	if err := s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(ExposureStateOverridden), 0, now); err != nil {
 		return ev, fmt.Errorf("override: update quote rollup: %w", err)
 	}
-	if err := s.flipAllActiveEscalators(ctx, quoteID, ExposureStateOverridden, now); err != nil {
+	// Only flip escalators that were actively raised — leave OK escalators
+	// (i.e. lines that were never above threshold) alone, otherwise the
+	// scanner can never re-detect them.
+	if err := s.flipActiveRaisedEscalators(ctx, quoteID, ExposureStateOverridden, now); err != nil {
 		return ev, fmt.Errorf("override: flip escalators: %w", err)
 	}
 
-	s.writeAudit(ev)
+	s.writeAudit(ctx, ev)
 	return ev, nil
 }
 
@@ -267,16 +289,40 @@ func (s *ExposureService) flipAllActiveEscalators(ctx context.Context, quoteID u
 	return nil
 }
 
-func (s *ExposureService) writeAudit(ev *QuoteExposureEvent) {
+// flipActiveRaisedEscalators flips only those escalators that are currently
+// in a "raised" state (FLAGGED / ESCALATED / ACK_REQUIRED / BLOCKED) to the
+// given new state. Escalators in OK state are left alone — used by the
+// override path so that quietly-OK lines remain detectable by the scanner.
+func (s *ExposureService) flipActiveRaisedEscalators(ctx context.Context, quoteID uuid.UUID, state ExposureState, at time.Time) error {
+	escalators, err := s.escalators.ListEscalatorsForQuote(ctx, quoteID)
+	if err != nil {
+		return err
+	}
+	for _, pe := range escalators {
+		switch ExposureState(pe.CurrentState) {
+		case ExposureStateFlagged, ExposureStateEscalated, ExposureStateAckRequired, ExposureStateBlocked:
+			if err := s.exposure.UpdateEscalatorState(ctx, pe.ID, string(state), at); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// writeAudit fires the audit log entry. The caller's context is NOT passed
+// through directly because we don't want HTTP-request cancellation (mid-flight
+// client disconnect) to drop audit-trail writes. We do, however, preserve
+// values (tracing IDs, claims) via context.WithoutCancel — and impose a
+// short bounded timeout so a stalled DB can't accumulate goroutines.
+func (s *ExposureService) writeAudit(parentCtx context.Context, ev *QuoteExposureEvent) {
 	if s.audit == nil {
 		return
 	}
 	if ev.EventType == EventDetected {
 		return
 	}
-	// Audit writes on a fresh context so callers' cancellation doesn't drop
-	// the audit trail mid-flight.
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), 5*time.Second)
+	defer cancel()
 	s.audit.LogEntry(ctx, AuditEntry{
 		Action:     string(ev.EventType),
 		EntityType: "quote_exposure_event",
@@ -292,12 +338,21 @@ func (s *ExposureService) writeAudit(ev *QuoteExposureEvent) {
 	})
 }
 
-// userEventKey builds a deterministic-but-unique idempotency key for a
-// user-driven event. (quote_id, event_type, actor, ts-nanos) is sufficient
-// because a real user won't double-click within the same nanosecond, and
-// dedup of identical clicks is desirable.
+// userEventKey builds an idempotency key for a user-driven event. The
+// timestamp is bucketed to 5-second windows so a duplicate POST from a flaky
+// network or accidental double-click within the same window dedupes
+// transparently. Two intentional acknowledgments more than 5 seconds apart
+// produce distinct keys, which is the correct behaviour for genuinely
+// separate user actions.
+//
+// For stronger guarantees, callers may pass a client-side
+// Idempotency-Key header in the future; this fallback keeps the system
+// resilient until that lands.
+const userEventBucketSeconds = 5
+
 func userEventKey(quoteID uuid.UUID, et EventType, actor string, t time.Time) string {
-	in := fmt.Sprintf("user|%s|%s|%s|%d", quoteID, et, actor, t.UnixNano())
+	bucket := t.Unix() / userEventBucketSeconds
+	in := fmt.Sprintf("user|%s|%s|%s|%d", quoteID, et, actor, bucket)
 	h := sha256.Sum256([]byte(in))
 	return hex.EncodeToString(h[:])
 }

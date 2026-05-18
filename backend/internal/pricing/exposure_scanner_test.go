@@ -111,7 +111,7 @@ func (r *fakeExposureRepo) ResolveIndexForProduct(_ context.Context, productID u
 	return r.resolveIndex[productID], nil
 }
 
-func (r *fakeExposureRepo) ListExposureForOwner(_ context.Context, _ *uuid.UUID, _ []string, _, _ int) ([]ExposureRow, error) {
+func (r *fakeExposureRepo) ListExposureForOwner(_ context.Context, _ ExposureFilter) ([]ExposureRow, error) {
 	return r.exposureRows, nil
 }
 func (r *fakeExposureRepo) PortfolioRollup(_ context.Context, _ *uuid.UUID) (*PortfolioSummary, error) {
@@ -519,6 +519,33 @@ func TestScanner_IndexNotFound_ReturnsError(t *testing.T) {
 	}
 	if !errors.Is(err, err) { // sanity: error has a message
 		t.Errorf("error didn't propagate")
+	}
+}
+
+func TestScanner_ExposureDollarsArePositiveMagnitude(t *testing.T) {
+	// Index moved DOWN through the threshold (−7%). exposure_dollars on the
+	// event must be a positive magnitude — sign is conveyed by delta_pct
+	// alone. Earlier code allowed negative values to flow through, which then
+	// cancelled out positive exposures in the per-quote rollup.
+	ewc, _, _, _ := buildEscalator(t, 6.00, 400.0, 5.0, PolicyFlagForRequote, false)
+	s, er, _, _, _, _, idxID := newTestScanner(t, 372.0, ewc) // -7%
+
+	if err := s.OnMarketIndexUpdated(context.Background(), idxID, uuid.New()); err != nil {
+		t.Fatalf("scanner: %v", err)
+	}
+	if len(er.events) != 1 {
+		t.Fatalf("expected one FLAGGED event, got %d", len(er.events))
+	}
+	ev := er.events[0]
+	if ev.ExposureDollars == nil {
+		t.Fatal("exposure_dollars missing")
+	}
+	if *ev.ExposureDollars <= 0 {
+		t.Errorf("exposure_dollars must be positive magnitude; got %.2f", *ev.ExposureDollars)
+	}
+	// Sanity: delta_pct should carry the sign
+	if ev.DeltaPct == nil || *ev.DeltaPct >= 0 {
+		t.Errorf("delta_pct should be negative for downward move; got %v", ev.DeltaPct)
 	}
 }
 

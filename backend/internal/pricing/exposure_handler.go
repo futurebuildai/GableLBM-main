@@ -63,10 +63,17 @@ func (h *ExposureHandler) HandleListExposure(w http.ResponseWriter, r *http.Requ
 	var spFilter *uuid.UUID
 	switch ownerParam {
 	case "", "me":
-		// Default: scope to caller's book unless caller is owner/admin asking for "me"
+		// Default: scope to caller's book. Non-owner/admin roles MUST have a
+		// resolvable salesperson UUID — otherwise fall-through to nil would
+		// leak the entire portfolio to anyone signed in with an opaque JWT
+		// subject (e.g. Keycloak's default "sub" claim). Owners/admins
+		// without a UUID are intentionally allowed (they see everything).
 		if uid != uuid.Nil {
 			id := uid
 			spFilter = &id
+		} else if role != "owner" && role != "admin" {
+			httputil.RespondError(w, r, "no salesperson context — cannot scope to your book", http.StatusForbidden, nil)
+			return
 		}
 	case "all":
 		if role != "owner" && role != "admin" {
@@ -93,7 +100,32 @@ func (h *ExposureHandler) HandleListExposure(w http.ResponseWriter, r *http.Requ
 		states = splitCsv(stateParam)
 	}
 
-	rows, err := h.exposure.ListExposureForOwner(r.Context(), spFilter, states, limit, offset)
+	// Optional finer-grained filters: customer_id, index_code, min_dollars.
+	filter := ExposureFilter{
+		SalespersonID: spFilter,
+		States:        states,
+		IndexCode:     q.Get("index_code"),
+		Limit:         limit,
+		Offset:        offset,
+	}
+	if cidStr := q.Get("customer_id"); cidStr != "" {
+		cid, err := uuid.Parse(cidStr)
+		if err != nil {
+			httputil.RespondError(w, r, "invalid customer_id", http.StatusBadRequest, err)
+			return
+		}
+		filter.CustomerID = &cid
+	}
+	if mdStr := q.Get("min_dollars"); mdStr != "" {
+		md, err := strconv.ParseFloat(mdStr, 64)
+		if err != nil || md < 0 {
+			httputil.RespondError(w, r, "invalid min_dollars", http.StatusBadRequest, err)
+			return
+		}
+		filter.MinDollars = md
+	}
+
+	rows, err := h.exposure.ListExposureForOwner(r.Context(), filter)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to list exposure", http.StatusInternalServerError, err)
 		return
@@ -160,12 +192,17 @@ func (h *ExposureHandler) HandleAcknowledge(w http.ResponseWriter, r *http.Reque
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
 	}
+	actor := userIDString(r)
+	if actor == "" {
+		httputil.RespondError(w, r, "authentication required", http.StatusUnauthorized, nil)
+		return
+	}
 	var req AcknowledgmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
-	ev, err := h.svc.Acknowledge(r.Context(), quoteID, req, userIDString(r), userRole(r))
+	ev, err := h.svc.Acknowledge(r.Context(), quoteID, req, actor, userRole(r))
 	if err != nil {
 		mapServiceError(w, r, err)
 		return
@@ -183,7 +220,12 @@ func (h *ExposureHandler) HandleRequestAck(w http.ResponseWriter, r *http.Reques
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
 	}
-	ev, err := h.svc.RequestAck(r.Context(), quoteID, userIDString(r), userRole(r))
+	actor := userIDString(r)
+	if actor == "" {
+		httputil.RespondError(w, r, "authentication required", http.StatusUnauthorized, nil)
+		return
+	}
+	ev, err := h.svc.RequestAck(r.Context(), quoteID, actor, userRole(r))
 	if err != nil {
 		mapServiceError(w, r, err)
 		return
@@ -200,6 +242,11 @@ func (h *ExposureHandler) HandleOverride(w http.ResponseWriter, r *http.Request)
 		httputil.RespondError(w, r, "override requires owner or admin role", http.StatusForbidden, nil)
 		return
 	}
+	actor := userIDString(r)
+	if actor == "" {
+		httputil.RespondError(w, r, "authentication required", http.StatusUnauthorized, nil)
+		return
+	}
 	quoteID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
@@ -210,7 +257,7 @@ func (h *ExposureHandler) HandleOverride(w http.ResponseWriter, r *http.Request)
 		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
-	ev, err := h.svc.Override(r.Context(), quoteID, req, userIDString(r), role)
+	ev, err := h.svc.Override(r.Context(), quoteID, req, actor, role)
 	if err != nil {
 		mapServiceError(w, r, err)
 		return

@@ -209,6 +209,31 @@ func TestOverride_NotesTooShort(t *testing.T) {
 	}
 }
 
+func TestOverride_AlreadyCleared_RejectedForOKState(t *testing.T) {
+	// Owner cannot override a quote whose exposure is already OK / ACKNOWLEDGED /
+	// OVERRIDDEN — would write spurious audit entries and unnecessarily flip
+	// every escalator to OVERRIDDEN, blocking future scanner re-detection.
+	for _, st := range []ExposureState{ExposureStateOK, ExposureStateAcknowledged, ExposureStateOverridden} {
+		t.Run(string(st), func(t *testing.T) {
+			checker := &fakeChecker{state: st}
+			svc, er, qr, _ := newTestExposureService(t, checker)
+
+			_, err := svc.Override(context.Background(), uuid.New(), OverrideRequest{
+				Notes: "Trying to override an already-resolved quote",
+			}, "linda-uuid", "owner")
+			if !errors.Is(err, errAlreadyCleared) {
+				t.Errorf("expected errAlreadyCleared for state %s, got %v", st, err)
+			}
+			if len(er.events) != 0 {
+				t.Errorf("must not write event when already cleared; got %d", len(er.events))
+			}
+			if len(qr.exposureUpdates) != 0 {
+				t.Errorf("must not flip rollup when already cleared; got %+v", qr.exposureUpdates)
+			}
+		})
+	}
+}
+
 // ---------- EscalateNowPreview ----------
 
 func TestEscalateNowPreview_NilProjection_ReturnsEmptyResult(t *testing.T) {

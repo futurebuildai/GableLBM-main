@@ -140,8 +140,29 @@ func (s *ExposureScanner) evaluateAllForIndex(ctx context.Context, idx MarketInd
 	if err != nil {
 		return err
 	}
+	failures := 0
 	for i := range escalators {
-		_, _ = s.evaluateOne(ctx, &escalators[i], idx.CurrentValue, idx.IndexCode, uuid.Nil, true)
+		if _, err := s.evaluateOne(ctx, &escalators[i], idx.CurrentValue, idx.IndexCode, uuid.Nil, true); err != nil {
+			// Don't abort the whole index — log and continue so a single bad
+			// line doesn't deny the rest of the safety-net pass.
+			lineID := uuid.Nil
+			if escalators[i].Escalator.QuoteLineID != nil {
+				lineID = *escalators[i].Escalator.QuoteLineID
+			}
+			s.logger.Warn("safety-net: evaluate line failed",
+				"index_code", idx.IndexCode,
+				"line_id", lineID,
+				"err", err,
+			)
+			failures++
+		}
+	}
+	if failures > 0 {
+		s.logger.Warn("safety-net: completed with failures",
+			"index_code", idx.IndexCode,
+			"failed_lines", failures,
+			"total_lines", len(escalators),
+		)
 	}
 	return nil
 }
@@ -181,7 +202,12 @@ func (s *ExposureScanner) evaluateOne(
 		threshold = 5.0
 	}
 
-	exposureDollars := (currentIndex/baseIndex - 1.0) * pe.BasePrice * ewc.LineQuantity
+	// Exposure dollars is always reported as a positive magnitude — sign is
+	// conveyed by delta_pct. Persisting unsigned here avoids cancellation
+	// when summing across lines with mixed-direction movement (e.g. a quote
+	// with one line on an index that rose 7% and another on an index that
+	// fell 6% — both contribute exposure, not net out).
+	exposureDollars := math.Abs(currentIndex/baseIndex-1.0) * pe.BasePrice * ewc.LineQuantity
 	exposureDollars = math.Round(exposureDollars*100) / 100
 	policy := EscalationPolicy(pe.PolicyAtSnapshot)
 	if policy == "" {
@@ -349,6 +375,10 @@ func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID 
 		return 0
 	}
 	// Walk events in order; keep the most recent non-CLEARED exposure_dollars per line.
+	// Per-line values are already unsigned (math.Abs in evaluateOne), so
+	// summing them is a straight positive-magnitude rollup. Earlier code
+	// applied Abs only to the final sum, which let mixed-direction line
+	// exposures cancel out and understate the quote total.
 	perLine := map[uuid.UUID]float64{}
 	for _, ev := range events {
 		if ev.QuoteLineID == nil || ev.ExposureDollars == nil {
@@ -359,14 +389,14 @@ func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID 
 			// Clears (or post-resolution events) zero out the line.
 			perLine[*ev.QuoteLineID] = 0
 		default:
-			perLine[*ev.QuoteLineID] = *ev.ExposureDollars
+			perLine[*ev.QuoteLineID] = math.Abs(*ev.ExposureDollars)
 		}
 	}
 	total := 0.0
 	for _, v := range perLine {
 		total += v
 	}
-	return math.Round(math.Abs(total)*100) / 100
+	return math.Round(total*100) / 100
 }
 
 // stateRank returns a worst-state ordering. Higher = more severe / more

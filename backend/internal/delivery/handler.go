@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -253,6 +254,17 @@ func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
 
 	d, capacityWarning, err := h.service.AssignOrderToRoute(r.Context(), req)
 	if err != nil {
+		// Pre-ship gate: unresolved price-protection exposure on the source
+		// quote. The pricing module's ErrUnresolvedExposure exposes its
+		// payload via UnresolvedExposurePayload() so delivery doesn't have to
+		// import pricing. Mirrors order/handler.go's translation.
+		var ue interface{ UnresolvedExposurePayload() map[string]any }
+		if errors.As(err, &ue) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(ue.UnresolvedExposurePayload())
+			return
+		}
 		slog.Error("AssignOrderToRoute failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
