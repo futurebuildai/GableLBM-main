@@ -139,7 +139,10 @@ export interface MarketIndexFull {
   name: string;
   source: string;
   current_value: number;
-  previous_value: number | null;
+  // Backend marshals `*float64` with omitempty, so the key is absent (undefined)
+  // when there's no previous value rather than null. Consumers that rely on
+  // strict-nullability should treat both forms equivalently.
+  previous_value?: number;
   unit: string;
   commodity_kind?: string;
   description?: string;

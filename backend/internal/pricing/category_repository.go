@@ -555,51 +555,49 @@ func (r *PostgresCategoryRepository) ListAuditEntries(ctx context.Context, ruleI
 // --- Bulk Operations ---
 
 func (r *PostgresCategoryRepository) BulkUpsertRules(ctx context.Context, rules []CategoryPricingRule) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
+	// Use the shared RunInTx so this composes with an ambient transaction
+	// (e.g. a multi-table import) instead of opening its own pooled
+	// connection. RunInTx is nested-tx-safe.
+	return r.db.RunInTx(ctx, func(txCtx context.Context) error {
+		exec := r.db.GetExecutor(txCtx)
+		for i := range rules {
+			rule := &rules[i]
+			if rule.ID == uuid.Nil {
+				rule.ID = uuid.New()
+			}
+			now := time.Now()
+			rule.UpdatedAt = now
 
-	for i := range rules {
-		rule := &rules[i]
-		if rule.ID == uuid.Nil {
-			rule.ID = uuid.New()
+			query := `
+				INSERT INTO category_pricing_rules
+					(id, target_type, customer_id, tier, category_id, rule_type, rule_value,
+					 margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+				ON CONFLICT (id) DO UPDATE SET
+					rule_type = EXCLUDED.rule_type,
+					rule_value = EXCLUDED.rule_value,
+					margin_floor_pct = EXCLUDED.margin_floor_pct,
+					starts_at = EXCLUDED.starts_at,
+					expires_at = EXCLUDED.expires_at,
+					is_active = EXCLUDED.is_active,
+					priority = EXCLUDED.priority,
+					updated_at = EXCLUDED.updated_at`
+
+			if rule.CreatedAt.IsZero() {
+				rule.CreatedAt = now
+			}
+
+			if _, err := exec.Exec(txCtx, query,
+				rule.ID, rule.TargetType, rule.CustomerID, nilIfEmpty(rule.Tier), rule.CategoryID,
+				rule.RuleType, rule.RuleValue, rule.MarginFloorPct,
+				rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority,
+				rule.CreatedBy, rule.CreatedAt, rule.UpdatedAt,
+			); err != nil {
+				return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
+			}
 		}
-		now := time.Now()
-		rule.UpdatedAt = now
-
-		query := `
-			INSERT INTO category_pricing_rules
-				(id, target_type, customer_id, tier, category_id, rule_type, rule_value,
-				 margin_floor_pct, starts_at, expires_at, is_active, priority, created_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-			ON CONFLICT (id) DO UPDATE SET
-				rule_type = EXCLUDED.rule_type,
-				rule_value = EXCLUDED.rule_value,
-				margin_floor_pct = EXCLUDED.margin_floor_pct,
-				starts_at = EXCLUDED.starts_at,
-				expires_at = EXCLUDED.expires_at,
-				is_active = EXCLUDED.is_active,
-				priority = EXCLUDED.priority,
-				updated_at = EXCLUDED.updated_at`
-
-		if rule.CreatedAt.IsZero() {
-			rule.CreatedAt = now
-		}
-
-		_, err := tx.Exec(ctx, query,
-			rule.ID, rule.TargetType, rule.CustomerID, nilIfEmpty(rule.Tier), rule.CategoryID,
-			rule.RuleType, rule.RuleValue, rule.MarginFloorPct,
-			rule.StartsAt, rule.ExpiresAt, rule.IsActive, rule.Priority,
-			rule.CreatedBy, rule.CreatedAt, rule.UpdatedAt,
-		)
-		if err != nil {
-			return fmt.Errorf("bulk upsert rule %s: %w", rule.ID, err)
-		}
-	}
-
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (r *PostgresCategoryRepository) BulkDeleteRules(ctx context.Context, ids []uuid.UUID) error {

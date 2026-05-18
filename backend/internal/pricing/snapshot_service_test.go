@@ -69,7 +69,7 @@ func newTestSnapshotService(t *testing.T, projection *quote.QuoteForSnapshot, in
 	er.resolveIndex = resolveIndex
 	esc := &snapshotEscalatorRepo{indices: indices}
 	qr := &stubQuoteRepo{projection: projection}
-	s := NewSnapshotService(esc, er, qr, slog.New(slog.NewTextHandler(testWriter{t: t}, nil)))
+	s := NewSnapshotService(esc, er, qr, nil, slog.New(slog.NewTextHandler(testWriter{t: t}, nil)))
 	return s, er, esc, qr
 }
 

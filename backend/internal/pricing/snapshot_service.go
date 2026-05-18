@@ -31,10 +31,11 @@ type SnapshotService struct {
 	escalators EscalatorRepository
 	exposure   ExposureRepository
 	quoteRepo  quote.QuoteLineReader
+	tx         TxRunner // optional; nil disables tx wrapping (tests)
 	logger     *slog.Logger
 }
 
-func NewSnapshotService(escalatorRepo EscalatorRepository, exposureRepo ExposureRepository, quoteRepo quote.QuoteLineReader, logger *slog.Logger) *SnapshotService {
+func NewSnapshotService(escalatorRepo EscalatorRepository, exposureRepo ExposureRepository, quoteRepo quote.QuoteLineReader, tx TxRunner, logger *slog.Logger) *SnapshotService {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -42,8 +43,16 @@ func NewSnapshotService(escalatorRepo EscalatorRepository, exposureRepo Exposure
 		escalators: escalatorRepo,
 		exposure:   exposureRepo,
 		quoteRepo:  quoteRepo,
+		tx:         tx,
 		logger:     logger,
 	}
+}
+
+func (s *SnapshotService) runInTx(ctx context.Context, fn func(context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
 }
 
 // SnapshotQuoteLines fetches the quote, walks every commodity line, resolves
@@ -76,6 +85,9 @@ func (s *SnapshotService) SnapshotQuoteLines(ctx context.Context, quoteID uuid.U
 
 	now := time.Now()
 	var escalators []PriceEscalator
+	// Track the line ids to deactivate so we can do it inside the
+	// transaction with the snapshot insert, keeping the operation atomic.
+	var deactivateLineIDs []uuid.UUID
 	skipped := 0
 
 	for _, line := range q.Lines {
@@ -137,22 +149,31 @@ func (s *SnapshotService) SnapshotQuoteLines(ctx context.Context, quoteID uuid.U
 			ExpirationDate:         now.AddDate(0, 1, 0), // legacy field; default 1 month — actual policy controls behaviour
 			IsActive:               true,
 		})
-
-		// Deactivate any prior escalator rows on this line so the new snapshot
-		// becomes the sole active baseline.
-		if err := s.exposure.DeactivateEscalatorsForLine(ctx, lineID); err != nil {
-			return fmt.Errorf("snapshot: deactivate prior escalators: %w", err)
-		}
+		deactivateLineIDs = append(deactivateLineIDs, lineID)
 	}
 
-	if len(escalators) > 0 {
-		if err := s.escalators.SnapshotEscalators(ctx, escalators); err != nil {
-			return fmt.Errorf("snapshot: insert escalators: %w", err)
+	// Atomic: deactivate every prior escalator on the affected lines,
+	// insert the new batch, and reset the quote rollup in a single tx.
+	// A failure on any step rolls all of them back so a re-send isn't
+	// observed by a parallel reader as "no exposure tracked anywhere"
+	// during the gap between deactivate and insert.
+	if err := s.runInTx(ctx, func(txCtx context.Context) error {
+		for _, lineID := range deactivateLineIDs {
+			if err := s.exposure.DeactivateEscalatorsForLine(txCtx, lineID); err != nil {
+				return fmt.Errorf("snapshot: deactivate prior escalators: %w", err)
+			}
 		}
-	}
-
-	if err := s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(ExposureStateOK), 0, now); err != nil {
-		return fmt.Errorf("snapshot: update quote exposure rollup: %w", err)
+		if len(escalators) > 0 {
+			if err := s.escalators.SnapshotEscalators(txCtx, escalators); err != nil {
+				return fmt.Errorf("snapshot: insert escalators: %w", err)
+			}
+		}
+		if err := s.quoteRepo.UpdateQuoteExposure(txCtx, quoteID, string(ExposureStateOK), 0, now); err != nil {
+			return fmt.Errorf("snapshot: update quote exposure rollup: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	s.logger.Info("snapshot: quote snapshotted",

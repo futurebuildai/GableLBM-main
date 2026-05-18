@@ -369,47 +369,37 @@ func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, f
 		limit = 50
 	}
 
+	pb := &paramBuilder{}
 	clauses := []string{"q.state IN ('SENT','ACCEPTED')"}
-	args := []any{}
-	idx := 1
 	if f.SalespersonID != nil {
-		clauses = append(clauses, fmt.Sprintf("c.salesperson_id = $%d", idx))
-		args = append(args, *f.SalespersonID)
-		idx++
+		clauses = append(clauses, "c.salesperson_id = "+pb.add(*f.SalespersonID))
 	}
 	if len(f.States) == 0 {
 		clauses = append(clauses, "q.exposure_state <> 'OK'")
 	} else {
-		placeholders := []string{}
+		placeholders := make([]string, 0, len(f.States))
 		for _, s := range f.States {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", idx))
-			args = append(args, s)
-			idx++
+			placeholders = append(placeholders, pb.add(s))
 		}
-		clauses = append(clauses, fmt.Sprintf("q.exposure_state IN (%s)", strings.Join(placeholders, ",")))
+		clauses = append(clauses, "q.exposure_state IN ("+strings.Join(placeholders, ",")+")")
 	}
 	if f.CustomerID != nil {
-		clauses = append(clauses, fmt.Sprintf("q.customer_id = $%d", idx))
-		args = append(args, *f.CustomerID)
-		idx++
+		clauses = append(clauses, "q.customer_id = "+pb.add(*f.CustomerID))
 	}
 	if f.IndexCode != "" {
 		// Subquery: only quotes that have an active escalator tagged to the
 		// given index_code. Faster than joining at the top level.
-		clauses = append(clauses, fmt.Sprintf(`q.id IN (
+		clauses = append(clauses, `q.id IN (
 			SELECT ql.quote_id FROM price_escalators pe
 			JOIN quote_lines ql ON ql.id = pe.quote_line_id
 			JOIN market_indices mi ON mi.id = pe.market_index_id
-			WHERE pe.is_active AND mi.index_code = $%d)`, idx))
-		args = append(args, f.IndexCode)
-		idx++
+			WHERE pe.is_active AND mi.index_code = `+pb.add(f.IndexCode)+`)`)
 	}
 	if f.MinDollars > 0 {
-		clauses = append(clauses, fmt.Sprintf("q.exposure_dollars >= $%d", idx))
-		args = append(args, f.MinDollars)
-		idx++
+		clauses = append(clauses, "q.exposure_dollars >= "+pb.add(f.MinDollars))
 	}
-	args = append(args, limit, f.Offset)
+	limitPh := pb.add(limit)
+	offsetPh := pb.add(f.Offset)
 
 	q := fmt.Sprintf(`
 		SELECT
@@ -446,10 +436,10 @@ func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, f
 		LEFT JOIN sales_team st ON st.id = c.salesperson_id
 		WHERE %s
 		ORDER BY q.exposure_dollars DESC
-		LIMIT $%d OFFSET $%d`,
-		strings.Join(clauses, " AND "), idx, idx+1)
+		LIMIT %s OFFSET %s`,
+		strings.Join(clauses, " AND "), limitPh, offsetPh)
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, pb.args...)
 	if err != nil {
 		return nil, fmt.Errorf("list exposure for owner: %w", err)
 	}
@@ -593,4 +583,16 @@ func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salesp
 	}
 
 	return out, nil
+}
+
+// paramBuilder is a tiny query-builder helper. Each call to add appends a
+// value to args and returns its $N placeholder. Avoids hand-rolled index
+// arithmetic that's easy to get wrong on edits to a multi-clause query.
+type paramBuilder struct {
+	args []any
+}
+
+func (b *paramBuilder) add(v any) string {
+	b.args = append(b.args, v)
+	return fmt.Sprintf("$%d", len(b.args))
 }

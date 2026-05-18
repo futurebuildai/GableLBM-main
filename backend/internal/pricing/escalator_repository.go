@@ -226,25 +226,20 @@ func (r *PostgresEscalatorRepository) CreateMarketIndex(ctx context.Context, idx
 
 func (r *PostgresEscalatorRepository) UpdateMarketIndex(ctx context.Context, idx *MarketIndex) error {
 	idx.LastUpdatedAt = time.Now()
-
-	// Use transaction wrapping for the multi-column update
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	query := `
 		UPDATE market_indices
 		SET current_value = $2, previous_value = $3, last_updated_at = $4
 		WHERE id = $1`
-
-	_, err = tx.Exec(ctx, query, idx.ID, idx.CurrentValue, idx.PreviousValue, idx.LastUpdatedAt)
-	if err != nil {
+	// Use GetExecutor so this composes inside an ambient tx (e.g. when the
+	// caller is HandleRefresh's RunInTx wrapper). The previous Pool.Begin
+	// approach opened a second connection and could deadlock against the
+	// outer tx's row lock on market_indices.
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+		idx.ID, idx.CurrentValue, idx.PreviousValue, idx.LastUpdatedAt,
+	); err != nil {
 		return fmt.Errorf("failed to update market index: %w", err)
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PostgresEscalatorRepository) CreateEscalator(ctx context.Context, esc *PriceEscalator) error {
@@ -255,30 +250,21 @@ func (r *PostgresEscalatorRepository) CreateEscalator(ctx context.Context, esc *
 	esc.CreatedAt = now
 	esc.UpdatedAt = now
 
-	// Transaction wrapping for referential integrity
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	query := `
 		INSERT INTO price_escalators (id, quote_line_id, market_index_id, escalation_type,
 			escalation_rate, base_price, base_index_value, effective_date, expiration_date,
 			is_active, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
-	_, err = tx.Exec(ctx, query,
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		esc.ID, esc.QuoteLineID, esc.MarketIndexID, esc.EscalationType,
 		esc.EscalationRate, esc.BasePrice, esc.BaseIndexValue,
 		esc.EffectiveDate, esc.ExpirationDate,
 		esc.IsActive, esc.CreatedAt, esc.UpdatedAt,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to create escalator: %w", err)
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *PostgresEscalatorRepository) GetEscalatorByQuoteLine(ctx context.Context, quoteLineID uuid.UUID) (*PriceEscalator, error) {

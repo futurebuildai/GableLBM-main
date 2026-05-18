@@ -444,10 +444,10 @@ func main() {
 	exposureNotifierImpl := notification.NewExposureNotifier(smsSvc, emailSvc, logger)
 	exposureNotifier := &exposureNotifierAdapter{notifier: exposureNotifierImpl}
 	exposureAuditWriter := &auditAdapter{logger: auditLog}
-	exposureScanner := pricing.NewExposureScanner(exposureRepo, escalatorRepo, quoteRepo, exposureNotifier, exposureAuditWriter, logger)
+	exposureScanner := pricing.NewExposureScanner(exposureRepo, escalatorRepo, quoteRepo, exposureNotifier, exposureAuditWriter, db, logger)
 	exposureChecker := pricing.NewExposureChecker(db)
 	exposureSvc := pricing.NewExposureService(exposureRepo, escalatorRepo, quoteRepo, exposureNotifier, exposureAuditWriter, exposureChecker, logger)
-	snapshotSvc := pricing.NewSnapshotService(escalatorRepo, exposureRepo, quoteRepo, logger)
+	snapshotSvc := pricing.NewSnapshotService(escalatorRepo, exposureRepo, quoteRepo, db, logger)
 
 	// HTTP handlers
 	exposureHandler := pricing.NewExposureHandler(exposureScanner, exposureChecker, exposureRepo, exposureSvc)

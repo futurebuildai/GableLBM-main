@@ -313,7 +313,9 @@ func newTestScanner(t *testing.T, indexCurrent float64, ewc *EscalatorWithContex
 	qr := newFakeQuoteRepo()
 	nt := &fakeNotifier{}
 	au := &fakeAudit{}
-	s := NewExposureScanner(er, esc, qr, nt, au, slog.New(slog.NewTextHandler(testWriter{t: t}, nil)))
+	// Pass nil TxRunner — tests run without DB-level wrapping; the back-pointer
+	// fakes already simulate the writes happening in order.
+	s := NewExposureScanner(er, esc, qr, nt, au, nil, slog.New(slog.NewTextHandler(testWriter{t: t}, nil)))
 	return s, er, esc, qr, nt, au, idxID
 }
 
@@ -577,3 +579,56 @@ func TestScanner_AuditLogSkippedForDetected(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// ---------- pure computeRollup tests ----------
+
+func TestComputeRollup_WorstStateWins(t *testing.T) {
+	cases := []struct {
+		name   string
+		states []ExposureState
+		want   ExposureState
+	}{
+		{"all OK", []ExposureState{ExposureStateOK, ExposureStateOK}, ExposureStateOK},
+		{"one flagged among ok", []ExposureState{ExposureStateOK, ExposureStateFlagged, ExposureStateOK}, ExposureStateFlagged},
+		// FLAGGED outranks ESCALATED because flagged is unresolved (salesperson
+		// must act) while escalated is auto-resolved by signed agreement.
+		{"flagged outranks escalated", []ExposureState{ExposureStateEscalated, ExposureStateFlagged}, ExposureStateFlagged},
+		{"ack_required outranks flagged", []ExposureState{ExposureStateFlagged, ExposureStateAckRequired}, ExposureStateAckRequired},
+		{"blocked is worst", []ExposureState{ExposureStateAckRequired, ExposureStateBlocked, ExposureStateFlagged}, ExposureStateBlocked},
+		// ACKNOWLEDGED is rank 0 (resolved) — same bucket as OK.
+		{"acknowledged is resolved like ok", []ExposureState{ExposureStateOK, ExposureStateAcknowledged}, ExposureStateOK},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			escalators := make([]PriceEscalator, len(c.states))
+			for i, s := range c.states {
+				escalators[i] = PriceEscalator{CurrentState: string(s)}
+			}
+			got, _ := computeRollup(escalators, nil)
+			if got != c.want {
+				t.Errorf("want %s, got %s", c.want, got)
+			}
+		})
+	}
+}
+
+func TestComputeRollup_SumsAbsoluteMagnitudes(t *testing.T) {
+	// Positive + negative line dollars must NOT cancel — both contribute
+	// positive exposure to the rollup total. Defense-in-depth against the
+	// regression fixed in the scanner's emit path.
+	_, total := computeRollup(nil, []float64{1000.0, -250.0, 500.50})
+	want := 1750.50
+	if total != want {
+		t.Errorf("expected %.2f sum of abs values, got %.2f", want, total)
+	}
+}
+
+func TestComputeRollup_EmptyInput(t *testing.T) {
+	state, total := computeRollup(nil, nil)
+	if state != ExposureStateOK {
+		t.Errorf("empty escalators must default to OK, got %s", state)
+	}
+	if total != 0 {
+		t.Errorf("empty dollars must total 0, got %v", total)
+	}
+}

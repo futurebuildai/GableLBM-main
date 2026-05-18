@@ -41,6 +41,16 @@ type AuditWriter interface {
 	LogEntry(ctx context.Context, e AuditEntry)
 }
 
+// TxRunner is the minimal contract the scanner needs to wrap multi-write
+// operations in a single transaction. `*database.DB` satisfies it directly
+// (its `RunInTx` injects a tx into the context that downstream repository
+// methods pick up via `GetExecutor`). Defined here as an interface so the
+// pricing package doesn't import the database package and so tests can
+// stub it (or run without transaction wrapping at all by passing nil).
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 // ExposureScanner evaluates open quote lines against an updated market index
 // and writes typed events based on the snapshotted customer policy.
 type ExposureScanner struct {
@@ -49,6 +59,7 @@ type ExposureScanner struct {
 	quoteRepo  quote.QuoteLineReader
 	notifier   ExposureNotifier
 	audit      AuditWriter
+	tx         TxRunner // optional; nil disables tx wrapping (tests)
 	logger     *slog.Logger
 }
 
@@ -58,6 +69,7 @@ func NewExposureScanner(
 	quoteRepo quote.QuoteLineReader,
 	notifier ExposureNotifier,
 	audit AuditWriter,
+	tx TxRunner,
 	logger *slog.Logger,
 ) *ExposureScanner {
 	if logger == nil {
@@ -69,8 +81,19 @@ func NewExposureScanner(
 		quoteRepo:  quoteRepo,
 		notifier:   notifier,
 		audit:      audit,
+		tx:         tx,
 		logger:     logger,
 	}
+}
+
+// runInTx wraps fn in a database transaction when one is configured;
+// otherwise just runs fn directly. Callers write multi-statement units
+// inside the fn so a mid-flight failure rolls back cleanly.
+func (s *ExposureScanner) runInTx(ctx context.Context, fn func(context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.RunInTx(ctx, fn)
 }
 
 // OnMarketIndexUpdated is the primary entry point — invoked synchronously by
@@ -289,84 +312,98 @@ func (s *ExposureScanner) evaluateOne(
 		ActorRole:            "scanner",
 		IdempotencyKey:       idemKey,
 	}
-	inserted, err := s.exposure.InsertEvent(ctx, ev)
+	// Wrap the entire write path — event insert, escalator state, price
+	// mutation, quote-total recompute, and quote rollup — in a single
+	// transaction so a mid-flight failure rolls back cleanly. Without this
+	// wrapping, a `RecomputeQuoteTotal` failure after `UpdateLineUnitPrice`
+	// would leave the customer contractually committed to a unit price the
+	// quote total doesn't reflect.
+	//
+	// Idempotency: if InsertEvent reports `inserted=false` (key collision),
+	// we commit the no-op tx and skip downstream writes. Subsequent state
+	// changes are gated on `inserted=true`.
+	var inserted bool
+	err := s.runInTx(ctx, func(txCtx context.Context) error {
+		ins, err := s.exposure.InsertEvent(txCtx, ev)
+		if err != nil {
+			return fmt.Errorf("scanner: insert event: %w", err)
+		}
+		inserted = ins
+		if !inserted {
+			return nil
+		}
+
+		if err := s.exposure.UpdateEscalatorState(txCtx, pe.ID, string(newState), now); err != nil {
+			return fmt.Errorf("scanner: update escalator state: %w", err)
+		}
+
+		if mutatePrice {
+			newPrice := pe.BasePrice * (currentIndex / baseIndex)
+			newPrice = math.Round(newPrice*10000) / 10000
+			if err := s.quoteRepo.UpdateLineUnitPrice(txCtx, *pe.QuoteLineID, newPrice); err != nil {
+				return fmt.Errorf("scanner: update line price: %w", err)
+			}
+			if err := s.quoteRepo.RecomputeQuoteTotal(txCtx, ewc.QuoteID); err != nil {
+				return fmt.Errorf("scanner: recompute total: %w", err)
+			}
+		}
+
+		if err := s.rollupQuote(txCtx, ewc.QuoteID, now); err != nil {
+			return fmt.Errorf("scanner: rollup quote: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("scanner: insert event: %w", err)
+		return 0, err
 	}
 	if !inserted {
-		// Idempotency dedup — event already written; no state changes either.
 		return 0, nil
 	}
 
-	// Update per-line state.
-	if err := s.exposure.UpdateEscalatorState(ctx, pe.ID, string(newState), now); err != nil {
-		return 1, fmt.Errorf("scanner: update escalator state: %w", err)
-	}
-
-	// AUTO_ESCALATE: mutate the quote line price and recompute the quote total.
-	if mutatePrice {
-		newPrice := pe.BasePrice * (currentIndex / baseIndex)
-		newPrice = math.Round(newPrice*10000) / 10000
-		if err := s.quoteRepo.UpdateLineUnitPrice(ctx, *pe.QuoteLineID, newPrice); err != nil {
-			return 1, fmt.Errorf("scanner: update line price: %w", err)
-		}
-		if err := s.quoteRepo.RecomputeQuoteTotal(ctx, ewc.QuoteID); err != nil {
-			return 1, fmt.Errorf("scanner: recompute total: %w", err)
-		}
-	}
-
-	// Roll up the quote-level exposure state and dollars.
-	if err := s.rollupQuote(ctx, ewc.QuoteID, now); err != nil {
-		return 1, fmt.Errorf("scanner: rollup quote: %w", err)
-	}
-
-	// Audit + notification (best-effort; failures do not roll back).
+	// Audit + notification fire AFTER commit so an external-system failure
+	// can't roll back persisted state, and a persistence-layer rollback
+	// can't leave dangling notifications. These are best-effort.
 	s.writeAudit(ctx, ev)
 	s.notify(ctx, eventType, ewc, indexCode, exposureDollars, deltaPct, pe.BasePrice, baseIndex, currentIndex)
 
 	return 1, nil
 }
 
+// computeRollup is a pure function over escalator states + per-line
+// exposure dollars. Worst state wins; totals are summed unsigned magnitudes
+// (each value already abs-rounded by the event-emitter). Exported as
+// package-private to make the rollup logic independently testable from the
+// I/O orchestration in rollupQuote.
+func computeRollup(escalators []PriceEscalator, perLineDollars []float64) (ExposureState, float64) {
+	worst := ExposureStateOK
+	for _, pe := range escalators {
+		st := ExposureState(pe.CurrentState)
+		if stateRank(st) > stateRank(worst) {
+			worst = st
+		}
+	}
+	total := 0.0
+	for _, v := range perLineDollars {
+		total += math.Abs(v)
+	}
+	total = math.Round(total*100) / 100
+	return worst, total
+}
+
 // rollupQuote updates the denormalized quotes.exposure_state /
 // exposure_dollars from the line-level escalator rows. Worst state wins
-// across the active escalators on the quote.
+// across the active escalators on the quote. I/O glue around computeRollup.
 func (s *ExposureScanner) rollupQuote(ctx context.Context, quoteID uuid.UUID, t time.Time) error {
 	escalators, err := s.escalators.ListEscalatorsForQuote(ctx, quoteID)
 	if err != nil {
 		return err
 	}
-
-	worstState := ExposureStateOK
-	totalExposure := 0.0
-	for _, pe := range escalators {
-		st := ExposureState(pe.CurrentState)
-		if stateRank(st) > stateRank(worstState) {
-			worstState = st
-		}
-	}
-	// Sum exposure dollars from the most-recent event per line.
-	// For v1 we use a simpler approximation: scan all per-line states and
-	// query the latest delta from the line's escalator. This avoids a
-	// separate aggregation table.
-	for _, pe := range escalators {
-		if pe.BaseIndexValue == nil || *pe.BaseIndexValue <= 0 || pe.MarketIndexID == nil {
-			continue
-		}
-		idx, err := s.escalators.GetMarketIndex(ctx, *pe.MarketIndexID)
-		if err != nil || idx == nil {
-			continue
-		}
-		ratio := (idx.CurrentValue - *pe.BaseIndexValue) / *pe.BaseIndexValue
-		// Line quantity isn't joined here; we use a fallback approximation —
-		// the per-line dollars are persisted on the event row, so for the
-		// rollup we sum across recent events instead. v1 uses 0 fallback.
-		_ = ratio
-	}
-	// Use the sum of exposure_dollars from the latest event per line.
-	// Lightweight implementation: leverage the per-quote events list.
-	totalExposure = s.sumLatestExposurePerLine(ctx, quoteID)
-
-	return s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(worstState), totalExposure, t)
+	// sumLatestExposurePerLine already collapses to a single unsigned dollar
+	// total — feed it through computeRollup as a single-element slice so the
+	// pure function remains the only place that owns the math.
+	total := s.sumLatestExposurePerLine(ctx, quoteID)
+	worst, total := computeRollup(escalators, []float64{total})
+	return s.quoteRepo.UpdateQuoteExposure(ctx, quoteID, string(worst), total, t)
 }
 
 func (s *ExposureScanner) sumLatestExposurePerLine(ctx context.Context, quoteID uuid.UUID) float64 {

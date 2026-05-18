@@ -144,6 +144,12 @@ BEGIN
             CHECK (price_escalation_policy IN ('AUTO_ESCALATE','FLAG_FOR_REQUOTE','REQUIRE_ACK'));
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'customers_escalation_threshold_check') THEN
+        -- Industry-typical thresholds sit between 1–10% for lumber. Upper bound
+        -- of 50 is intentionally conservative — beyond that, the customer is
+        -- effectively opting out of escalator-driven re-quote (and likely wants
+        -- a different deal structure). If you need to model "stop-loss at
+        -- 100%" semantics, drop this CHECK in a follow-up migration rather
+        -- than raising the ceiling.
         ALTER TABLE customers ADD CONSTRAINT customers_escalation_threshold_check
             CHECK (escalation_threshold_pct > 0 AND escalation_threshold_pct <= 50);
     END IF;
