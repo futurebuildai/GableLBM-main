@@ -687,12 +687,12 @@ func main() {
 		Name, License, Phone, Email, CDLClass, CDLExpiry, HireDate string
 	}
 	drvs := []driver{
-		{"Mike Johnson", "BC-CDL-88421", "250-555-4001", "mike.j@gable.com", "1", "2026-11-15", "2019-03-01"},
-		{"Carlos Rivera", "BC-CDL-77332", "250-555-4002", "carlos.r@gable.com", "3", "2027-02-28", "2020-06-15"},
-		{"Dave Thompson", "BC-CDL-66243", "250-555-4003", "dave.t@gable.com", "1", "2026-08-30", "2018-01-10"},
-		{"Jake Wilson", "BC-CDL-55154", "250-555-4004", "jake.w@gable.com", "3", "2027-05-15", "2021-09-20"},
-		{"Sarah Mitchell", "BC-CDL-44065", "250-555-4005", "sarah.m@gable.com", "1", "2027-01-20", "2022-04-15"},
-		{"Tommy Nguyen", "BC-CDL-33976", "250-555-4006", "tommy.n@gable.com", "5", "2026-12-01", "2023-01-08"},
+		{"Ryan MacKenzie", "BC-CDL-88421", "250-555-4001", "ryan.m@gablelumber.ca", "1", "2026-11-15", "2019-03-01"},
+		{"Daniel Sandhu", "BC-CDL-77332", "250-555-4002", "daniel.s@gablelumber.ca", "3", "2027-02-28", "2020-06-15"},
+		{"Connor Tremblay", "BC-CDL-66243", "250-555-4003", "connor.t@gablelumber.ca", "1", "2026-08-30", "2018-01-10"},
+		{"Marc Cardinal", "BC-CDL-55154", "250-555-4004", "marc.c@gablelumber.ca", "3", "2027-05-15", "2021-09-20"},
+		{"Brendan Lee", "BC-CDL-44065", "250-555-4005", "brendan.l@gablelumber.ca", "1", "2027-01-20", "2022-04-15"},
+		{"Tyler Beaudry", "BC-CDL-33976", "250-555-4006", "tyler.b@gablelumber.ca", "5", "2026-12-01", "2023-01-08"},
 	}
 	driverIDs := make([]uuid.UUID, 0)
 	for _, d := range drvs {
