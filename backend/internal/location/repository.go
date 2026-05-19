@@ -14,11 +14,15 @@ import (
 var ErrNotFound = errors.New("location not found")
 
 // locationColumns lists the columns selected by every SELECT so the scanner
-// stays in sync with model.Location.
+// stays in sync with model.Location. Nullable string columns are COALESCEd to
+// '' because the model uses non-pointer string fields (non-branch rows leave
+// branch-only metadata NULL in the DB).
 const locationColumns = `
-    id, parent_id, path, type, code, description,
-    name, address, city, state, zip, phone,
-    tax_jurisdiction_code, default_tax_rate, timezone, active, branch_id,
+    id, parent_id, path, type, code, COALESCE(description, ''),
+    COALESCE(name, ''), COALESCE(address, ''), COALESCE(city, ''),
+    COALESCE(state, ''), COALESCE(zip, ''), COALESCE(phone, ''),
+    COALESCE(tax_jurisdiction_code, ''), default_tax_rate,
+    COALESCE(timezone, ''), active, branch_id,
     created_at, updated_at
 `
 
