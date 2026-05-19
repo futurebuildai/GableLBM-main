@@ -1027,13 +1027,19 @@ func main() {
 	fmt.Println("Seed: Portal Users (demo@kelbrook.ca / okhomes@gable.com / missionhill@gable.com, password: 'password')")
 
 	// =========================================================================
-	// 22. OFFLINE POS SYNC LOGS
+	// 22. POS REGISTERS + OFFLINE POS SYNC LOGS
 	// =========================================================================
+	// POSTerminal.ts hardcodes the register id "REG-01"; without a row in
+	// pos_registers, /api/v1/pos/transactions fails with "failed to resolve
+	// register branch".
+	db.Exec(`INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
+		VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
+		ON CONFLICT (id) DO NOTHING`, kelMainID.String())
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
-		VALUES ('sync-batch-001', 'REG-1', 42, 0, 0, NOW() - interval '2 hours')`)
+		VALUES ('sync-batch-001', 'REG-01', 42, 0, 0, NOW() - interval '2 hours')`)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
-		VALUES ('sync-batch-002', 'REG-2', 15, 2, 0, NOW() - interval '30 minutes')`)
-	fmt.Println("Seed: Offline POS Sync Logs")
+		VALUES ('sync-batch-002', 'REG-01', 15, 2, 0, NOW() - interval '30 minutes')`)
+	fmt.Println("Seed: POS Registers + Offline POS Sync Logs")
 
 	// =========================================================================
 	// 23. EDI TRADING PARTNERS
