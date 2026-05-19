@@ -18,6 +18,87 @@ func recentDate(daysBack int) time.Time {
 	return time.Now().AddDate(0, 0, -rand.Intn(daysBack))
 }
 
+// dedupeBranches collapses duplicate BRANCH rows in `locations`. Previous seed
+// runs relied on `ON CONFLICT (parent_id, code)` to be idempotent, but
+// Postgres treats NULL as distinct in unique indexes — every rerun created a
+// fresh branch row. This function picks the oldest row per code as canonical,
+// repoints every FK that references `locations.id` to it (discovered via
+// information_schema), updates `system_settings.default_branch_id`, then
+// deletes the duplicate branch rows. It also drops any pre-Kelowna legacy
+// "MAIN / Main Branch" row from before the rebrand.
+func dedupeBranches(db *sql.DB) {
+	// Drop the stale pre-Kelowna placeholder if present.
+	if _, err := db.Exec(`DELETE FROM locations WHERE type='BRANCH' AND code='MAIN' AND name='Main Branch'`); err != nil {
+		log.Printf("dedupeBranches: drop legacy MAIN: %v", err)
+	}
+
+	rows, err := db.Query(`
+		SELECT l.id::text, c.canonical_id::text
+		FROM locations l
+		JOIN (
+			SELECT DISTINCT ON (code) id AS canonical_id, code
+			FROM locations WHERE type='BRANCH'
+			ORDER BY code, created_at ASC
+		) c USING (code)
+		WHERE l.type='BRANCH' AND l.id != c.canonical_id`)
+	if err != nil {
+		log.Printf("dedupeBranches: scan dupes: %v", err)
+		return
+	}
+	type pair struct{ Dupe, Canon string }
+	var pairs []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.Dupe, &p.Canon); err == nil {
+			pairs = append(pairs, p)
+		}
+	}
+	rows.Close()
+	if len(pairs) == 0 {
+		return
+	}
+
+	fkRows, err := db.Query(`
+		SELECT tc.table_name, kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+		  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu
+		  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+		  AND ccu.table_name = 'locations' AND ccu.column_name = 'id'`)
+	if err != nil {
+		log.Printf("dedupeBranches: list FKs: %v", err)
+		return
+	}
+	type fk struct{ Table, Col string }
+	var fks []fk
+	for fkRows.Next() {
+		var f fk
+		if err := fkRows.Scan(&f.Table, &f.Col); err == nil {
+			fks = append(fks, f)
+		}
+	}
+	fkRows.Close()
+
+	for _, p := range pairs {
+		for _, f := range fks {
+			// Table/column come from Postgres metadata, not user input — safe to interpolate.
+			q := fmt.Sprintf(`UPDATE %q SET %q = $1 WHERE %q = $2`, f.Table, f.Col, f.Col)
+			if _, err := db.Exec(q, p.Canon, p.Dupe); err != nil {
+				log.Printf("dedupeBranches: repoint %s.%s: %v", f.Table, f.Col, err)
+			}
+		}
+		if _, err := db.Exec(`UPDATE system_settings SET value=$1 WHERE key='default_branch_id' AND value=$2`, p.Canon, p.Dupe); err != nil {
+			log.Printf("dedupeBranches: system_settings: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM locations WHERE id=$1`, p.Dupe); err != nil {
+			log.Printf("dedupeBranches: delete dupe %s: %v", p.Dupe, err)
+		}
+	}
+	log.Printf("Seed: dedupeBranches collapsed %d duplicate branch rows", len(pairs))
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -52,20 +133,45 @@ func main() {
 		{"WK", "West Kelowna Satellite", "2475 Dobbin Rd", "West Kelowna", "BC", "V4T 2E9", "250-555-1100", "BC", 0.12},
 		{"LK", "Lake Country Outpost", "11852 Highway 97", "Lake Country", "BC", "V4V 1E2", "250-555-1200", "BC", 0.12},
 	}
+	// One-time cleanup: previous seed runs created duplicate BRANCH rows because
+	// Postgres treats NULL parent_id as distinct in unique constraints. Pick the
+	// canonical (oldest) branch per code, repoint any descendants / inventory /
+	// stock_moves / orders / settings to it, then drop the dupes. Also drop any
+	// stale legacy "MAIN" branch from pre-Kelowna seed runs.
+	//
+	// We do this inside the seed (rather than as a migration) so existing demo
+	// databases self-heal on the next deploy without manual psql intervention.
+	dedupeBranches(db)
+
+	// Idempotent branch upsert. We can't rely on ON CONFLICT (parent_id, code)
+	// because parent_id is NULL for branches and NULL != NULL in unique indexes.
+	// Pre-select instead: if a BRANCH with this code exists, UPDATE it; else INSERT.
 	branchIDs := make(map[string]uuid.UUID)
 	for _, b := range branches {
 		var id string
-		err := db.QueryRow(`INSERT INTO locations
-			(id, code, type, description, path, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active)
-			VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'America/Vancouver', TRUE)
-			ON CONFLICT ON CONSTRAINT locations_parent_id_code_key DO UPDATE SET
-				name=$2, description=$2, address=$3, city=$4, state=$5, zip=$6, phone=$7,
-				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone='America/Vancouver', active=TRUE
-			RETURNING id`,
-			b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate).Scan(&id)
+		err := db.QueryRow(`SELECT id FROM locations WHERE type='BRANCH' AND code=$1 LIMIT 1`, b.Code).Scan(&id)
 		if err != nil {
-			log.Printf("Branch %s: %v", b.Code, err)
-			db.QueryRow("SELECT id FROM locations WHERE code=$1 AND type='BRANCH'", b.Code).Scan(&id)
+			// Not found → insert.
+			err = db.QueryRow(`INSERT INTO locations
+				(id, code, type, description, path, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active)
+				VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'America/Vancouver', TRUE)
+				RETURNING id`,
+				b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate).Scan(&id)
+			if err != nil {
+				log.Printf("Branch %s insert: %v", b.Code, err)
+				continue
+			}
+		} else {
+			// Found → update in place.
+			_, err = db.Exec(`UPDATE locations SET
+				description=$2, name=$2, address=$3, city=$4, state=$5, zip=$6, phone=$7,
+				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone='America/Vancouver',
+				active=TRUE, updated_at=NOW()
+				WHERE id=$1`,
+				id, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate)
+			if err != nil {
+				log.Printf("Branch %s update: %v", b.Code, err)
+			}
 		}
 		if id != "" {
 			branchIDs[b.Code] = uuid.MustParse(id)
