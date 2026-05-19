@@ -18,85 +18,41 @@ func recentDate(daysBack int) time.Time {
 	return time.Now().AddDate(0, 0, -rand.Intn(daysBack))
 }
 
-// dedupeBranches collapses duplicate BRANCH rows in `locations`. Previous seed
-// runs relied on `ON CONFLICT (parent_id, code)` to be idempotent, but
-// Postgres treats NULL as distinct in unique indexes — every rerun created a
-// fresh branch row. This function picks the oldest row per code as canonical,
-// repoints every FK that references `locations.id` to it (discovered via
-// information_schema), updates `system_settings.default_branch_id`, then
-// deletes the duplicate branch rows. It also drops any pre-Kelowna legacy
-// "MAIN / Main Branch" row from before the rebrand.
+// dedupeBranches resets the locations hierarchy when prior seed runs left
+// duplicate BRANCH rows behind. The original upsert relied on
+// `ON CONFLICT (parent_id, code)`, but Postgres treats NULL as distinct in
+// unique indexes — every rerun inserted three fresh branch rows, and each of
+// those grew its own set of zone children, inventory rows, etc. In-place
+// repointing fails because duplicated child zones share a (parent_id, code)
+// constraint with the canonical branch's children.
+//
+// The pragmatic recovery on a demo database is to nuke `locations` CASCADE
+// when duplication is detected. Every location-dependent table is fully
+// rebuilt by the rest of this seed in the same run, so the demo data lands
+// exactly as if this were a brand-new database. Clean databases skip it.
 func dedupeBranches(db *sql.DB) {
 	// Drop the stale pre-Kelowna placeholder if present.
 	if _, err := db.Exec(`DELETE FROM locations WHERE type='BRANCH' AND code='MAIN' AND name='Main Branch'`); err != nil {
 		log.Printf("dedupeBranches: drop legacy MAIN: %v", err)
 	}
 
-	rows, err := db.Query(`
-		SELECT l.id::text, c.canonical_id::text
-		FROM locations l
-		JOIN (
-			SELECT DISTINCT ON (code) id AS canonical_id, code
-			FROM locations WHERE type='BRANCH'
-			ORDER BY code, created_at ASC
-		) c USING (code)
-		WHERE l.type='BRANCH' AND l.id != c.canonical_id`)
-	if err != nil {
-		log.Printf("dedupeBranches: scan dupes: %v", err)
+	var total, distinct int
+	if err := db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT code) FROM locations WHERE type='BRANCH'`).Scan(&total, &distinct); err != nil {
+		log.Printf("dedupeBranches: count: %v", err)
 		return
 	}
-	type pair struct{ Dupe, Canon string }
-	var pairs []pair
-	for rows.Next() {
-		var p pair
-		if err := rows.Scan(&p.Dupe, &p.Canon); err == nil {
-			pairs = append(pairs, p)
-		}
-	}
-	rows.Close()
-	if len(pairs) == 0 {
+	if total <= distinct {
 		return
 	}
-
-	fkRows, err := db.Query(`
-		SELECT tc.table_name, kcu.column_name
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-		  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-		JOIN information_schema.constraint_column_usage ccu
-		  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-		WHERE tc.constraint_type = 'FOREIGN KEY'
-		  AND ccu.table_name = 'locations' AND ccu.column_name = 'id'`)
-	if err != nil {
-		log.Printf("dedupeBranches: list FKs: %v", err)
+	log.Printf("Seed: dedupeBranches detected %d duplicate BRANCH rows; truncating locations CASCADE", total-distinct)
+	if _, err := db.Exec(`TRUNCATE locations CASCADE`); err != nil {
+		log.Printf("dedupeBranches: TRUNCATE locations CASCADE: %v", err)
 		return
 	}
-	type fk struct{ Table, Col string }
-	var fks []fk
-	for fkRows.Next() {
-		var f fk
-		if err := fkRows.Scan(&f.Table, &f.Col); err == nil {
-			fks = append(fks, f)
-		}
+	if _, err := db.Exec(`DELETE FROM system_settings WHERE key='default_branch_id'`); err != nil {
+		log.Printf("dedupeBranches: clear default_branch_id setting: %v", err)
 	}
-	fkRows.Close()
-
-	for _, p := range pairs {
-		for _, f := range fks {
-			// Table/column come from Postgres metadata, not user input — safe to interpolate.
-			q := fmt.Sprintf(`UPDATE %q SET %q = $1 WHERE %q = $2`, f.Table, f.Col, f.Col)
-			if _, err := db.Exec(q, p.Canon, p.Dupe); err != nil {
-				log.Printf("dedupeBranches: repoint %s.%s: %v", f.Table, f.Col, err)
-			}
-		}
-		if _, err := db.Exec(`UPDATE system_settings SET value=$1 WHERE key='default_branch_id' AND value=$2`, p.Canon, p.Dupe); err != nil {
-			log.Printf("dedupeBranches: system_settings: %v", err)
-		}
-		if _, err := db.Exec(`DELETE FROM locations WHERE id=$1`, p.Dupe); err != nil {
-			log.Printf("dedupeBranches: delete dupe %s: %v", p.Dupe, err)
-		}
-	}
-	log.Printf("Seed: dedupeBranches collapsed %d duplicate branch rows", len(pairs))
+	log.Printf("Seed: dedupeBranches reset; downstream steps will rebuild location-dependent tables")
 }
 
 func main() {
