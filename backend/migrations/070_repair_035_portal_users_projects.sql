@@ -1,12 +1,10 @@
--- Up
---
--- Note: the migration runner executes each file's contents in a single
--- transaction without splitting on `-- Up` / `-- Down` markers (see
--- backend/cmd/migrate/main.go). The original version of this file ended
--- with a "-- Down" rollback section that ran immediately after the Up,
--- silently dropping every table/column it had just created. The Down
--- statements have been removed; migration 070 re-applies any artifacts
--- that prior deployments lost as a result of this bug.
+-- Migration 035 originally contained a `-- Down` rollback section that the
+-- file-based migration runner executed alongside the Up section in the same
+-- transaction (see backend/cmd/migrate/main.go), silently dropping every
+-- artifact 035 had just created. Deployments that already ran the buggy 035
+-- have it marked as applied in `schema_migrations` and won't re-execute the
+-- fixed file. This migration idempotently re-applies the intended Up
+-- content so existing demo/staging databases self-heal on the next deploy.
 CREATE TABLE IF NOT EXISTS portal_invites (
     id UUID PRIMARY KEY,
     customer_id UUID NOT NULL REFERENCES customers(id),
