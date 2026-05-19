@@ -466,35 +466,37 @@ func main() {
 		Role  string
 	}
 	salesReps := []salesRep{
-		{"a1b2c3d4-0001-4000-8000-000000000001", "Sarah Mitchell", "sarah.m@gable.com", "250-555-5001", "Sales Manager"},
-		{"a1b2c3d4-0002-4000-8000-000000000002", "Jake Rodriguez", "jake.r@gable.com", "250-555-5002", "Sales Rep"},
-		{"a1b2c3d4-0003-4000-8000-000000000003", "Emily Chen", "emily.c@gable.com", "250-555-5003", "Account Executive"},
-		{"a1b2c3d4-0004-4000-8000-000000000004", "Marcus Williams", "marcus.w@gable.com", "250-555-5004", "Sales Rep"},
-		{"a1b2c3d4-0005-4000-8000-000000000005", "Tyler Brooks", "tyler.b@gable.com", "250-555-5005", "Sales Rep"},
-		{"a1b2c3d4-0006-4000-8000-000000000006", "Rachel Dunn", "rachel.d@gable.com", "250-555-5006", "Account Executive"},
+		{"a1b2c3d4-0001-4000-8000-000000000001", "Heather Macdonald", "heather.m@gablelumber.ca", "250-555-5001", "Sales Manager"},
+		{"a1b2c3d4-0002-4000-8000-000000000002", "Ethan Gagnon", "ethan.g@gablelumber.ca", "250-555-5002", "Sales Rep"},
+		{"a1b2c3d4-0003-4000-8000-000000000003", "Priya Brar", "priya.b@gablelumber.ca", "250-555-5003", "Account Executive"},
+		{"a1b2c3d4-0004-4000-8000-000000000004", "Cameron Fraser", "cameron.f@gablelumber.ca", "250-555-5004", "Sales Rep"},
+		{"a1b2c3d4-0005-4000-8000-000000000005", "Lucas Pelletier", "lucas.p@gablelumber.ca", "250-555-5005", "Sales Rep"},
+		{"a1b2c3d4-0006-4000-8000-000000000006", "Amanda Wong", "amanda.w@gablelumber.ca", "250-555-5006", "Account Executive"},
 	}
 	for _, sr := range salesReps {
 		db.Exec(`INSERT INTO sales_team (id, name, email, phone, role)
-			VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, sr.ID, sr.Name, sr.Email, sr.Phone, sr.Role)
+			VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email, phone=EXCLUDED.phone, role=EXCLUDED.role`,
+			sr.ID, sr.Name, sr.Email, sr.Phone, sr.Role)
 	}
 	fmt.Printf("Seed: %d Sales Team Members\n", len(salesReps))
 
 	// Salesperson-to-customer assignments.
 	custSalesperson := make(map[uuid.UUID]string)
 	spAssignments := map[string]string{
-		"Okanagan Homes Ltd":         "a1b2c3d4-0001-4000-8000-000000000001", // Sarah Mitchell - top account
-		"Mission Hill Custom":        "a1b2c3d4-0001-4000-8000-000000000001", // Sarah Mitchell - top account
-		"Kelbrook Construction":      "a1b2c3d4-0003-4000-8000-000000000003", // Emily Chen
-		"Peachland Framing Crew":     "a1b2c3d4-0003-4000-8000-000000000003", // Emily Chen
-		"Glenmore Heritage Reno":     "a1b2c3d4-0006-4000-8000-000000000006", // Rachel Dunn
-		"Vernon Valley Construction": "a1b2c3d4-0006-4000-8000-000000000006", // Rachel Dunn
-		"Predator Ridge Renos":       "a1b2c3d4-0002-4000-8000-000000000002", // Jake Rodriguez
-		"Lake Country Builders":      "a1b2c3d4-0002-4000-8000-000000000002", // Jake Rodriguez
-		"Summerland Roofers":         "a1b2c3d4-0004-4000-8000-000000000004", // Marcus Williams
-		"Westbank Decks & Fence":     "a1b2c3d4-0004-4000-8000-000000000004", // Marcus Williams
-		"Big White Cabin Co":         "a1b2c3d4-0004-4000-8000-000000000004", // Marcus Williams
-		"Knox Mountain Landscapes":   "a1b2c3d4-0005-4000-8000-000000000005", // Tyler Brooks
-		"Okanagan DIY Owner":         "a1b2c3d4-0005-4000-8000-000000000005", // Tyler Brooks
+		"Okanagan Homes Ltd":         "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
+		"Mission Hill Custom":        "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
+		"Kelbrook Construction":      "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
+		"Peachland Framing Crew":     "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
+		"Glenmore Heritage Reno":     "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
+		"Vernon Valley Construction": "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
+		"Predator Ridge Renos":       "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
+		"Lake Country Builders":      "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
+		"Summerland Roofers":         "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
+		"Westbank Decks & Fence":     "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
+		"Big White Cabin Co":         "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
+		"Knox Mountain Landscapes":   "a1b2c3d4-0005-4000-8000-000000000005", // Lucas Pelletier
+		"Okanagan DIY Owner":         "a1b2c3d4-0005-4000-8000-000000000005", // Lucas Pelletier
 	}
 	for custName, custID := range customerIDs {
 		if spID, ok := spAssignments[custName]; ok {
