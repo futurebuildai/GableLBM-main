@@ -67,15 +67,35 @@ func (r *Repository) GetPortalConfig(ctx context.Context) (*PortalConfig, error)
 }
 
 // GetCustomerARSummary fetches balance, credit limit, and past-due amount.
+//
+// Balance is computed live from the invoices table (sum of all UNPAID/OVERDUE
+// invoice totals) rather than read from the denormalized customers.balance_due
+// column. The stored column is not maintained by the seed pipeline or the
+// invoice write paths, so reading it produced stale zeros while past_due
+// (already live-computed) reported real numbers — making the portal dashboard
+// contradict itself. Credit limit still comes from customers since it is a
+// policy value, not an accumulated balance.
 func (r *Repository) GetCustomerARSummary(ctx context.Context, customerID uuid.UUID) (balance, creditLimit, pastDue float64, err error) {
-	// Balance and credit limit from customers table
-	custQuery := `SELECT COALESCE(balance_due, 0)::float8, COALESCE(credit_limit, 0)::float8 FROM customers WHERE id = $1`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, custQuery, customerID).Scan(&balance, &creditLimit)
+	// Credit limit (policy value) from customers table.
+	creditQuery := `SELECT COALESCE(credit_limit, 0)::float8 FROM customers WHERE id = $1`
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, creditQuery, customerID).Scan(&creditLimit)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to get customer AR: %w", err)
+		return 0, 0, 0, fmt.Errorf("failed to get customer credit limit: %w", err)
 	}
 
-	// Past due: sum of unpaid/overdue invoices past their due date
+	// Current balance: sum of all open invoices (unpaid or overdue), regardless of due date.
+	balanceQuery := `
+		SELECT COALESCE(SUM(total_amount), 0)::float8
+		FROM invoices
+		WHERE customer_id = $1
+		  AND status IN ('UNPAID', 'OVERDUE')
+	`
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, balanceQuery, customerID).Scan(&balance)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to get current balance: %w", err)
+	}
+
+	// Past due: subset of the balance whose due_date is already in the past.
 	pastDueQuery := `
 		SELECT COALESCE(SUM(total_amount), 0)::float8
 		FROM invoices
