@@ -132,11 +132,29 @@ make pg-shell        # psql into the gable_postgres container
 - New endpoints under the correct prefix (`/api/v1`, `/api/portal/v1`, `/api/integration`, `/api/v1/a2a`) and wired into a `RegisterRoutes` call in `backend/cmd/server/main.go`
 
 ## Notes & Gotchas
-- The root contains a ~60 MB binary named `docker-compose` — likely a packaged tool, not source. Don't commit modifications to it
+- The root contains a ~60 MB binary named `docker-compose` — likely a packaged tool, not source. Don't commit modifications to it (it's gitignored at `/docker-compose`)
 - README.md says the frontend is "React + TypeScript + Tailwind"; it is actually **Lit 3**. Trust this file over the README for stack details
 - `.agent/workflows/development.md` references `app/src/App.tsx`; the actual route table is `app/src/routes.ts`
 - Default Postgres port in the app/config is **5434** (matches docker-compose), not 5432
 - AI features degrade gracefully when no key is configured — don't add hard failures for missing AI keys; resolve via `KeyStore` instead
+
+### Money convention is not uniform across modules
+The convention table at `Key Conventions → Database` ("cents in app code") is **the target**, not the current reality. Audit before assuming:
+
+| Surface | Wire format | Notes |
+|---|---|---|
+| ERP `/api/v1/orders`, `/api/v1/invoices` | **int64 cents** | `order/repository.go` does `dollarsToInt64Cents()` on read, `/100.0` on write. DB column is `DECIMAL(10,2)` dollars |
+| Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
+| Quotes, DailyTill, reporting | **float64 dollars** | Legacy float convention |
+| `account` module | **int64 cents** | Reads/writes `customers.balance_due` as cents — incompatible with portal's dollar interpretation of the same column |
+
+When rendering money on **ERP pages**, use `formatCents()` from `app/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.07. Portal/quotes pages already get dollars from the API and should format directly.
+
+### `customers.balance_due` is unmaintained — compute live
+The denormalized `customers.balance_due` column is **not kept in sync** by the seed pipeline or the invoice write paths. Reading it returns stale zeros for fresh seed data. The portal AR summary (`backend/internal/portal/repository.go:GetCustomerARSummary`) computes balance live as `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID', 'OVERDUE')` — mirror this pattern in any new AR surface. Don't trust the column.
+
+### Seed re-runs must use `ON CONFLICT (id) DO UPDATE`
+`backend/cmd/seed/main.go` runs on every demo/staging deploy via the DO post-deploy job. Rows seeded with `ON CONFLICT DO NOTHING` will **not** pick up future edits to names, emails, etc. Sales reps (line 468), drivers (line 689), and any other deterministic-UUID seed data use `ON CONFLICT (id) DO UPDATE SET ...` so rebrand commits actually overwrite existing demo data. If you're touching seed strings on a row that already exists in production demo, verify the upsert clause names every column you changed.
 
 ## Detailed Specs
 See `docs/architecture.md`, `docs/design-system.md`, and `docs/database-erd.md` for deeper documentation.
