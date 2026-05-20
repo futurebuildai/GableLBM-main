@@ -8,6 +8,7 @@ import { type Order, getStatusColor } from '../../types/order.ts';
 import type { OrderStatus } from '../../types/order.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import { Truck, Check, Printer, User, DollarSign, Mail, Phone } from 'lucide';
+import { formatCents } from '../../lib/utils.ts';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -182,13 +183,13 @@ export class GableOrderDetail extends LitElement {
                                                     ${line.product_name ? html`<div class="text-xs text-muted-foreground">${line.product_name}</div>` : nothing}
                                                 </td>
                                                 <td class="p-4 text-white font-mono text-right">${line.quantity}</td>
-                                                <td class="p-4 text-white font-mono text-right">$${line.price_each.toFixed(2)}</td>
+                                                <td class="p-4 text-white font-mono text-right">${formatCents(line.price_each)}</td>
                                                 <td class="p-4 text-gable-green font-mono text-right font-medium">
-                                                    $${lineTotal.toFixed(2)}
+                                                    ${formatCents(lineTotal)}
                                                 </td>
-                                                <td class="p-4 text-zinc-400 font-mono text-right">$${lineCost.toFixed(2)}</td>
+                                                <td class="p-4 text-zinc-400 font-mono text-right">${formatCents(lineCost)}</td>
                                                 <td class="p-4 font-mono text-right ${lmColor}">
-                                                    $${lineMargin.toFixed(2)}
+                                                    ${formatCents(lineMargin)}
                                                     <span class="text-xs ml-1">(${lineMarginPct.toFixed(1)}%)</span>
                                                 </td>
                                             </tr>
@@ -199,13 +200,13 @@ export class GableOrderDetail extends LitElement {
                                     <tr>
                                         <td colspan="3" class="p-4 text-right font-bold text-white uppercase">Grand Total</td>
                                         <td class="p-4 text-right font-bold text-gable-green font-mono text-lg">
-                                            $${order.total_amount.toFixed(2)}
+                                            ${formatCents(order.total_amount)}
                                         </td>
                                         <td class="p-4 text-right font-mono text-zinc-400">
-                                            $${order.total_cost.toFixed(2)}
+                                            ${formatCents(order.total_cost)}
                                         </td>
                                         <td class="p-4 text-right font-mono font-bold ${marginColor}">
-                                            $${order.total_margin.toFixed(2)}
+                                            ${formatCents(order.total_margin)}
                                         </td>
                                     </tr>
                                 </tfoot>
@@ -257,21 +258,21 @@ export class GableOrderDetail extends LitElement {
                             <div class="space-y-3 text-sm">
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Revenue</span>
-                                    <span class="text-white font-mono font-medium">$${order.total_amount.toFixed(2)}</span>
+                                    <span class="text-white font-mono font-medium">${formatCents(order.total_amount)}</span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Cost</span>
-                                    <span class="text-white font-mono">$${order.total_cost.toFixed(2)}</span>
+                                    <span class="text-white font-mono">${formatCents(order.total_cost)}</span>
                                 </div>
                                 <div class="border-t border-white/10 pt-3 flex justify-between">
                                     <span class="text-zinc-400">Margin</span>
                                     <span class="font-mono font-bold ${marginColor}">
-                                        $${order.total_margin.toFixed(2)} (${order.margin_percent.toFixed(1)}%)
+                                        ${formatCents(order.total_margin)} (${order.margin_percent.toFixed(1)}%)
                                     </span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-zinc-400">Commission</span>
-                                    <span class="text-white font-mono">$${order.total_commission.toFixed(2)}</span>
+                                    <span class="text-white font-mono">${formatCents(order.total_commission)}</span>
                                 </div>
                             </div>
                         </div>

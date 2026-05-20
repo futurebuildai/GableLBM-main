@@ -57,8 +57,10 @@ export class ProjectDashboard extends LitElement {
         }
     }
 
-    private _formatCurrency(amount: number): string {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    // total_amount on orders/invoices arrives from the ERP API as int64 cents;
+    // divide before formatting (see app/src/lib/utils.ts formatCents).
+    private _formatCurrency(cents: number): string {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
     }
 
     private _renderItemRow(item: ProjectItem, iconData: Parameters<typeof icon>[0], colorClass: string, linkPrefix: string) {

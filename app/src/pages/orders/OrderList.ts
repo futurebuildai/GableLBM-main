@@ -7,6 +7,7 @@ import { OrderService } from '../../services/OrderService.ts';
 import { type Order, getStatusColor } from '../../types/order.ts';
 import type { OrderStatus } from '../../types/order.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { formatCents } from '../../lib/utils.ts';
 
 @customElement('gable-order-list')
 export class GableOrderList extends LitElement {
@@ -116,7 +117,7 @@ export class GableOrderList extends LitElement {
                                         </span>
                                     </td>
                                     <td class="p-4 font-mono text-right text-gable-green">
-                                        $${order.total_amount.toFixed(2)}
+                                        ${formatCents(order.total_amount)}
                                     </td>
                                     <td class="p-4 text-right">
                                         <button

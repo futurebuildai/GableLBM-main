@@ -8,6 +8,7 @@ import { ReportingService } from '../../services/ReportingService.ts';
 import type { Invoice } from '../../types/invoice.ts';
 import type { Payment, CreatePaymentRequest } from '../../types/payment.ts';
 import { Download, CreditCard, Mail, RotateCcw } from 'lucide';
+import { formatCents } from '../../lib/utils.ts';
 
 // Side-effect imports: register child custom elements
 import '../../components/invoices/PaymentModal.ts';
@@ -218,8 +219,8 @@ export class GableInvoiceDetail extends LitElement {
                                         ${line.product_name ? html`<div class="text-xs text-zinc-400">${line.product_name}</div>` : nothing}
                                     </td>
                                     <td class="px-6 py-4 text-right text-zinc-300 font-mono">${line.quantity}</td>
-                                    <td class="px-6 py-4 text-right text-zinc-300 font-mono">$${line.price_each.toFixed(2)}</td>
-                                    <td class="px-6 py-4 text-right text-white font-mono font-bold">$${(line.quantity * line.price_each).toFixed(2)}</td>
+                                    <td class="px-6 py-4 text-right text-zinc-300 font-mono">${formatCents(line.price_each)}</td>
+                                    <td class="px-6 py-4 text-right text-white font-mono font-bold">${formatCents(line.quantity * line.price_each)}</td>
                                 </tr>
                             `)}
                         </tbody>
@@ -227,16 +228,16 @@ export class GableInvoiceDetail extends LitElement {
                             ${invoice.subtotal > 0 && invoice.subtotal !== invoice.total_amount ? html`
                                 <tr>
                                     <td colspan="3" class="px-6 py-2 text-right text-zinc-400">Subtotal</td>
-                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">$${invoice.subtotal.toFixed(2)}</td>
+                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">${formatCents(invoice.subtotal)}</td>
                                 </tr>
                                 <tr>
                                     <td colspan="3" class="px-6 py-2 text-right text-zinc-400">Tax (${(invoice.tax_rate * 100).toFixed(2)}%)</td>
-                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">$${invoice.tax_amount.toFixed(2)}</td>
+                                    <td class="px-6 py-2 text-right text-zinc-300 font-mono">${formatCents(invoice.tax_amount)}</td>
                                 </tr>
                             ` : nothing}
                             <tr>
                                 <td colspan="3" class="px-6 py-4 text-right text-zinc-400 font-bold uppercase">Total Due</td>
-                                <td class="px-6 py-4 text-right text-emerald-500 font-bold font-mono text-xl">$${invoice.total_amount.toFixed(2)}</td>
+                                <td class="px-6 py-4 text-right text-emerald-500 font-bold font-mono text-xl">${formatCents(invoice.total_amount)}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -247,7 +248,7 @@ export class GableInvoiceDetail extends LitElement {
                     <div class="bg-zinc-900 rounded-lg border border-zinc-800 overflow-hidden">
                         <div class="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
                             <h3 class="text-zinc-100 font-bold">Payment History</h3>
-                            <span class="text-zinc-400 text-sm">Paid: <span class="text-green-400 font-mono">$${totalPaid.toFixed(2)}</span></span>
+                            <span class="text-zinc-400 text-sm">Paid: <span class="text-green-400 font-mono">${formatCents(totalPaid)}</span></span>
                         </div>
                         <table class="w-full text-left text-sm" aria-label="Payment history">
                             <thead class="bg-zinc-950 text-zinc-400 uppercase text-xs">
@@ -264,7 +265,7 @@ export class GableInvoiceDetail extends LitElement {
                                         <td class="px-6 py-4 text-zinc-300">${new Date(p.created_at).toLocaleString()}</td>
                                         <td class="px-6 py-4 text-zinc-300 font-bold">${p.method}</td>
                                         <td class="px-6 py-4 text-zinc-400 font-mono text-xs">${p.reference || '-'}</td>
-                                        <td class="px-6 py-4 text-right text-white font-mono font-bold">$${p.amount.toFixed(2)}</td>
+                                        <td class="px-6 py-4 text-right text-white font-mono font-bold">${formatCents(p.amount)}</td>
                                     </tr>
                                 `)}
                             </tbody>

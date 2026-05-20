@@ -6,6 +6,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ClipboardList, ChevronRight, Package, Clock, User } from 'lucide';
 import { OrderService } from '../../services/OrderService';
 import type { Order } from '../../types/order';
+import { formatCents } from '../../lib/utils.ts';
 
 @customElement('gable-pick-queue')
 export class PickQueue extends LitElement {
@@ -90,7 +91,7 @@ export class PickQueue extends LitElement {
                                             ${order.lines?.length || '?'} items
                                         </div>
                                         <div class="text-xs font-mono text-zinc-400">
-                                            $${order.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            ${formatCents(order.total_amount)}
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-1 text-[10px] text-zinc-500">
