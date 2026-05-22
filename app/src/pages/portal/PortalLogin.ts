@@ -21,6 +21,20 @@ export class PortalLogin extends LitElement {
         PortalService.getConfig()
             .then(c => { this.config = c; })
             .catch(() => { /* Ignore — show default branding */ });
+
+        if (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') {
+            this.loading = true;
+            PortalService.login('demo@kelbrook.ca', 'password')
+                .then(resp => {
+                    localStorage.setItem('portal_config', JSON.stringify(resp.config));
+                    localStorage.setItem('portal_user', JSON.stringify(resp.user));
+                    router.replace('/portal');
+                })
+                .catch(err => {
+                    this.error = 'Dev Mode auto-login failed: ' + (err instanceof Error ? err.message : String(err));
+                    this.loading = false;
+                });
+        }
     }
 
     private async _handleSubmit(e: Event) {

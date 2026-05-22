@@ -202,10 +202,16 @@ export class POSTerminal extends LitElement {
       this._completedTransaction = null;
       this._tenders = [];
       this._showTenderInput = false;
-      const cashierId = localStorage.getItem('user_id') || '';
+      let cashierId = localStorage.getItem('user_id') || '';
       if (!cashierId) {
-        this._error = 'No cashier ID found. Please log in again.';
-        return;
+        if (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') {
+          cashierId = '11111111-1111-1111-1111-111111111111';
+          localStorage.setItem('user_id', cashierId);
+          localStorage.setItem('user_role', 'cashier');
+        } else {
+          this._error = 'No cashier ID found. Please log in again.';
+          return;
+        }
       }
       const customerID = this._selectedCustomer?.id;
       const tx = await posService.startTransaction('REG-01', cashierId, customerID);
