@@ -254,7 +254,7 @@ func (r *PostgresRepository) CreateSavedReport(ctx context.Context, report *Save
 	query := `
 INSERT INTO saved_reports (name, description, entity_type, definition_json, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, created_at, updated_at
+RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.CreatedBy).
@@ -267,7 +267,7 @@ RETURNING id, created_at, updated_at
 
 func (r *PostgresRepository) GetSavedReport(ctx context.Context, id string) (*SavedReport, error) {
 	query := `
-SELECT id, name, description, entity_type, definition_json, created_by, created_at, updated_at
+SELECT id, name, description, entity_type, definition_json, created_by, created_at::text, updated_at::text
 FROM saved_reports
 WHERE id = $1
 `
@@ -283,7 +283,7 @@ WHERE id = $1
 
 func (r *PostgresRepository) ListSavedReports(ctx context.Context) ([]SavedReport, error) {
 	query := `
-SELECT id, name, description, entity_type, definition_json, created_by, created_at, updated_at
+SELECT id, name, description, entity_type, definition_json, created_by, created_at::text, updated_at::text
 FROM saved_reports
 ORDER BY created_at DESC
 `
@@ -311,7 +311,7 @@ func (r *PostgresRepository) UpdateSavedReport(ctx context.Context, report *Save
 UPDATE saved_reports
 SET name = $1, description = $2, entity_type = $3, definition_json = $4, updated_at = NOW()
 WHERE id = $5
-RETURNING updated_at
+RETURNING updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		report.Name, report.Description, report.EntityType, report.DefinitionJSON, report.ID).
@@ -332,7 +332,7 @@ func (r *PostgresRepository) CreateReportSchedule(ctx context.Context, schedule 
 	query := `
 INSERT INTO report_schedules (report_id, cron_expression, recipients, status)
 VALUES ($1, $2, $3, $4)
-RETURNING id, created_at, updated_at
+RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status).
@@ -345,7 +345,7 @@ RETURNING id, created_at, updated_at
 
 func (r *PostgresRepository) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
 	query := `
-SELECT id, report_id, cron_expression, recipients, status, last_run_at, next_run_at, created_at, updated_at
+SELECT id, report_id, cron_expression, recipients, status, last_run_at::text, next_run_at::text, created_at::text, updated_at::text
 FROM report_schedules
 ORDER BY created_at DESC
 `
