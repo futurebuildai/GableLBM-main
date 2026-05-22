@@ -387,6 +387,7 @@ func main() {
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
+	posSvc.WithTaxRate(0.12) // BC: GST 5% + PST 7% on building materials
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 

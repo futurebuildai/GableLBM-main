@@ -40,8 +40,15 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 
 	query := `
 		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
-		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
+		FROM (
+			SELECT method, amount, created_at
+			FROM payments
+			WHERE created_at >= $1 AND created_at < $2
+			UNION ALL
+			SELECT method, amount::NUMERIC, created_at
+			FROM pos_tenders
+			WHERE created_at >= $1 AND created_at < $2
+		) AS combined
 		GROUP BY method
 	`
 

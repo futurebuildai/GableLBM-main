@@ -10,7 +10,9 @@ import { icon } from '../../lib/icons.ts';
 import {
   LayoutDashboard, LayoutGrid, Package, Truck, FileText,
   Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search,
-  ShoppingBag, Store, BookOpen, Building2
+  ShoppingBag, Store, BookOpen, Building2, BarChart3,
+  FolderOpen, Clock, Receipt, Landmark, GitCompareArrows,
+  TrendingUp, Scale
 } from 'lucide';
 
 @customElement('gable-app-shell')
@@ -115,7 +117,16 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/millwork/configurator', Hammer, 'Millwork')}
             ${this._navItem('/dispatch', Truck, 'Logistics')}
             ${this._navItem('/fleet', Settings, 'Fleet')}
+
+            <div class="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+              ${this._sidebarOpen ? 'Reports' : nothing}
+            </div>
+
+            ${this._navItem('/reports/builder', BarChart3, 'Report Builder')}
+            ${this._navItem('/reports/saved', FolderOpen, 'Saved Reports')}
             ${this._navItem('/reports/daily-till', LayoutDashboard, 'Daily Till')}
+            ${this._navItem('/reports/ar-aging', Clock, 'AR Aging')}
+            ${this._navItem('/reports/customer-statement', Receipt, 'Customer Statement')}
 
             <div class="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
               ${this._sidebarOpen ? 'Accounting' : nothing}
@@ -124,6 +135,10 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/accounting/chart-of-accounts', BookOpen, 'Chart of Accounts')}
             ${this._navItem('/accounting/journal-entries', FileText, 'Journal Entries')}
             ${this._navItem('/accounting/trial-balance', LayoutDashboard, 'Trial Balance')}
+            ${this._navItem('/accounting/profit-and-loss', TrendingUp, 'Profit & Loss')}
+            ${this._navItem('/accounting/balance-sheet', Scale, 'Balance Sheet')}
+            ${this._navItem('/accounting/bank-reconciliation', Landmark, 'Bank Reconciliation')}
+            ${this._navItem('/accounting/po-matching', GitCompareArrows, 'PO Matching')}
           </nav>
 
           <!-- Footer -->

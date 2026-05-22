@@ -3,6 +3,8 @@ import type {
     JournalEntry,
     FiscalPeriod,
     TrialBalanceRow,
+    ProfitAndLossReport,
+    BalanceSheetReport,
     CreateAccountRequest,
     CreateJournalEntryRequest,
 } from '../types/gl';
@@ -78,6 +80,25 @@ export async function fetchTrialBalance(asOfDate?: string): Promise<TrialBalance
     const params = asOfDate ? `?as_of=${asOfDate}` : '';
     const res = await fetchWithAuth(`${API}/api/v1/gl/trial-balance${params}`);
     if (!res.ok) throw new Error('Failed to fetch trial balance');
+    return res.json();
+}
+
+// --- Financial Statements ---
+
+export async function fetchProfitAndLoss(startDate?: string, endDate?: string): Promise<ProfitAndLossReport> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('start', startDate);
+    if (endDate) params.set('end', endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetchWithAuth(`${API}/api/v1/gl/profit-and-loss${qs}`);
+    if (!res.ok) throw new Error('Failed to fetch profit and loss report');
+    return res.json();
+}
+
+export async function fetchBalanceSheet(asOfDate?: string): Promise<BalanceSheetReport> {
+    const params = asOfDate ? `?as_of=${asOfDate}` : '';
+    const res = await fetchWithAuth(`${API}/api/v1/gl/balance-sheet${params}`);
+    if (!res.ok) throw new Error('Failed to fetch balance sheet');
     return res.json();
 }
 

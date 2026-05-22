@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/transactions", guard(h.StartTransaction))
 	mux.HandleFunc("GET /api/v1/pos/transactions/{id}", guard(h.GetTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/items", guard(h.AddItem))
+	mux.HandleFunc("PUT /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.UpdateItemQuantity))
 	mux.HandleFunc("DELETE /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.RemoveItem))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/complete", guard(h.CompleteTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
@@ -143,6 +144,35 @@ func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.service.RemoveItem(r.Context(), txID, itemID)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to remove item", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tx)
+}
+
+func (h *Handler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request) {
+	txID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid transaction ID", http.StatusBadRequest, err)
+		return
+	}
+
+	itemID, err := uuid.Parse(r.PathValue("itemId"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid item ID", http.StatusBadRequest, err)
+		return
+	}
+
+	var req UpdateItemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	tx, err := h.service.UpdateItemQuantity(r.Context(), txID, itemID, req.Quantity)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to update item quantity", http.StatusUnprocessableEntity, err)
 		return
 	}
 

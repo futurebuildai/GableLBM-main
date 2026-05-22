@@ -27,6 +27,10 @@ type Repository interface {
 	// Trial Balance
 	GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error)
 
+	// Financial Statements
+	GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error)
+	GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error)
+
 	// Fiscal Periods
 	ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error)
 	GetFiscalPeriodForDate(ctx context.Context, date time.Time) (*FiscalPeriod, error)
@@ -339,6 +343,181 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 		result = append(result, row)
 	}
 	return result, nil
+}
+
+// --- Financial Statements ---
+
+func (r *PostgresRepository) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+	query := `
+		SELECT a.id, a.code, a.name, a.type,
+		       COALESCE(SUM(l.debit), 0) AS total_debit,
+		       COALESCE(SUM(l.credit), 0) AS total_credit
+		FROM gl_accounts a
+		JOIN gl_journal_lines l ON l.account_id = a.id
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		WHERE e.status = 'POSTED'
+		  AND e.entry_date >= $1::date
+		  AND e.entry_date <= $2::date
+		  AND a.type IN ('REVENUE', 'EXPENSE')
+		  AND a.is_active = TRUE
+		GROUP BY a.id, a.code, a.name, a.type
+		ORDER BY a.code
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get profit and loss: %w", err)
+	}
+	defer rows.Close()
+
+	report := &ProfitAndLossReport{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Revenue:   []AccountLineItem{},
+		COGS:      []AccountLineItem{},
+		Expenses:  []AccountLineItem{},
+	}
+
+	for rows.Next() {
+		var accountID uuid.UUID
+		var code, name, accountType string
+		var debitFloat, creditFloat float64
+		if err := rows.Scan(&accountID, &code, &name, &accountType, &debitFloat, &creditFloat); err != nil {
+			return nil, fmt.Errorf("failed to scan P&L row: %w", err)
+		}
+
+		item := AccountLineItem{
+			AccountID:   accountID.String(),
+			AccountCode: code,
+			AccountName: name,
+		}
+
+		switch accountType {
+		case AccountTypeRevenue:
+			// Revenue has credit normal balance: amount = credit - debit
+			item.Amount = int64((creditFloat-debitFloat)*100.0 + 0.5)
+			report.Revenue = append(report.Revenue, item)
+			report.TotalRevenue += item.Amount
+		case AccountTypeExpense:
+			// Expense has debit normal balance: amount = debit - credit
+			item.Amount = int64((debitFloat-creditFloat)*100.0 + 0.5)
+			// COGS accounts have codes starting with "50"
+			if len(code) >= 2 && code[:2] == "50" {
+				report.COGS = append(report.COGS, item)
+				report.TotalCOGS += item.Amount
+			} else {
+				report.Expenses = append(report.Expenses, item)
+				report.TotalExpenses += item.Amount
+			}
+		}
+	}
+
+	report.GrossProfit = report.TotalRevenue - report.TotalCOGS
+	report.NetIncome = report.GrossProfit - report.TotalExpenses
+
+	return report, nil
+}
+
+func (r *PostgresRepository) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+	// Query balance sheet accounts (ASSET, LIABILITY, EQUITY)
+	bsQuery := `
+		SELECT a.id, a.code, a.name, a.type,
+		       COALESCE(SUM(l.debit), 0) AS total_debit,
+		       COALESCE(SUM(l.credit), 0) AS total_credit
+		FROM gl_accounts a
+		JOIN gl_journal_lines l ON l.account_id = a.id
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		WHERE e.status = 'POSTED'
+		  AND e.entry_date <= $1::date
+		  AND a.type IN ('ASSET', 'LIABILITY', 'EQUITY')
+		  AND a.is_active = TRUE
+		GROUP BY a.id, a.code, a.name, a.type
+		ORDER BY a.code
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, bsQuery, asOfDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance sheet: %w", err)
+	}
+	defer rows.Close()
+
+	report := &BalanceSheetReport{
+		AsOfDate:    asOfDate,
+		Assets:      []AccountLineItem{},
+		Liabilities: []AccountLineItem{},
+		Equity:      []AccountLineItem{},
+	}
+
+	for rows.Next() {
+		var accountID uuid.UUID
+		var code, name, accountType string
+		var debitFloat, creditFloat float64
+		if err := rows.Scan(&accountID, &code, &name, &accountType, &debitFloat, &creditFloat); err != nil {
+			return nil, fmt.Errorf("failed to scan balance sheet row: %w", err)
+		}
+
+		item := AccountLineItem{
+			AccountID:   accountID.String(),
+			AccountCode: code,
+			AccountName: name,
+		}
+
+		switch accountType {
+		case AccountTypeAsset:
+			// Assets have debit normal balance: balance = debit - credit
+			item.Amount = int64((debitFloat-creditFloat)*100.0 + 0.5)
+			report.Assets = append(report.Assets, item)
+			report.TotalAssets += item.Amount
+		case AccountTypeLiability:
+			// Liabilities have credit normal balance: balance = credit - debit
+			item.Amount = int64((creditFloat-debitFloat)*100.0 + 0.5)
+			report.Liabilities = append(report.Liabilities, item)
+			report.TotalLiabilities += item.Amount
+		case AccountTypeEquity:
+			// Equity has credit normal balance: balance = credit - debit
+			item.Amount = int64((creditFloat-debitFloat)*100.0 + 0.5)
+			report.Equity = append(report.Equity, item)
+			report.TotalEquity += item.Amount
+		}
+	}
+
+	// Calculate retained earnings from revenue - expenses to date
+	reQuery := `
+		SELECT a.type,
+		       COALESCE(SUM(l.debit), 0) AS total_debit,
+		       COALESCE(SUM(l.credit), 0) AS total_credit
+		FROM gl_accounts a
+		JOIN gl_journal_lines l ON l.account_id = a.id
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		WHERE e.status = 'POSTED'
+		  AND e.entry_date <= $1::date
+		  AND a.type IN ('REVENUE', 'EXPENSE')
+		  AND a.is_active = TRUE
+		GROUP BY a.type
+	`
+	reRows, err := r.db.GetExecutor(ctx).Query(ctx, reQuery, asOfDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get retained earnings: %w", err)
+	}
+	defer reRows.Close()
+
+	var totalRevenue, totalExpenses int64
+	for reRows.Next() {
+		var accountType string
+		var debitFloat, creditFloat float64
+		if err := reRows.Scan(&accountType, &debitFloat, &creditFloat); err != nil {
+			return nil, fmt.Errorf("failed to scan retained earnings row: %w", err)
+		}
+		switch accountType {
+		case AccountTypeRevenue:
+			totalRevenue = int64((creditFloat-debitFloat)*100.0 + 0.5)
+		case AccountTypeExpense:
+			totalExpenses = int64((debitFloat-creditFloat)*100.0 + 0.5)
+		}
+	}
+
+	report.RetainedEarnings = totalRevenue - totalExpenses
+	report.TotalEquity += report.RetainedEarnings
+
+	return report, nil
 }
 
 // --- Fiscal Periods ---

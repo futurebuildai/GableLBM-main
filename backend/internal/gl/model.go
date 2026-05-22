@@ -111,3 +111,37 @@ type TrialBalanceRow struct {
 	Debit       int64     `json:"debit"`  // Cents
 	Credit      int64     `json:"credit"` // Cents
 }
+
+// AccountLineItem is a single account line in a financial statement.
+type AccountLineItem struct {
+	AccountID   string `json:"account_id"`
+	AccountCode string `json:"account_code"`
+	AccountName string `json:"account_name"`
+	Amount      int64  `json:"amount"` // Cents
+}
+
+// ProfitAndLossReport represents an income statement for a date range.
+type ProfitAndLossReport struct {
+	StartDate     string            `json:"start_date"`
+	EndDate       string            `json:"end_date"`
+	Revenue       []AccountLineItem `json:"revenue"`
+	COGS          []AccountLineItem `json:"cogs"`
+	Expenses      []AccountLineItem `json:"expenses"`
+	TotalRevenue  int64             `json:"total_revenue"`
+	TotalCOGS     int64             `json:"total_cogs"`
+	GrossProfit   int64             `json:"gross_profit"`
+	TotalExpenses int64             `json:"total_expenses"`
+	NetIncome     int64             `json:"net_income"`
+}
+
+// BalanceSheetReport represents a balance sheet as of a specific date.
+type BalanceSheetReport struct {
+	AsOfDate         string            `json:"as_of_date"`
+	Assets           []AccountLineItem `json:"assets"`
+	Liabilities      []AccountLineItem `json:"liabilities"`
+	Equity           []AccountLineItem `json:"equity"`
+	TotalAssets      int64             `json:"total_assets"`
+	TotalLiabilities int64             `json:"total_liabilities"`
+	TotalEquity      int64             `json:"total_equity"`
+	RetainedEarnings int64             `json:"retained_earnings"`
+}

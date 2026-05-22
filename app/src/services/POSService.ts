@@ -40,6 +40,16 @@ export const posService = {
         return response.json();
     },
 
+    updateItemQuantity: async (txId: string, itemId: string, quantity: number): Promise<POSTransaction> => {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${txId}/items/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quantity }),
+        });
+        if (!response.ok) throw new Error('Failed to update item quantity');
+        return response.json();
+    },
+
     removeItem: async (txId: string, itemId: string): Promise<POSTransaction> => {
         const response = await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${txId}/items/${itemId}`, {
             method: 'DELETE',
@@ -84,4 +94,18 @@ export const posService = {
         if (!response.ok) throw new Error('Failed to search products');
         return response.json();
     },
+
+    searchCustomers: async (query: string): Promise<Array<{ id: string; name: string; account_number: string }>> => {
+        if (query.length < 2) return [];
+        const response = await fetchWithAuth(`${API_URL}/api/v1/customers?limit=10&offset=0`);
+        if (!response.ok) throw new Error('Failed to search customers');
+        const payload = await response.json();
+        const customers = Array.isArray(payload) ? payload : (payload?.data ?? []);
+        // Client-side filter since the endpoint doesn't have a search param
+        const q = query.toLowerCase();
+        return customers.filter((c: { name: string; account_number: string }) =>
+            c.name.toLowerCase().includes(q) || c.account_number.toLowerCase().includes(q)
+        );
+    },
 };
+

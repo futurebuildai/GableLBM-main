@@ -19,6 +19,7 @@ type Repository interface {
 	ListTransactions(ctx context.Context, registerID string, date time.Time) ([]TransactionSummary, error)
 
 	AddLineItem(ctx context.Context, item *POSLineItem) error
+	UpdateLineItem(ctx context.Context, txID uuid.UUID, itemID uuid.UUID, qty float64, unitPrice int64) error
 	RemoveLineItem(ctx context.Context, itemID uuid.UUID) error
 	GetLineItems(ctx context.Context, txID uuid.UUID) ([]POSLineItem, error)
 
@@ -239,6 +240,24 @@ func (r *PostgresRepository) AddLineItem(ctx context.Context, item *POSLineItem)
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add POS line item: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UpdateLineItem(ctx context.Context, txID uuid.UUID, itemID uuid.UUID, qty float64, unitPrice int64) error {
+	lineTotal := int64(float64(unitPrice)*qty + 0.5)
+	query := `
+		UPDATE pos_line_items
+		SET quantity = $1, line_total = $2
+		WHERE id = $3 AND transaction_id = $4
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
+		qty,
+		float64(lineTotal)/100.0,
+		itemID, txID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update POS line item: %w", err)
 	}
 	return nil
 }

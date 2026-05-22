@@ -84,6 +84,11 @@ type AddLineItemRequest struct {
 	UOM       string    `json:"uom"`
 }
 
+// UpdateItemRequest is sent when changing the quantity of an existing line item.
+type UpdateItemRequest struct {
+	Quantity float64 `json:"quantity"`
+}
+
 // AddTenderRequest is sent when applying a payment method.
 type AddTenderRequest struct {
 	Method    string  `json:"method"`

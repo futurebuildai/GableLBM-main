@@ -1052,6 +1052,51 @@ func main() {
 		VALUES ('Do It Best', 'DIB-111111', 'GABLE-987654', 'DIB', 'GAB', 'AS2')`)
 	fmt.Println("Seed: EDI Trading Partners")
 
+	// =========================================================================
+	// 24. SAVED REPORT TEMPLATES (Pre-built for Report Builder)
+	// =========================================================================
+	type savedReport struct {
+		Name, Desc, Entity, DefJSON string
+	}
+	savedReports := []savedReport{
+		{
+			"Monthly Sales by Customer",
+			"Invoice totals grouped by customer for the current period",
+			"invoices",
+			`{"columns":[{"field":"customer_name","label":"Customer"},{"field":"total_amount","label":"Total Sales","aggregation":"SUM"},{"field":"id","label":"Invoice Count","aggregation":"COUNT"}],"filters":[],"groupings":[{"field":"customer_name"}]}`,
+		},
+		{
+			"Slow-Moving Inventory",
+			"Products with current stock levels — sort by quantity to find slow movers",
+			"inventory",
+			`{"columns":[{"field":"product_name","label":"Product"},{"field":"quantity","label":"Qty On Hand"}],"filters":[],"groupings":[]}`,
+		},
+		{
+			"Sales by Rep",
+			"Order totals grouped by salesperson for performance tracking",
+			"orders",
+			`{"columns":[{"field":"customer_name","label":"Customer"},{"field":"total_amount","label":"Total Amount","aggregation":"SUM"},{"field":"id","label":"Order Count","aggregation":"COUNT"}],"filters":[{"field":"status","operator":"=","value":"FULFILLED"}],"groupings":[{"field":"customer_name"}]}`,
+		},
+		{
+			"Daily Revenue Trend",
+			"Invoice totals grouped by date for revenue trending",
+			"invoices",
+			`{"columns":[{"field":"created_at","label":"Date"},{"field":"total_amount","label":"Revenue","aggregation":"SUM"},{"field":"id","label":"Invoices","aggregation":"COUNT"}],"filters":[],"groupings":[{"field":"created_at"}]}`,
+		},
+		{
+			"Open Purchase Orders",
+			"All purchase orders that have not yet been fully received",
+			"purchase_orders",
+			`{"columns":[{"field":"po_number","label":"PO Number"},{"field":"vendor_name","label":"Vendor"},{"field":"status","label":"Status"},{"field":"total_amount","label":"Total Amount"},{"field":"order_date","label":"Order Date"},{"field":"expected_date","label":"Expected Date"}],"filters":[{"field":"status","operator":"!=","value":"RECEIVED"}],"groupings":[]}`,
+		},
+	}
+	for _, sr := range savedReports {
+		db.Exec(`INSERT INTO saved_reports (name, description, entity_type, definition_json, created_by)
+			VALUES ($1,$2,$3,$4::jsonb,$5)
+			ON CONFLICT DO NOTHING`, sr.Name, sr.Desc, sr.Entity, sr.DefJSON, demoUserID)
+	}
+	fmt.Printf("Seed: %d Saved Report Templates\n", len(savedReports))
+
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE LUMBER & SUPPLY (KELOWNA, BC)  ")
 	fmt.Println("==================================================")

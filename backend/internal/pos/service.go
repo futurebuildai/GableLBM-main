@@ -29,12 +29,19 @@ type Service struct {
 	invoiceSvc   *invoice.Service
 	paymentSvc   *payment.Service
 	priceCalc    PriceCalculator
+	taxRate      float64 // e.g. 0.07 for 7%; defaults to 0.0
 	logger       *slog.Logger
 }
 
 // WithPricing enables customer-specific pricing resolution for POS line items.
 func (s *Service) WithPricing(calc PriceCalculator) {
 	s.priceCalc = calc
+}
+
+// WithTaxRate sets the tax rate applied when recalculating transaction totals.
+// Pass 0.07 for 7%, etc. Default is 0.0 (no tax).
+func (s *Service) WithTaxRate(rate float64) {
+	s.taxRate = rate
 }
 
 // NewService creates a new POS service.
@@ -128,6 +135,48 @@ func (s *Service) RemoveItem(ctx context.Context, txID uuid.UUID, itemID uuid.UU
 	if err := s.repo.RemoveLineItem(ctx, itemID); err != nil {
 		return nil, err
 	}
+	return s.recalculateTotals(ctx, txID)
+}
+
+// UpdateItemQuantity changes the quantity of a line item in an OPEN transaction.
+// If newQty <= 0, the item is removed instead.
+func (s *Service) UpdateItemQuantity(ctx context.Context, txID uuid.UUID, itemID uuid.UUID, newQty float64) (*POSTransaction, error) {
+	// Validate transaction status
+	tx, err := s.repo.GetTransaction(ctx, txID)
+	if err != nil {
+		return nil, err
+	}
+	if tx.Status != TransactionStatusOpen {
+		return nil, fmt.Errorf("transaction is not open (status: %s)", tx.Status)
+	}
+
+	// If newQty <= 0, remove the item
+	if newQty <= 0 {
+		return s.RemoveItem(ctx, txID, itemID)
+	}
+
+	// Get the existing line item to read its unit price
+	items, err := s.repo.GetLineItems(ctx, txID)
+	if err != nil {
+		return nil, err
+	}
+	var unitPrice int64
+	found := false
+	for _, item := range items {
+		if item.ID == itemID {
+			unitPrice = item.UnitPrice
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("line item %s not found in transaction %s", itemID, txID)
+	}
+
+	if err := s.repo.UpdateLineItem(ctx, txID, itemID, newQty, unitPrice); err != nil {
+		return nil, err
+	}
+
 	return s.recalculateTotals(ctx, txID)
 }
 
@@ -313,8 +362,9 @@ func (s *Service) recalculateTotals(ctx context.Context, txID uuid.UUID) (*POSTr
 	}
 
 	tx.Subtotal = subtotal
-	// TODO: Calculate tax via Avalara (Sprint 29). For now, tax is $0.
-	tx.TaxAmount = 0
+	// Apply configurable tax rate (default 0.0 for backward compatibility).
+	// TODO: Replace with Avalara integration (Sprint 29).
+	tx.TaxAmount = int64(math.Round(float64(subtotal) * s.taxRate))
 	tx.Total = subtotal + tx.TaxAmount
 
 	if err := s.repo.UpdateTransaction(ctx, tx); err != nil {

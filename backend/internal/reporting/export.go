@@ -5,7 +5,15 @@ import (
 "fmt"
 "io"
 "strconv"
+"time"
 
+"github.com/johnfercher/maroto/v2"
+"github.com/johnfercher/maroto/v2/pkg/components/text"
+"github.com/johnfercher/maroto/v2/pkg/config"
+"github.com/johnfercher/maroto/v2/pkg/consts/align"
+"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
+"github.com/johnfercher/maroto/v2/pkg/core"
+"github.com/johnfercher/maroto/v2/pkg/props"
 "github.com/xuri/excelize/v2"
 )
 
@@ -93,6 +101,72 @@ return fmt.Errorf("failed to write XLSX: %w", err)
 return nil
 }
 
+// GeneratePDFReport renders the report as a PDF document using maroto v2.
+func GeneratePDFReport(w io.Writer, columns []ReportColumn, results []map[string]interface{}) error {
+	m := maroto.New(config.NewBuilder().
+		WithPageNumber().
+		Build())
+
+	// Title row
+	m.AddRow(20,
+		text.NewCol(12, "GableLBM Report", props.Text{
+			Size:  18,
+			Style: fontstyle.Bold,
+			Align: align.Center,
+		}),
+	)
+
+	// Generation date row
+	m.AddRow(10,
+		text.NewCol(12, fmt.Sprintf("Generated: %s", time.Now().Format("2006-01-02 15:04:05")), props.Text{
+			Size:  9,
+			Align: align.Right,
+			Color: &props.Color{Red: 120, Green: 120, Blue: 120},
+		}),
+	)
+
+	// Column headers
+	colSize := 12 / len(columns)
+	if colSize < 1 {
+		colSize = 1
+	}
+	var headerCols []core.Col
+	for _, col := range columns {
+		label := col.Label
+		if label == "" {
+			label = col.Field
+		}
+		if col.Aggregation != "" {
+			label = fmt.Sprintf("%s (%s)", label, col.Aggregation)
+		}
+		headerCols = append(headerCols, text.NewCol(colSize, label, props.Text{
+			Size:  9,
+			Style: fontstyle.Bold,
+		}))
+	}
+	m.AddRow(10, headerCols...)
+
+	// Data rows
+	for _, row := range results {
+		var dataCols []core.Col
+		for _, col := range columns {
+			val := formatValue(row[col.Field])
+			dataCols = append(dataCols, text.NewCol(colSize, val, props.Text{
+				Size: 8,
+			}))
+		}
+		m.AddRow(8, dataCols...)
+	}
+
+	doc, err := m.Generate()
+	if err != nil {
+		return fmt.Errorf("failed to generate PDF: %w", err)
+	}
+
+	_, err = w.Write(doc.GetBytes())
+	return err
+}
+
 func formatValue(val interface{}) string {
 if val == nil {
 return ""
@@ -112,3 +186,4 @@ default:
 return fmt.Sprintf("%v", v)
 }
 }
+

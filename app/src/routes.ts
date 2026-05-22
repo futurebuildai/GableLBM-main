@@ -77,6 +77,10 @@ export const routes: RouteConfig[] = [
   { path: '/accounting/chart-of-accounts', load: () => import('./pages/accounting/ChartOfAccounts.ts'), layout: 'erp' },
   { path: '/accounting/journal-entries', load: () => import('./pages/accounting/JournalEntries.ts'), layout: 'erp' },
   { path: '/accounting/trial-balance', load: () => import('./pages/accounting/TrialBalance.ts'), layout: 'erp' },
+  { path: '/accounting/profit-and-loss', load: () => import('./pages/accounting/ProfitAndLoss.ts'), layout: 'erp' },
+  { path: '/accounting/balance-sheet', load: () => import('./pages/accounting/BalanceSheet.ts'), layout: 'erp' },
+  { path: '/accounting/bank-reconciliation', load: () => import('./pages/accounting/BankReconciliation.ts'), layout: 'erp' },
+  { path: '/accounting/po-matching', load: () => import('./pages/accounting/POMatching.ts'), layout: 'erp' },
   // Always-available ERP dashboard (linked from the local-dev surface picker).
   { path: '/dashboard', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
   // Surface picker — mounted at `/` for:

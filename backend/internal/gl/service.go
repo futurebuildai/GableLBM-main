@@ -143,6 +143,16 @@ func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]Tr
 	return s.repo.GetTrialBalance(ctx, asOfDate)
 }
 
+// --- Financial Statements ---
+
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+	return s.repo.GetProfitAndLoss(ctx, startDate, endDate)
+}
+
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+	return s.repo.GetBalanceSheet(ctx, asOfDate)
+}
+
 // --- Fiscal Periods ---
 
 func (s *Service) ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error) {

@@ -3,6 +3,7 @@ package reporting
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -106,6 +107,7 @@ func (h *Handler) RegisterBuilderRoutes(mux *http.ServeMux, roleGuard ...func(ht
 	mux.HandleFunc("GET /api/v1/reporting/saved/{id}", guard(h.HandleGetSavedReport))
 	mux.HandleFunc("PUT /api/v1/reporting/saved/{id}", guard(h.HandleUpdateSavedReport))
 	mux.HandleFunc("DELETE /api/v1/reporting/saved/{id}", guard(h.HandleDeleteSavedReport))
+	mux.HandleFunc("POST /api/v1/reporting/saved/{id}/run", guard(h.HandleRunSavedReport))
 }
 
 func (h *Handler) HandleBuilderPreview(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +163,13 @@ contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 disposition = `attachment; filename="report.xlsx"`
 if err := ExportXLSX(&buf, req.Definition.Columns, results); err != nil {
 httputil.RespondError(w, r, "failed to export XLSX", http.StatusInternalServerError, err)
+return
+}
+case "pdf":
+contentType = "application/pdf"
+disposition = `attachment; filename="report.pdf"`
+if err := GeneratePDFReport(&buf, req.Definition.Columns, results); err != nil {
+httputil.RespondError(w, r, "failed to export PDF", http.StatusInternalServerError, err)
 return
 }
 default:
@@ -238,7 +247,42 @@ if err := h.service.DeleteSavedReport(r.Context(), id); err != nil {
 httputil.RespondError(w, r, "failed to delete saved report", http.StatusInternalServerError, err)
 return
 }
-w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) HandleRunSavedReport(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		httputil.RespondError(w, r, "saved report ID required", http.StatusBadRequest, nil)
+		return
+	}
+
+	report, err := h.service.GetSavedReport(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get saved report", http.StatusNotFound, err)
+		return
+	}
+
+	// Reconstruct ReportDefinition from definition_json
+	defBytes, err := json.Marshal(report.DefinitionJSON)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to marshal report definition", http.StatusInternalServerError, err)
+		return
+	}
+	var def ReportDefinition
+	if err := json.Unmarshal(defBytes, &def); err != nil {
+		httputil.RespondError(w, r, "failed to parse report definition", http.StatusInternalServerError, err)
+		return
+	}
+
+	results, err := h.service.ExecuteReportDefinition(r.Context(), &def, report.EntityType)
+	if err != nil {
+		httputil.RespondError(w, r, fmt.Sprintf("failed to execute saved report: %s", report.Name), http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 
 func (h *Handler) RegisterBIIntegrationRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {

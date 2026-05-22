@@ -47,6 +47,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Trial Balance
 	mux.HandleFunc("GET /api/v1/gl/trial-balance", guard(h.HandleTrialBalance))
 
+	// Financial Statements
+	mux.HandleFunc("GET /api/v1/gl/profit-and-loss", guard(h.HandleProfitAndLoss))
+	mux.HandleFunc("GET /api/v1/gl/balance-sheet", guard(h.HandleBalanceSheet))
+
 	// Fiscal Periods
 	mux.HandleFunc("GET /api/v1/gl/fiscal-periods", guard(h.HandleListFiscalPeriods))
 	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/close", guard(h.HandleCloseFiscalPeriod))
@@ -289,6 +293,65 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rows)
+}
+
+// --- Financial Statements ---
+
+func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+
+	// Default to current month if no dates provided
+	if startStr == "" {
+		now := time.Now()
+		startStr = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+	}
+	if endStr == "" {
+		endStr = time.Now().Format("2006-01-02")
+	}
+
+	// Validate date formats
+	if _, err := time.Parse("2006-01-02", startStr); err != nil {
+		httputil.RespondError(w, r, "invalid start date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+	if _, err := time.Parse("2006-01-02", endStr); err != nil {
+		httputil.RespondError(w, r, "invalid end date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+
+	report, err := h.svc.GetProfitAndLoss(r.Context(), startStr, endStr)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
+	asOfStr := r.URL.Query().Get("as_of")
+
+	// Default to today if no date provided
+	if asOfStr == "" {
+		asOfStr = time.Now().Format("2006-01-02")
+	}
+
+	// Validate date format
+	if _, err := time.Parse("2006-01-02", asOfStr); err != nil {
+		httputil.RespondError(w, r, "invalid as_of date (expected YYYY-MM-DD)", http.StatusBadRequest, err)
+		return
+	}
+
+	report, err := h.svc.GetBalanceSheet(r.Context(), asOfStr)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
 }
 
 // --- Fiscal Periods ---

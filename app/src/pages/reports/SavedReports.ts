@@ -40,66 +40,71 @@ export class SavedReports extends LitElement {
         }
     }
 
+    private _handleRun(id: string) {
+        // Navigate to builder with the report ID — the builder auto-loads and auto-runs
+        window.location.href = `/reports/builder?id=${id}`;
+    }
+
     render() {
         if (this.loading) {
-            return html`<div class="p-8">Loading reports...</div>`;
+            return html`<div class="p-8 text-white">Loading reports...</div>`;
         }
 
         return html`
             <div class="p-8">
                 <div class="flex justify-between items-center mb-6">
-                    <h1 class="text-2xl font-bold">Saved Reports</h1>
+                    <h1 class="text-2xl font-bold text-white">Saved Reports</h1>
                     <a
                         href="/reports/builder"
-                        class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
+                        class="bg-gable-green text-white px-4 py-2 rounded shadow hover:bg-gable-green/80"
                     >
                         Create New Report
                     </a>
                 </div>
 
                 ${this.error ? html`
-                    <div class="bg-red-50 text-red-700 p-4 rounded mb-6">
+                    <div class="bg-red-500/10 text-red-400 p-4 rounded mb-6">
                         ${this.error}
                     </div>
                 ` : nothing}
 
                 ${this.reports.length === 0 ? html`
-                    <div class="text-center text-gray-500 py-12 bg-white rounded shadow">
+                    <div class="text-center text-zinc-400 py-12 bg-slate-steel rounded border border-white/10">
                         <p>No reports saved yet.</p>
-                        <a href="/reports/builder" class="text-blue-600 hover:underline mt-2 inline-block">
+                        <a href="/reports/builder" class="text-gable-green hover:underline mt-2 inline-block">
                             Build your first report
                         </a>
                     </div>
                 ` : html`
-                    <div class="bg-white shadow rounded overflow-hidden">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                    <div class="bg-slate-steel border border-white/10 rounded overflow-hidden">
+                        <table class="min-w-full divide-y divide-white/5">
+                            <thead class="bg-slate-steel/50">
                                 <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entity Type</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Entity Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Description</th>
+                                    <th class="px-6 py-3 text-right text-xs font-medium text-zinc-400 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
+                            <tbody class="divide-y divide-white/5">
                                 ${this.reports.map((report) => html`
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">${report.name}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">${report.entity_type}</td>
-                                        <td class="px-6 py-4 text-sm text-gray-500 truncate max-w-xs">${report.description}</td>
+                                    <tr class="hover:bg-white/5">
+                                        <td class="px-6 py-4 whitespace-nowrap font-medium text-white">${report.name}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-zinc-400 capitalize">${report.entity_type}</td>
+                                        <td class="px-6 py-4 text-sm text-zinc-400 truncate max-w-xs">${report.description}</td>
                                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <button
-                                                class="text-indigo-600 hover:text-indigo-900 mr-4"
-                                                @click=${() => ToastService.show('Run functionality coming soon', 'info')}
+                                                class="text-gable-green hover:text-gable-green/80 mr-4"
+                                                @click=${() => this._handleRun(report.id)}
                                             >
                                                 Run
                                             </button>
-                                            <a href="/reports/builder?id=${report.id}" class="text-blue-600 hover:text-blue-900 mr-4">
+                                            <a href="/reports/builder?id=${report.id}" class="text-blueprint-blue hover:text-blueprint-blue/80 mr-4">
                                                 Edit
                                             </a>
                                             <button
                                                 @click=${() => this._handleDelete(report.id)}
-                                                class="text-red-600 hover:text-red-900"
+                                                class="text-red-400 hover:text-red-300"
                                             >
                                                 Delete
                                             </button>

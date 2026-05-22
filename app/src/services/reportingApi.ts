@@ -54,7 +54,7 @@ export const reportingApi = {
   },
 
   // Export
-  exportReport: async (entityType: string, format: 'csv' | 'xlsx', definition: ReportDefinition) => {
+  exportReport: async (entityType: string, format: 'csv' | 'xlsx' | 'pdf', definition: ReportDefinition) => {
     const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/builder/export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,5 +102,14 @@ export const reportingApi = {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error(`Delete failed`);
+  },
+
+  // Run a saved report
+  runSavedReport: async (id: string): Promise<Record<string, unknown>[]> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/saved/${id}/run`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
   }
 };

@@ -82,3 +82,36 @@ export interface CreateJournalEntryRequest {
         credit: number;
     }[];
 }
+
+// Financial Statement types
+
+export interface AccountLineItem {
+    account_id: string;
+    account_code: string;
+    account_name: string;
+    amount: number; // Cents
+}
+
+export interface ProfitAndLossReport {
+    start_date: string;
+    end_date: string;
+    revenue: AccountLineItem[];
+    cogs: AccountLineItem[];
+    expenses: AccountLineItem[];
+    total_revenue: number;
+    total_cogs: number;
+    gross_profit: number;
+    total_expenses: number;
+    net_income: number;
+}
+
+export interface BalanceSheetReport {
+    as_of_date: string;
+    assets: AccountLineItem[];
+    liabilities: AccountLineItem[];
+    equity: AccountLineItem[];
+    total_assets: number;
+    total_liabilities: number;
+    total_equity: number;
+    retained_earnings: number;
+}
