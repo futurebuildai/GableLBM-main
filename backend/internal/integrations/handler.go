@@ -52,6 +52,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// AI_LM load-management & routing integration surface
 	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehicles))
+	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
 	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
 	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
 }
@@ -399,6 +400,37 @@ func (h *Handler) ListVehicles(w http.ResponseWriter, r *http.Request) {
 			Make:              v.Make,
 			Model:             v.Model,
 			Year:              v.Year,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DriverResponse is the integration-facing driver model. AI_LM needs a valid
+// driver id to attach to each delivery_route it writes back.
+type DriverResponse struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"` // ACTIVE/INACTIVE/ON_LEAVE
+}
+
+// ListDrivers returns the fleet's drivers for AI_LM route write-back.
+func (h *Handler) ListDrivers(w http.ResponseWriter, r *http.Request) {
+	if h.deliverySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "delivery service not configured")
+		return
+	}
+	drivers, err := h.deliverySvc.ListDrivers(r.Context())
+	if err != nil {
+		slog.Error("failed to list drivers", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to list drivers")
+		return
+	}
+	resp := make([]DriverResponse, 0, len(drivers))
+	for _, d := range drivers {
+		resp = append(resp, DriverResponse{
+			ID:     d.ID.String(),
+			Name:   d.Name,
+			Status: string(d.Status),
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
