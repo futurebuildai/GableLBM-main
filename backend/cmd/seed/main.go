@@ -299,6 +299,21 @@ func main() {
 		{"2 X 4 RL Utility", "LUMBUT24RL", "LF", "Gable Lumber & Supply", "Lumber", 0.29, 0.44, 0.5, 500, 2000},
 	}
 
+	// Parametric 3D geometry (inches) for the digital-twin Load Builder. Only a
+	// few representative SKUs carry dimensions; the rest resolve as FALLBACK
+	// until a merchandiser sets them in the PIM Geometry tab. Values are nominal
+	// milled sizes (a "2x4" is the actual 1.5" x 3.5").
+	type dims struct {
+		L, W, H   float64
+		Stackable bool
+	}
+	productDims := map[string]dims{
+		"LUM-248-PREM":  {96, 3.5, 1.5, true},    // 2x4x8 SPF
+		"LUM-2410-PREM": {120, 3.5, 1.5, true},   // 2x4x10 SPF
+		"LUM-21216-NO2": {192, 11.25, 1.5, true}, // 2x12x16 Hem-Fir
+		"LUM-6612-PT":   {144, 5.5, 5.5, false},  // 6x6x12 PT post (non-stackable)
+	}
+
 	skuToID := make(map[string]uuid.UUID)
 	productPrices := make(map[string]float64)
 	for _, p := range products {
@@ -314,6 +329,12 @@ func main() {
 		pid := uuid.MustParse(id)
 		skuToID[p.SKU] = pid
 		productPrices[p.SKU] = p.Price
+		// Canonical PIM geometry for the digital-twin Load Builder, re-applied on
+		// every seed run so demo dimensions survive redeploys.
+		if d, ok := productDims[p.SKU]; ok {
+			db.Exec(`UPDATE products SET length_in=$2, width_in=$3, height_in=$4, stackable=$5, geometry_source='parametric' WHERE id=$1`,
+				pid, d.L, d.W, d.H, d.Stackable)
+		}
 		// Stock split: ~70% sits at Kelowna Main, ~20% West Kelowna, ~10% Lake Country.
 		for _, bID := range branchIDList {
 			db.Exec(`DELETE FROM inventory WHERE product_id=$1 AND location_id=$2`, pid, bID)
@@ -960,13 +981,13 @@ func main() {
 			date := recentDate(90)
 			db.Exec(`INSERT INTO gl_journal_entries (id, entry_date, memo, source, status, posted_by, created_at, updated_at)
 				VALUES ($1, $2, 'Daily Sales Auto-Entry', 'INVOICE', 'POSTED', 'System', $2, $2)`, jeID, date)
-			
+
 			amt := 10000 + rand.Intn(50000) // $100 to $500
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
 				VALUES (gen_random_uuid(), $1, $2, 'AR Debit', $3, 0)`, jeID, arID, amt)
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
 				VALUES (gen_random_uuid(), $1, $2, 'Sales Credit', 0, $3)`, jeID, revID, amt)
-				
+
 			// COGS
 			cogsAmt := int(float64(amt) * 0.7)
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
@@ -974,14 +995,14 @@ func main() {
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
 				VALUES (gen_random_uuid(), $1, $2, 'Inventory Credit', 0, $3)`, jeID, invID, cogsAmt)
 		}
-		
+
 		for i := 0; i < 5; i++ {
 			jeID := uuid.New()
 			date := recentDate(60)
 			db.Exec(`INSERT INTO gl_journal_entries (id, entry_date, memo, source, status, posted_by, created_at, updated_at)
 				VALUES ($1, $2, 'Customer Payment', 'PAYMENT', 'POSTED', 'System', $2, $2)`, jeID, date)
-			
-			amt := 5000 + rand.Intn(20000) 
+
+			amt := 5000 + rand.Intn(20000)
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
 				VALUES (gen_random_uuid(), $1, $2, 'Cash Debit', $3, 0)`, jeID, cashID, amt)
 			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
