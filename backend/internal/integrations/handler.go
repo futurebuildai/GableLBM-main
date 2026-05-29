@@ -93,9 +93,12 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 	category := r.URL.Query().Get("category")
 	query := r.URL.Query().Get("q")
 
+	// With no filter this is a bulk catalog pull (e.g. AI_LM hydrating its
+	// load-planning catalog with PIM geometry); a higher cap avoids silently
+	// truncating the catalog. Filtered search keeps the small typeahead cap.
+	limit := 20
 	if category == "" && query == "" {
-		writeError(w, http.StatusBadRequest, "category or q query parameter required")
-		return
+		limit = 1000
 	}
 
 	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0), COALESCE(p.weight_lbs, 0),
@@ -114,7 +117,7 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 		args = append(args, "%"+query+"%")
 		argIdx++
 	}
-	sqlQuery += ` ORDER BY p.sku LIMIT 20`
+	sqlQuery += fmt.Sprintf(` ORDER BY p.sku LIMIT %d`, limit)
 
 	rows, err := h.db.Pool.Query(r.Context(), sqlQuery, args...)
 	if err != nil {
