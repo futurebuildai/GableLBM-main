@@ -7,6 +7,7 @@ import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, 
 import { QuoteService } from '../../services/QuoteService.ts';
 import type { Quote, QuoteState, ParseMapItem } from '../../types/quote.ts';
 import { OrderService } from '../../services/OrderService.ts';
+import '../../components/quotes/exposure-banner.ts';
 
 type Tab = 'details' | 'original' | 'mapping';
 
@@ -464,6 +465,12 @@ export class GableQuoteDetail extends LitElement {
                         ` : nothing}
                     </div>
                 </div>
+
+                <!-- Lumber index exposure / margin erosion (self-hides when not at risk) -->
+                <gable-exposure-banner
+                    .quoteId=${quote.id}
+                    .shortId=${quote.id.slice(0, 8)}>
+                </gable-exposure-banner>
 
                 <!-- Tabs -->
                 <div class="flex gap-1 border-b border-white/10">

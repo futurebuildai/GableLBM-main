@@ -6,6 +6,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ExposureService } from '../../services/ExposureService';
 import type { ExposureRow, ExposureState } from '../../types/exposure';
 import { TrendingUp, ShieldAlert } from 'lucide';
+import '../../components/quotes/acknowledgment-modal.ts';
 
 const STATE_STYLES: Record<ExposureState, string> = {
   OK: 'text-zinc-400 bg-white/5',
@@ -25,6 +26,7 @@ export class QuoteExposurePage extends LitElement {
   @state() private loading = true;
   @state() private stateFilter = '';
   @state() private busyQuote = '';
+  @state() private ackRow: ExposureRow | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -51,20 +53,8 @@ export class QuoteExposurePage extends LitElement {
     return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
-  private async _acknowledge(row: ExposureRow) {
-    const notes = window.prompt(`Record customer acknowledgment for quote ${row.short_id}.\nEnter notes (min 10 chars):`);
-    if (notes == null) return;
-    this.busyQuote = row.quote_id;
-    try {
-      await ExposureService.acknowledge(row.quote_id, { method: 'VERBAL', notes });
-      ToastService.show('Acknowledgment recorded', 'success');
-      await this._load();
-    } catch (err) {
-      console.error(err);
-      ToastService.show('Failed to record acknowledgment', 'error');
-    } finally {
-      this.busyQuote = '';
-    }
+  private _acknowledge(row: ExposureRow) {
+    this.ackRow = row;
   }
 
   private async _requestAck(row: ExposureRow) {
@@ -94,7 +84,7 @@ export class QuoteExposurePage extends LitElement {
             Acknowledge
           </button>
         ` : nothing}
-        ${actions.includes('request-ack') ? html`
+        ${actions.includes('request_ack') ? html`
           <button
             ?disabled=${busy}
             @click=${(e: Event) => { e.stopPropagation(); this._requestAck(row); }}
@@ -192,6 +182,14 @@ export class QuoteExposurePage extends LitElement {
           </table>
         `}
       </div>
+
+      <gable-acknowledgment-modal
+        .open=${this.ackRow != null}
+        .quoteId=${this.ackRow?.quote_id ?? ''}
+        .shortId=${this.ackRow?.short_id ?? ''}
+        @close=${() => { this.ackRow = null; }}
+        @acknowledged=${() => { this.ackRow = null; this._load(); }}>
+      </gable-acknowledgment-modal>
     `;
   }
 }

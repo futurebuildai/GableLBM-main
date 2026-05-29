@@ -1323,6 +1323,12 @@ func main() {
 		{6, "Summerland Roofers", "RL_SPF_2X4", "LUM-2412-PREM", 160, 392.0, 5.0, "FLAG_FOR_REQUOTE", "FLAGGED", "FLAGGED"},
 	}
 
+	// Reset any prior price-exposure demo quotes (deterministic e10000* UUIDs)
+	// before re-inserting. This keeps re-seeds idempotent even when the UUID
+	// scheme below changes, so stale duplicates can't linger in the at-risk list.
+	// Cascades clean up quote_lines, price_escalators, and quote_exposure_events.
+	db.Exec(`DELETE FROM quotes WHERE id::text LIKE 'e10000%'`)
+
 	exposureSeeded := 0
 	for _, sc := range scenarios {
 		cid, ok := customerIDs[sc.Customer]
@@ -1351,7 +1357,10 @@ func main() {
 		qDate := recentDate(20)
 		expires := qDate.AddDate(0, 0, 30)
 
-		quoteID := uuid.MustParse(fmt.Sprintf("e1000000-0000-4000-8000-0000000000%02d", sc.N))
+		// Distinct first segment per scenario so the displayed quote number —
+		// first 8 chars of the UUID (SUBSTRING in the at-risk query, id.slice(0,8)
+		// on the quote-detail page) — is unique across the demo set.
+		quoteID := uuid.MustParse(fmt.Sprintf("e100000%d-0000-4000-8000-000000000001", sc.N))
 		lineID := uuid.MustParse(fmt.Sprintf("e2000000-0000-4000-8000-0000000000%02d", sc.N))
 		escID := uuid.MustParse(fmt.Sprintf("e3000000-0000-4000-8000-0000000000%02d", sc.N))
 
