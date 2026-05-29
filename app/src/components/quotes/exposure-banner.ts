@@ -56,6 +56,16 @@ export class GableExposureBanner extends LitElement {
       // No exposure record (404) or transient error — render nothing.
       this.detail = null;
     }
+    // Surface the erosion so the host's standard margin card can reflect it.
+    const atRisk = this.detail != null && this.detail.exposure_state !== 'OK';
+    this.dispatchEvent(new CustomEvent('exposure-loaded', {
+      detail: {
+        exposureDollars: atRisk ? this.detail!.exposure_dollars : 0,
+        state: this.detail?.exposure_state ?? 'OK',
+      },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   private _fmt(v: number) {

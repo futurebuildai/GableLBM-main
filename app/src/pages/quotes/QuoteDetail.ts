@@ -21,6 +21,7 @@ export class GableQuoteDetail extends LitElement {
     @state() private loading = true;
     @state() private processing = false;
     @state() private activeTab: Tab = 'details';
+    @state() private exposureDollars = 0;
 
     private stateColors: Record<string, string> = {
         DRAFT: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
@@ -128,10 +129,17 @@ export class GableQuoteDetail extends LitElement {
     private renderDetailsTab(quote: Quote) {
         const lines = quote.lines || [];
         const totalRevenue = lines.reduce((s, l) => s + l.line_total, 0);
-        const totalCost = lines.reduce((s, l) => s + l.unit_cost * l.quantity, 0);
+        const baseCost = lines.reduce((s, l) => s + l.unit_cost * l.quantity, 0);
+        const baseMargin = totalRevenue - baseCost;
+        const baseMarginPct = totalRevenue > 0 ? (baseMargin / totalRevenue) * 100 : 0;
+        const hasCostData = lines.some(l => l.unit_cost > 0);
+
+        // Index-driven margin erosion: the locked price stands, but the cost to
+        // fulfill has risen by the exposure dollars, so the realized margin drops.
+        const erosion = this.exposureDollars > 0 ? this.exposureDollars : 0;
+        const totalCost = baseCost + erosion;
         const projectedMargin = totalRevenue - totalCost;
         const marginPct = totalRevenue > 0 ? (projectedMargin / totalRevenue) * 100 : 0;
-        const hasCostData = lines.some(l => l.unit_cost > 0);
 
         return html`
             <div class="space-y-6">
@@ -150,17 +158,24 @@ export class GableQuoteDetail extends LitElement {
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Est. Cost</div>
                                 <div class="text-xl font-mono font-bold text-zinc-300">$${totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                ${erosion > 0 ? html`
+                                    <div class="text-[11px] font-mono text-rose-400 mt-1">+$${erosion.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} index</div>
+                                ` : nothing}
                             </div>
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Projected Margin</div>
                                 <div class="text-xl font-mono font-bold ${projectedMargin >= 0 ? 'text-gable-green' : 'text-red-400'}">
                                     $${projectedMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
+                                ${erosion > 0 ? html`
+                                    <div class="text-[11px] font-mono text-zinc-500 mt-1 line-through">$${baseMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                ` : nothing}
                             </div>
                             <div>
                                 <div class="text-[11px] text-zinc-500 uppercase tracking-wider mb-1">Margin %</div>
                                 <div class="text-xl font-mono font-bold ${marginPct >= 20 ? 'text-gable-green' : marginPct >= 10 ? 'text-amber-400' : 'text-red-400'}">
                                     ${marginPct.toFixed(1)}%
+                                    ${erosion > 0 ? html`<span class="text-[11px] text-zinc-500 line-through ml-1">${baseMarginPct.toFixed(1)}%</span>` : nothing}
                                 </div>
                                 <div class="mt-2 h-1.5 bg-white/5 rounded-full overflow-hidden">
                                     <div
@@ -469,7 +484,8 @@ export class GableQuoteDetail extends LitElement {
                 <!-- Lumber index exposure / margin erosion (self-hides when not at risk) -->
                 <gable-exposure-banner
                     .quoteId=${quote.id}
-                    .shortId=${quote.id.slice(0, 8)}>
+                    .shortId=${quote.id.slice(0, 8)}
+                    @exposure-loaded=${(e: Event) => { this.exposureDollars = (e as CustomEvent).detail?.exposureDollars ?? 0; }}>
                 </gable-exposure-banner>
 
                 <!-- Tabs -->
