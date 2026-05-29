@@ -364,6 +364,18 @@ func splitCsv(s string) []string {
 	return out
 }
 
+// devActor is the synthetic actor recorded for write actions in dev mode
+// (AUTH_MODE=dev), where no JWT is present. Mirrors the scanner's "system".
+const devActor = "dev"
+
+// Dev-mode note: when AUTH_MODE=dev the auth middleware is not mounted, so
+// requests reach these handlers with nil claims. In production such requests
+// are rejected with 401 upstream (exposure routes are NOT in the public-path
+// whitelist), so nil claims here can only mean dev mode. We therefore treat
+// the dev caller as a full owner — consistent with the documented dev-mode
+// pass-through in which the seeded demo@gable.com user acts as admin/owner.
+// This never relaxes production access: in prod, claims are always non-nil.
+
 // userID / userRole / userIDString read JWT claims set by the auth
 // middleware. Defensive — empty/zero on missing claims.
 func userID(r *http.Request) uuid.UUID {
@@ -380,7 +392,7 @@ func userID(r *http.Request) uuid.UUID {
 func userIDString(r *http.Request) string {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
-		return ""
+		return devActor // dev mode (see Dev-mode note above)
 	}
 	return claims.Subject
 }
@@ -390,7 +402,7 @@ func userIDString(r *http.Request) string {
 func userRole(r *http.Request) string {
 	claims, _ := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims)
 	if claims == nil {
-		return ""
+		return "owner" // dev mode (see Dev-mode note above)
 	}
 	if claims.Role != "" {
 		return claims.Role
