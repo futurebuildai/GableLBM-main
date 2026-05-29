@@ -108,6 +108,9 @@ func (h *Handler) RegisterBuilderRoutes(mux *http.ServeMux, roleGuard ...func(ht
 	mux.HandleFunc("PUT /api/v1/reporting/saved/{id}", guard(h.HandleUpdateSavedReport))
 	mux.HandleFunc("DELETE /api/v1/reporting/saved/{id}", guard(h.HandleDeleteSavedReport))
 	mux.HandleFunc("POST /api/v1/reporting/saved/{id}/run", guard(h.HandleRunSavedReport))
+	mux.HandleFunc("POST /api/v1/reporting/schedules", guard(h.HandleCreateReportSchedule))
+	mux.HandleFunc("GET /api/v1/reporting/schedules", guard(h.HandleListReportSchedules))
+	mux.HandleFunc("DELETE /api/v1/reporting/schedules/{id}", guard(h.HandleDeleteReportSchedule))
 }
 
 func (h *Handler) HandleBuilderPreview(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +286,63 @@ func (h *Handler) HandleRunSavedReport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
+}
+
+func (h *Handler) HandleCreateReportSchedule(w http.ResponseWriter, r *http.Request) {
+	var schedule ReportSchedule
+	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+		httputil.RespondError(w, r, "failed to decode create report schedule request", http.StatusBadRequest, err)
+		return
+	}
+
+	if schedule.ReportID == "" || schedule.CronExpression == "" || len(schedule.Recipients) == 0 {
+		httputil.RespondError(w, r, "report_id, cron_expression, and recipients are required", http.StatusBadRequest, nil)
+		return
+	}
+
+	if schedule.Format == "" {
+		schedule.Format = "CSV"
+	}
+	schedule.Status = "ACTIVE"
+
+	if err := h.service.CreateReportSchedule(r.Context(), &schedule); err != nil {
+		httputil.RespondError(w, r, "failed to create report schedule", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(schedule)
+}
+
+func (h *Handler) HandleListReportSchedules(w http.ResponseWriter, r *http.Request) {
+	schedules, err := h.service.ListReportSchedules(r.Context())
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list report schedules", http.StatusInternalServerError, err)
+		return
+	}
+
+	if schedules == nil {
+		schedules = []ReportSchedule{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(schedules)
+}
+
+func (h *Handler) HandleDeleteReportSchedule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		httputil.RespondError(w, r, "schedule ID required", http.StatusBadRequest, nil)
+		return
+	}
+
+	if err := h.service.DeleteReportSchedule(r.Context(), id); err != nil {
+		httputil.RespondError(w, r, "failed to delete report schedule", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) RegisterBIIntegrationRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {

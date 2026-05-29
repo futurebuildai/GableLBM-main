@@ -49,6 +49,9 @@ type Config struct {
 	// Auth & Security
 	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
 
+	// Event Bus
+	NATSURL string // NATS/JetStream URL; empty → in-process event bus fallback
+
 	// Logging
 	LogLevel string // DEBUG, INFO, WARN, ERROR (default: INFO)
 
@@ -106,6 +109,10 @@ func Load() (*Config, error) {
 
 		// Auth & Security
 		AuthMode: getEnv("AUTH_MODE", ""),
+
+		// Event Bus — empty default routes through the in-process fallback so
+		// the DO demo/staging deploys (no NATS service) degrade gracefully.
+		NATSURL: getEnv("NATS_URL", ""),
 
 		// Logging
 		LogLevel: getEnv("LOG_LEVEL", "INFO"),

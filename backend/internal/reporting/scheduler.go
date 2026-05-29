@@ -1,13 +1,15 @@
 package reporting
 
 import (
-"bytes"
-"context"
-"fmt"
-"log"
-"time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+	"time"
 
-"github.com/robfig/cron/v3"
+	"github.com/robfig/cron/v3"
 )
 
 // EmailSender defines the interface needed to send emails with attachments.
@@ -73,47 +75,72 @@ s.jobIDs[schedule.ID] = entryID
 return nil
 }
 
-// ExecuteAndSendReport runs the report and emails the PDF/CSV to recipients.
+// ExecuteAndSendReport runs the report and emails the PDF/CSV/XLSX to recipients.
 func (s *Scheduler) ExecuteAndSendReport(ctx context.Context, schedule ReportSchedule) error {
-// 1. Fetch Report Definition
-report, err := s.service.GetSavedReport(ctx, schedule.ReportID)
-if err != nil {
-return fmt.Errorf("failed to get report definition: %w", err)
-}
+	// 1. Fetch Report Definition
+	report, err := s.service.GetSavedReport(ctx, schedule.ReportID)
+	if err != nil {
+		return fmt.Errorf("failed to get report definition: %w", err)
+	}
 
-// Unmarshal definition
-// Since report.DefinitionJSON is map[string]interface{}, we need to reconstruct ReportDefinition
-// Simplification: assume we can inject it back effectively or modify ExecuteReportDefinition to take map
-// For now, let's assume ExecuteReportDefinition takes ReportDefinition.
-// In a complete implementation, we'd map this properly.
+	// Reconstruct ReportDefinition from definition_json
+	defBytes, err := json.Marshal(report.DefinitionJSON)
+	if err != nil {
+		return fmt.Errorf("failed to marshal report definition: %w", err)
+	}
+	var def ReportDefinition
+	if err := json.Unmarshal(defBytes, &def); err != nil {
+		return fmt.Errorf("failed to parse report definition: %w", err)
+	}
 
-// 2. Execute Query
-// ... (implementation omitted for brevity, would call s.service.ExecuteReportDefinition)
-var def ReportDefinition
-// ... populate def from report.DefinitionJSON ...
+	// 2. Execute Query
+	results, err := s.service.ExecuteReportDefinition(ctx, &def, report.EntityType)
+	if err != nil {
+		return fmt.Errorf("failed to execute report query: %w", err)
+	}
 
-results, err := s.service.ExecuteReportDefinition(ctx, &def, report.EntityType)
-if err != nil {
-return fmt.Errorf("failed to execute report query: %w", err)
-}
+	// 3. Generate file buffer based on schedule format
+	var buf bytes.Buffer
+	var filename string
+	format := strings.ToLower(schedule.Format)
+	if format == "" {
+		format = "csv"
+	}
 
-// 3. Generate CSV (Defaulting to CSV for scheduled reports for simplicity)
-var buf bytes.Buffer
-if err := ExportCSV(&buf, def.Columns, results); err != nil {
-return fmt.Errorf("failed to generate CSV: %w", err)
-}
+	switch format {
+	case "csv":
+		filename = fmt.Sprintf("%s_%s.csv", report.Name, time.Now().Format("2006-01-02"))
+		if err := ExportCSV(&buf, def.Columns, results); err != nil {
+			return fmt.Errorf("failed to generate CSV: %w", err)
+		}
+	case "xlsx":
+		filename = fmt.Sprintf("%s_%s.xlsx", report.Name, time.Now().Format("2006-01-02"))
+		if err := ExportXLSX(&buf, def.Columns, results); err != nil {
+			return fmt.Errorf("failed to generate XLSX: %w", err)
+		}
+	case "pdf":
+		filename = fmt.Sprintf("%s_%s.pdf", report.Name, time.Now().Format("2006-01-02"))
+		if err := GeneratePDFReport(&buf, def.Columns, results); err != nil {
+			return fmt.Errorf("failed to generate PDF: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported format: %s", schedule.Format)
+	}
 
-// 4. Send Email
-subject := fmt.Sprintf("Scheduled Report: %s", report.Name)
-body := fmt.Sprintf("Please find attached the latest run for report '%s'.", report.Name)
-filename := fmt.Sprintf("%s_%s.csv", report.Name, time.Now().Format("2006-01-02"))
+	// 4. Send Email
+	subject := fmt.Sprintf("Scheduled Report: %s", report.Name)
+	body := fmt.Sprintf("Please find attached the latest run for report '%s'.", report.Name)
 
-if err := s.emailSender.SendEmailWithAttachment(ctx, schedule.Recipients, subject, body, filename, buf.Bytes()); err != nil {
-return fmt.Errorf("failed to send email: %w", err)
-}
+	if err := s.emailSender.SendEmailWithAttachment(ctx, schedule.Recipients, subject, body, filename, buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
 
-// 5. Update Schedule Last/Next Run Status
-// (Implementation to update schedule status in DB omitted for brevity)
+	// 5. Update Schedule Last/Next Run Status
+	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	if sched, err := parser.Parse(schedule.CronExpression); err == nil {
+		nextRun := sched.Next(time.Now())
+		_ = s.service.UpdateReportScheduleNextRun(ctx, schedule.ID, nextRun)
+	}
 
-return nil
+	return nil
 }

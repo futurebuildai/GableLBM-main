@@ -37,6 +37,15 @@ func (m *MockEscalatorRepository) GetMarketIndex(_ context.Context, id uuid.UUID
 	return nil, nil
 }
 
+func (m *MockEscalatorRepository) GetMarketIndexByCode(_ context.Context, code string) (*MarketIndex, error) {
+	for _, idx := range m.indices {
+		if idx.IndexCode == code {
+			return &idx, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *MockEscalatorRepository) CreateMarketIndex(_ context.Context, idx *MarketIndex) error {
 	if idx.ID == uuid.Nil {
 		idx.ID = uuid.New()
@@ -65,6 +74,33 @@ func (m *MockEscalatorRepository) GetEscalatorByQuoteLine(_ context.Context, quo
 		}
 	}
 	return nil, nil
+}
+
+func (m *MockEscalatorRepository) SnapshotEscalators(_ context.Context, escalators []PriceEscalator) error {
+	for i := range escalators {
+		esc := escalators[i]
+		if esc.ID == uuid.Nil {
+			esc.ID = uuid.New()
+		}
+		m.escalators[esc.ID] = esc
+	}
+	return nil
+}
+
+func (m *MockEscalatorRepository) UpdateMarketIndexMetadata(_ context.Context, id uuid.UUID, name, description string, isActive bool) error {
+	idx, ok := m.indices[id]
+	if !ok {
+		return nil
+	}
+	if name != "" {
+		idx.Name = name
+	}
+	if description != "" {
+		idx.Description = &description
+	}
+	idx.IsActive = isActive
+	m.indices[id] = idx
+	return nil
 }
 
 func TestCalculateEscalation_Percentage(t *testing.T) {

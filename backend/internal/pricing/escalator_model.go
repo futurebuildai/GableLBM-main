@@ -15,6 +15,8 @@ const (
 )
 
 // MarketIndex represents a lumber market index (e.g., Random Lengths).
+// IndexCode/CommodityKind/Description/IsActive were added in migration 072 to
+// support the price-protection taxonomy; older rows are backfilled there.
 type MarketIndex struct {
 	ID            uuid.UUID `json:"id"`
 	Name          string    `json:"name"`
@@ -24,9 +26,18 @@ type MarketIndex struct {
 	Unit          string    `json:"unit"`
 	LastUpdatedAt time.Time `json:"last_updated_at"`
 	CreatedAt     time.Time `json:"created_at"`
+
+	IndexCode     string  `json:"index_code"`
+	CommodityKind *string `json:"commodity_kind,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	IsActive      bool    `json:"is_active"`
 }
 
 // PriceEscalator links a quote line to an escalation strategy.
+// The snapshot-lifecycle fields (BaseIndexRecordedAt … ThresholdPctAtSnapshot)
+// were added in migration 072 and freeze the policy/threshold in force when the
+// quote was sent, so later customer-policy edits cannot retroactively change a
+// live quote's escalation behavior.
 type PriceEscalator struct {
 	ID             uuid.UUID      `json:"id"`
 	QuoteLineID    *uuid.UUID     `json:"quote_line_id,omitempty"`
@@ -40,6 +51,12 @@ type PriceEscalator struct {
 	IsActive       bool           `json:"is_active"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
+
+	BaseIndexRecordedAt    *time.Time `json:"base_index_recorded_at,omitempty"`
+	LastCheckedAt          *time.Time `json:"last_checked_at,omitempty"`
+	CurrentState           string     `json:"current_state"`
+	PolicyAtSnapshot       *string    `json:"policy_at_snapshot,omitempty"`
+	ThresholdPctAtSnapshot *float64   `json:"threshold_pct_at_snapshot,omitempty"`
 }
 
 // EscalationRequest is the payload for the calculate-escalation endpoint.

@@ -200,6 +200,10 @@ func (s *Service) UpdateReportScheduleNextRun(ctx context.Context, scheduleID st
 return s.repo.UpdateReportScheduleNextRun(ctx, scheduleID, nextRun)
 }
 
+func (s *Service) DeleteReportSchedule(ctx context.Context, id string) error {
+return s.repo.DeleteReportSchedule(ctx, id)
+}
+
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {
 	pgRepo, ok := s.repo.(*PostgresRepository)
 	if !ok {

@@ -8,14 +8,42 @@ import (
 	"github.com/google/uuid"
 )
 
+// defaultStalenessThresholdPct is the fallback index-movement threshold (in
+// percent) used to flag a locked-in price as stale when no per-quote snapshot
+// threshold applies. Historically hardcoded at 2%.
+const defaultStalenessThresholdPct = 2.0
+
 // EscalatorService handles price escalation calculations and staleness detection.
 type EscalatorService struct {
 	repo EscalatorRepository
+	// stalenessThresholdPct overrides the default 2% movement threshold. The
+	// price-protection feature freezes a per-quote threshold at send time; this
+	// service-level value is the system default for ad-hoc staleness checks.
+	stalenessThresholdPct float64
 }
 
 // NewEscalatorService creates a new escalator service.
 func NewEscalatorService(repo EscalatorRepository) *EscalatorService {
-	return &EscalatorService{repo: repo}
+	return &EscalatorService{repo: repo, stalenessThresholdPct: defaultStalenessThresholdPct}
+}
+
+// WithStalenessThreshold overrides the default staleness threshold (percent).
+// Values <= 0 are ignored so callers can pass an unset system_settings value
+// without disabling staleness detection.
+func (s *EscalatorService) WithStalenessThreshold(pct float64) *EscalatorService {
+	if pct > 0 {
+		s.stalenessThresholdPct = pct
+	}
+	return s
+}
+
+// thresholdPct returns the effective staleness threshold, guarding against a
+// zero-valued struct (e.g. constructed without NewEscalatorService).
+func (s *EscalatorService) thresholdPct() float64 {
+	if s.stalenessThresholdPct > 0 {
+		return s.stalenessThresholdPct
+	}
+	return defaultStalenessThresholdPct
 }
 
 // CalculateEscalation computes a future price based on escalation parameters.
@@ -80,10 +108,11 @@ func (s *EscalatorService) CalculateEscalation(ctx context.Context, req Escalati
 					result.DeltaPercent = math.Round((result.PriceDelta/req.BasePrice)*10000) / 100
 				}
 
-				// Staleness detection: if index has moved >2% from when price was set
+				// Staleness detection: if index has moved beyond the configured
+				// threshold from when the price was set.
 				if idx.PreviousValue != nil && *idx.PreviousValue > 0 {
 					indexDelta := math.Abs(currentIndex-*idx.PreviousValue) / *idx.PreviousValue * 100
-					if indexDelta > 2.0 {
+					if indexDelta > s.thresholdPct() {
 						result.IsStale = true
 						result.StaleDeltaPct = math.Round(indexDelta*100) / 100
 					}
@@ -110,7 +139,7 @@ func (s *EscalatorService) CheckStaleness(ctx context.Context, baseIndexValue fl
 
 	// Calculate delta between current index and the base index value
 	indexDeltaPct := (idx.CurrentValue - baseIndexValue) / baseIndexValue * 100
-	isStale := math.Abs(indexDeltaPct) > 2.0 // >2% movement = stale
+	isStale := math.Abs(indexDeltaPct) > s.thresholdPct() // movement beyond threshold = stale
 
 	return isStale, math.Round(indexDeltaPct*100) / 100, nil
 }

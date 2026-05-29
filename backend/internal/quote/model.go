@@ -53,6 +53,13 @@ type Quote struct {
 	// AI parse mapping data (stored as JSONB)
 	ParseMap json.RawMessage `json:"parse_map,omitempty"`
 
+	// Index-aware price-protection rollup (migration 072). Denormalized
+	// worst-state across the quote's active escalators; maintained by the
+	// pricing exposure scanner. ExposureState defaults to "OK".
+	ExposureState         string     `json:"exposure_state"`
+	ExposureDollars       float64    `json:"exposure_dollars"`
+	ExposureLastCheckedAt *time.Time `json:"exposure_last_checked_at,omitempty"`
+
 	Lines []QuoteLine `json:"lines,omitempty"`
 }
 

@@ -847,9 +847,59 @@ func main() {
 	fmt.Printf("Seed: %d Pricing Rules\n", len(rules))
 
 	// =========================================================================
-	// 14. GL JOURNAL ENTRIES (placeholder)
+	// 14. GL JOURNAL ENTRIES
 	// =========================================================================
 	months := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun"}
+	var acctMap = make(map[string]uuid.UUID)
+	acctRows, _ := db.Query("SELECT code, id FROM gl_accounts")
+	for acctRows.Next() {
+		var code string
+		var acctID uuid.UUID
+		acctRows.Scan(&code, &acctID)
+		acctMap[code] = acctID
+	}
+	acctRows.Close()
+
+	if len(acctMap) > 0 {
+		var cashID = acctMap["1000"] // Cash
+		var arID = acctMap["1200"]   // Accounts Receivable
+		var revID = acctMap["4000"]  // Sales Revenue
+		var cogsID = acctMap["5000"] // Cost of Goods Sold
+		var invID = acctMap["1300"]  // Inventory
+
+		for i := 0; i < 10; i++ {
+			jeID := uuid.New()
+			date := recentDate(90)
+			db.Exec(`INSERT INTO gl_journal_entries (id, entry_date, memo, source, status, posted_by, created_at, updated_at)
+				VALUES ($1, $2, 'Daily Sales Auto-Entry', 'INVOICE', 'POSTED', 'System', $2, $2)`, jeID, date)
+			
+			amt := 10000 + rand.Intn(50000) // $100 to $500
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'AR Debit', $3, 0)`, jeID, arID, amt)
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'Sales Credit', 0, $3)`, jeID, revID, amt)
+				
+			// COGS
+			cogsAmt := int(float64(amt) * 0.7)
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'COGS Debit', $3, 0)`, jeID, cogsID, cogsAmt)
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'Inventory Credit', 0, $3)`, jeID, invID, cogsAmt)
+		}
+		
+		for i := 0; i < 5; i++ {
+			jeID := uuid.New()
+			date := recentDate(60)
+			db.Exec(`INSERT INTO gl_journal_entries (id, entry_date, memo, source, status, posted_by, created_at, updated_at)
+				VALUES ($1, $2, 'Customer Payment', 'PAYMENT', 'POSTED', 'System', $2, $2)`, jeID, date)
+			
+			amt := 5000 + rand.Intn(20000) 
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'Cash Debit', $3, 0)`, jeID, cashID, amt)
+			db.Exec(`INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES (gen_random_uuid(), $1, $2, 'AR Credit', 0, $3)`, jeID, arID, amt)
+		}
+	}
 	fmt.Printf("Seed: %d GL Journal Entries (6 months x 3)\n", len(months)*3)
 
 	// =========================================================================

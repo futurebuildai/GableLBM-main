@@ -115,7 +115,8 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		SELECT q.id, q.customer_id, COALESCE(c.name, ''), q.job_id, q.state, q.total_amount, q.expires_at, q.created_at, q.updated_at,
 			q.sent_at, q.accepted_at, q.rejected_at, COALESCE(q.margin_total, 0), COALESCE(q.source, 'manual'),
 			COALESCE(q.original_filename, ''), COALESCE(q.original_content_type, ''), q.parse_map,
-			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, ''), q.branch_id
+			COALESCE(q.delivery_type, 'PICKUP'), COALESCE(q.freight_amount, 0), q.vehicle_id, COALESCE(v.name, ''), q.branch_id,
+			COALESCE(q.exposure_state, 'OK'), COALESCE(q.exposure_dollars, 0), q.exposure_last_checked_at
 		FROM quotes q
 		LEFT JOIN customers c ON c.id = q.customer_id
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
@@ -127,6 +128,7 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 		&q.SentAt, &q.AcceptedAt, &q.RejectedAt, &q.MarginTotal, &q.Source,
 		&q.OriginalFilename, &q.OriginalContentType, &q.ParseMap,
 		&q.DeliveryType, &q.FreightAmount, &q.VehicleID, &q.VehicleName, &q.BranchID,
+		&q.ExposureState, &q.ExposureDollars, &q.ExposureLastCheckedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -339,6 +341,109 @@ func (r *PostgresRepository) ListQuotesByCustomer(ctx context.Context, customerI
 		quotes = append(quotes, q)
 	}
 	return quotes, nil
+}
+
+// GetQuoteWithLinesAndCustomer builds the narrow projection the pricing
+// exposure snapshot/scanner needs: customer escalation policy (frozen at
+// snapshot time) plus each line's commodity flag and resolved index override.
+// Implements QuoteLineReader.
+func (r *PostgresRepository) GetQuoteWithLinesAndCustomer(ctx context.Context, quoteID uuid.UUID) (*QuoteForSnapshot, error) {
+	q := &QuoteForSnapshot{}
+	headerQuery := `
+		SELECT q.id, q.customer_id, COALESCE(c.name, ''), c.salesperson_id,
+			COALESCE(c.price_escalation_policy, 'FLAG_FOR_REQUOTE'),
+			COALESCE(c.escalation_threshold_pct, 5.0),
+			c.escalation_agreement_signed_at,
+			COALESCE(c.escalation_agreement_ref, '')
+		FROM quotes q
+		LEFT JOIN customers c ON c.id = q.customer_id
+		WHERE q.id = $1
+	`
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, headerQuery, quoteID).Scan(
+		&q.ID, &q.CustomerID, &q.CustomerName, &q.SalespersonID,
+		&q.CustomerPolicy.Policy, &q.CustomerPolicy.ThresholdPct,
+		&q.CustomerPolicy.AgreementSignedAt, &q.CustomerPolicy.AgreementRef,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to load quote for snapshot: %w", err)
+	}
+	q.ShortID = q.ID.String()[:8]
+
+	linesQuery := `
+		SELECT ql.id, ql.product_id, ql.sku, ql.quantity, ql.unit_price,
+			COALESCE(p.is_commodity, FALSE), p.market_index_id
+		FROM quote_lines ql
+		LEFT JOIN products p ON p.id = ql.product_id
+		WHERE ql.quote_id = $1
+		ORDER BY ql.created_at ASC
+	`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, linesQuery, quoteID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load quote lines for snapshot: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var l QuoteLineForSnapshot
+		if err := rows.Scan(
+			&l.ID, &l.ProductID, &l.SKU, &l.Quantity, &l.UnitPrice,
+			&l.IsCommodity, &l.MarketIndexID,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan quote line for snapshot: %w", err)
+		}
+		q.Lines = append(q.Lines, l)
+	}
+	return q, nil
+}
+
+// UpdateQuoteExposure writes the denormalized exposure rollup onto the quote
+// header. Implements QuoteLineReader.
+func (r *PostgresRepository) UpdateQuoteExposure(ctx context.Context, quoteID uuid.UUID, state string, dollars float64, lastCheckedAt time.Time) error {
+	query := `
+		UPDATE quotes
+		SET exposure_state = $2, exposure_dollars = $3, exposure_last_checked_at = $4, updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, quoteID, state, dollars, lastCheckedAt)
+	if err != nil {
+		return fmt.Errorf("failed to update quote exposure: %w", err)
+	}
+	return nil
+}
+
+// UpdateLineUnitPrice mutates a single line's unit price and recomputes its
+// line total. Used by AUTO_ESCALATE. Implements QuoteLineReader.
+func (r *PostgresRepository) UpdateLineUnitPrice(ctx context.Context, lineID uuid.UUID, newUnitPrice float64) error {
+	query := `
+		UPDATE quote_lines
+		SET unit_price = $2, line_total = quantity * $2
+		WHERE id = $1
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, lineID, newUnitPrice)
+	if err != nil {
+		return fmt.Errorf("failed to update line unit price: %w", err)
+	}
+	return nil
+}
+
+// RecomputeQuoteTotal re-sums the quote's line totals plus freight onto the
+// header. Implements QuoteLineReader.
+func (r *PostgresRepository) RecomputeQuoteTotal(ctx context.Context, quoteID uuid.UUID) error {
+	query := `
+		UPDATE quotes q
+		SET total_amount = COALESCE((
+			SELECT SUM(ql.line_total) FROM quote_lines ql WHERE ql.quote_id = q.id
+		), 0) + COALESCE(q.freight_amount, 0),
+		updated_at = NOW()
+		WHERE q.id = $1
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, quoteID)
+	if err != nil {
+		return fmt.Errorf("failed to recompute quote total: %w", err)
+	}
+	return nil
 }
 
 // GetOriginalFile retrieves the original uploaded file for a quote.

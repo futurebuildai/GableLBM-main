@@ -39,6 +39,9 @@ export interface ReportSchedule {
   cron_expression: string;
   recipients: string[];
   status: string;
+  format: 'CSV' | 'XLSX' | 'PDF';
+  last_run_at?: string;
+  next_run_at?: string;
 }
 
 export const reportingApi = {
@@ -111,5 +114,29 @@ export const reportingApi = {
     });
     if (!response.ok) throw new Error(`API Error: ${response.status}`);
     return response.json();
+  },
+
+  // Schedules CRUD
+  listReportSchedules: async (): Promise<ReportSchedule[]> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules`);
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
+  },
+
+  createReportSchedule: async (schedule: Partial<ReportSchedule>): Promise<ReportSchedule> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedule)
+    });
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+    return response.json();
+  },
+
+  deleteReportSchedule: async (id: string): Promise<void> => {
+    const response = await fetchWithAuth(`${API_BASE}/api/v1/reporting/schedules/${id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error(`Delete failed`);
   }
 };

@@ -23,6 +23,7 @@ type Repository interface {
 	CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error
 	ListReportSchedules(ctx context.Context) ([]ReportSchedule, error)
 	UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error
+	DeleteReportSchedule(ctx context.Context, id string) error
 }
 
 type PostgresRepository struct {
@@ -330,12 +331,12 @@ func (r *PostgresRepository) DeleteSavedReport(ctx context.Context, id string) e
 
 func (r *PostgresRepository) CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error {
 	query := `
-INSERT INTO report_schedules (report_id, cron_expression, recipients, status)
-VALUES ($1, $2, $3, $4)
+INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status).
+		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format).
 		Scan(&schedule.ID, &schedule.CreatedAt, &schedule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create report schedule: %w", err)
@@ -345,7 +346,7 @@ RETURNING id, created_at::text, updated_at::text
 
 func (r *PostgresRepository) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
 	query := `
-SELECT id, report_id, cron_expression, recipients, status, last_run_at::text, next_run_at::text, created_at::text, updated_at::text
+SELECT id, report_id, cron_expression, recipients, status, last_run_at::text, next_run_at::text, created_at::text, updated_at::text, format
 FROM report_schedules
 ORDER BY created_at DESC
 `
@@ -361,7 +362,7 @@ ORDER BY created_at DESC
 		if err := rows.Scan(
 			&schedule.ID, &schedule.ReportID, &schedule.CronExpression,
 			&schedule.Recipients, &schedule.Status, &schedule.LastRunAt,
-			&schedule.NextRunAt, &schedule.CreatedAt, &schedule.UpdatedAt); err != nil {
+			&schedule.NextRunAt, &schedule.CreatedAt, &schedule.UpdatedAt, &schedule.Format); err != nil {
 			return nil, fmt.Errorf("failed to scan report schedule: %w", err)
 		}
 		schedules = append(schedules, schedule)
@@ -376,5 +377,11 @@ SET last_run_at = NOW(), next_run_at = $1, updated_at = NOW()
 WHERE id = $2
 `
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, nextRun, scheduleID)
+	return err
+}
+
+func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {
+	query := `DELETE FROM report_schedules WHERE id = $1`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, id)
 	return err
 }

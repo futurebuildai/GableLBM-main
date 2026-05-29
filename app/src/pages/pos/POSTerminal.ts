@@ -43,6 +43,10 @@ export class POSTerminal extends LitElement {
   // Receipt state
   @state() private _completedTransaction: POSTransaction | null = null;
   @state() private _showReceipt = false;
+  @state() private _isListening = false;
+
+  private _recognition: any = null;
+  private _successTimer: ReturnType<typeof setTimeout> | null = null;
 
   @query('#pos-search-input') private _searchInput!: HTMLInputElement;
 
@@ -63,6 +67,7 @@ export class POSTerminal extends LitElement {
     document.removeEventListener('keydown', this._boundKeyHandler);
     if (this._newTxTimer) clearTimeout(this._newTxTimer);
     if (this._errorTimer) clearTimeout(this._errorTimer);
+    if (this._successTimer) clearTimeout(this._successTimer);
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
     if (this._customerDebounce) clearTimeout(this._customerDebounce);
   }
@@ -138,6 +143,94 @@ export class POSTerminal extends LitElement {
       }
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Error scanning barcode';
+    }
+  }
+
+  /* ---- Voice Search ---- */
+
+  private _toggleVoiceSearch() {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      this._error = 'Speech Recognition is not supported in this browser. Please use Google Chrome.';
+      this._errorTimer = setTimeout(() => { this._error = null; }, 3000);
+      return;
+    }
+
+    if (this._isListening) {
+      if (this._recognition) {
+        this._recognition.stop();
+      }
+      this._isListening = false;
+      return;
+    }
+
+    try {
+      if (!this._recognition) {
+        this._recognition = new SpeechRecognition();
+        this._recognition.continuous = false;
+        this._recognition.interimResults = false;
+        this._recognition.lang = 'en-US';
+
+        this._recognition.onstart = () => {
+          this._isListening = true;
+          this._error = null;
+        };
+
+        this._recognition.onresult = async (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          if (transcript) {
+            this._searchQuery = transcript;
+            this._loading = true;
+            this._error = null;
+            try {
+              const results = await posService.searchProducts(transcript);
+              this._searchResults = results;
+              
+              if (results && results.length > 0) {
+                const normalizedTranscript = transcript.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                // Try finding an exact match by SKU or description (ignoring non-alphanumeric chars)
+                const exactMatch = results.find(r => 
+                  r.sku.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedTranscript || 
+                  r.description.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedTranscript
+                );
+                
+                if (exactMatch) {
+                  await this._addItem(exactMatch);
+                  this._success = `Voice matched & added: ${exactMatch.description}`;
+                  if (this._successTimer) clearTimeout(this._successTimer);
+                  this._successTimer = setTimeout(() => { this._success = null; }, 4000);
+                } else if (results.length === 1) {
+                  // If there is exactly one result, add it directly to speed up checkout
+                  await this._addItem(results[0]);
+                  this._success = `Voice matched & added: ${results[0].description}`;
+                  if (this._successTimer) clearTimeout(this._successTimer);
+                  this._successTimer = setTimeout(() => { this._success = null; }, 4000);
+                }
+              }
+            } catch (err: unknown) {
+              this._error = err instanceof Error ? err.message : 'Error executing voice search';
+            } finally {
+              this._loading = false;
+            }
+          }
+        };
+
+        this._recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          this._error = `Voice input error: ${event.error}`;
+          this._isListening = false;
+        };
+
+        this._recognition.onend = () => {
+          this._isListening = false;
+        };
+      }
+
+      this._recognition.start();
+    } catch (err: unknown) {
+      this._error = 'Failed to start speech recognition: ' + (err instanceof Error ? err.message : 'Unknown error');
+      this._isListening = false;
     }
   }
 
@@ -430,6 +523,7 @@ export class POSTerminal extends LitElement {
     const remainingBalance = this._getRemainingBalance();
     const remainingDollars = (remainingBalance / 100).toFixed(2);
     const canComplete = this._tenders.length > 0 && remainingBalance <= 0 && lineItems.length > 0;
+    const isSpeechSupported = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
 
     return html`
       <!-- Print styles: hide everything except receipt -->
@@ -440,6 +534,14 @@ export class POSTerminal extends LitElement {
           #pos-receipt-overlay { position: static !important; background: #fff !important; }
           #pos-receipt-overlay > *:not(#pos-receipt) { display: none !important; }
           #pos-receipt { margin: 0 !important; padding: 8px !important; box-shadow: none !important; }
+        }
+        @keyframes voicePulse {
+          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+          70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .voice-pulse-btn {
+          animation: voicePulse 1.5s infinite;
         }
       </style>
 
@@ -508,6 +610,15 @@ export class POSTerminal extends LitElement {
                   style="flex:1;padding:12px 16px;background:#0A0B10;border:2px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;outline:none;box-sizing:border-box"
                   aria-label="Search product by SKU or description"
                 />
+                <button
+                  @click=${this._toggleVoiceSearch}
+                  class=${this._isListening ? 'voice-pulse-btn' : ''}
+                  ?disabled=${!isSpeechSupported}
+                  style="background:${!isSpeechSupported ? '#161821' : this._isListening ? '#EF4444' : '#21262d'};border:1px solid ${!isSpeechSupported ? '#21262d' : this._isListening ? '#EF4444' : '#30363d'};border-radius:8px;color:${!isSpeechSupported ? '#484f58' : this._isListening ? '#FFF' : '#e6edf3'};padding:0 16px;cursor:${!isSpeechSupported ? 'not-allowed' : 'pointer'};font-weight:bold;display:flex;align-items:center;gap:6px;transition:all 0.2s ease"
+                  title=${isSpeechSupported ? 'Voice SKU Search' : 'Voice Search not supported in this browser'}
+                >
+                  🎤 ${this._isListening ? 'Listening...' : 'Voice'}
+                </button>
                 <button
                   @click=${() => { this._isScanning = true; }}
                   style="background:#00FFA3;border:none;border-radius:8px;color:#0A0B10;padding:0 16px;cursor:pointer;font-weight:bold;display:flex;align-items:center;gap:8px"

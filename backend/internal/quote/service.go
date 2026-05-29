@@ -15,9 +15,10 @@ type AutoPOService interface {
 }
 
 type Service struct {
-	repo    Repository
-	poSvc   AutoPOService
-	logger  *slog.Logger
+	repo        Repository
+	poSvc       AutoPOService
+	snapshotSvc SnapshotService
+	logger      *slog.Logger
 }
 
 func NewService(repo Repository) *Service {
@@ -27,6 +28,13 @@ func NewService(repo Repository) *Service {
 // WithAutoPO injects the purchase order service for auto-PO on quote accept.
 func (s *Service) WithAutoPO(poSvc AutoPOService) {
 	s.poSvc = poSvc
+}
+
+// WithSnapshotService injects the pricing exposure snapshot service, fired
+// best-effort when a quote transitions DRAFT → SENT. Optional: nil disables
+// price-protection snapshotting.
+func (s *Service) WithSnapshotService(snapshotSvc SnapshotService) {
+	s.snapshotSvc = snapshotSvc
 }
 
 func (s *Service) CreateQuote(ctx context.Context, q *Quote) error {
@@ -103,6 +111,19 @@ func (s *Service) UpdateState(ctx context.Context, id uuid.UUID, state QuoteStat
 	// Auto-PO: when accepted, trigger POs for special-order items
 	if state == QuoteStateAccepted && s.poSvc != nil {
 		s.triggerAutoPO(ctx, q)
+	}
+
+	// Price-protection: when sent, snapshot index baselines for commodity
+	// lines. Best-effort — a pricing-module failure must never block a send.
+	if state == QuoteStateSent && s.snapshotSvc != nil {
+		if err := s.snapshotSvc.SnapshotQuoteLines(ctx, q.ID); err != nil {
+			s.logger.Warn("exposure snapshot failed for quote",
+				"quote_id", q.ID,
+				"error", err,
+			)
+		} else {
+			s.logger.Info("exposure snapshot written for quote", "quote_id", q.ID)
+		}
 	}
 
 	return nil

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
@@ -26,10 +27,11 @@ type Handler struct {
 	orderSvc    *order.Service
 	customerSvc *customer.Service
 	productSvc  *product.Service
+	deliverySvc *delivery.Service
 	apiKey      string
 }
 
-func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, apiKey string) *Handler {
+func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, deliverySvc *delivery.Service, apiKey string) *Handler {
 	return &Handler{
 		db:          db,
 		pricingSvc:  pricingSvc,
@@ -37,6 +39,7 @@ func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Se
 		orderSvc:    orderSvc,
 		customerSvc: customerSvc,
 		productSvc:  productSvc,
+		deliverySvc: deliverySvc,
 		apiKey:      apiKey,
 	}
 }
@@ -46,6 +49,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/integration/quotes/bulk-price", h.authMiddleware(h.BulkCalculatePrice))
 	mux.HandleFunc("POST /api/integration/quotes", h.authMiddleware(h.CreateQuote))
 	mux.HandleFunc("POST /api/integration/quotes/{id}/accept-and-convert", h.authMiddleware(h.AcceptAndConvertQuote))
+
+	// AI_LM load-management & routing integration surface
+	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehicles))
+	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
+	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -65,12 +73,13 @@ func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // ProductResponse is the integration-facing product model
 type ProductResponse struct {
-	ID       string  `json:"id"`
-	SKU      string  `json:"sku"`
-	Name     string  `json:"name"`
-	Category string  `json:"category"`
-	UOM      string  `json:"uom"`
-	Price    int64   `json:"price"` // cents
+	ID        string  `json:"id"`
+	SKU       string  `json:"sku"`
+	Name      string  `json:"name"`
+	Category  string  `json:"category"`
+	UOM       string  `json:"uom"`
+	Price     int64   `json:"price"`      // cents
+	WeightLbs float64 `json:"weight_lbs"` // per-unit weight (lb)
 }
 
 // ListProductsByCategory returns products filtered by category and/or text search
@@ -83,7 +92,7 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0)
+	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0), COALESCE(p.weight_lbs, 0)
 		FROM products p WHERE 1=1`
 	args := []interface{}{}
 	argIdx := 1
@@ -112,7 +121,7 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var p ProductResponse
 		var priceFloat float64
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat, &p.WeightLbs); err != nil {
 			slog.Error("failed to scan product row", "error", err, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "failed to read product data")
 			return
@@ -354,6 +363,243 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) confirmOrder(ctx context.Context, orderID uuid.UUID) error {
 	return h.orderSvc.ConfirmOrder(ctx, orderID)
+}
+
+// VehicleResponse is the integration-facing fleet model. AI_LM keys its own
+// axle/bed-dimension profiles by this id.
+type VehicleResponse struct {
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	VehicleType       string  `json:"vehicle_type"`
+	CapacityWeightLbs *int    `json:"capacity_weight_lbs,omitempty"`
+	Make              *string `json:"make,omitempty"`
+	Model             *string `json:"model,omitempty"`
+	Year              *int    `json:"year,omitempty"`
+}
+
+// ListVehicles returns the active fleet for AI_LM load/route planning.
+func (h *Handler) ListVehicles(w http.ResponseWriter, r *http.Request) {
+	if h.deliverySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "delivery service not configured")
+		return
+	}
+	vehicles, err := h.deliverySvc.ListVehicles(r.Context())
+	if err != nil {
+		slog.Error("failed to list vehicles", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to list vehicles")
+		return
+	}
+	resp := make([]VehicleResponse, 0, len(vehicles))
+	for _, v := range vehicles {
+		resp = append(resp, VehicleResponse{
+			ID:                v.ID.String(),
+			Name:              v.Name,
+			VehicleType:       string(v.VehicleType),
+			CapacityWeightLbs: v.CapacityWeightLbs,
+			Make:              v.Make,
+			Model:             v.Model,
+			Year:              v.Year,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// IntegrationOrderLine carries the per-product weight AI_LM needs for the
+// load solver. weight_lbs is the per-unit weight from the catalog.
+type IntegrationOrderLine struct {
+	ProductID string  `json:"product_id"`
+	SKU       string  `json:"sku"`
+	Quantity  float64 `json:"quantity"`
+	WeightLbs float64 `json:"weight_lbs"`
+}
+
+// IntegrationOrderResponse is an order plus its line items and (when a delivery
+// stop has been geocoded) its destination coordinates.
+type IntegrationOrderResponse struct {
+	ID        string                 `json:"id"`
+	Status    string                 `json:"status"`
+	Latitude  *float64               `json:"latitude,omitempty"`
+	Longitude *float64               `json:"longitude,omitempty"`
+	Lines     []IntegrationOrderLine `json:"lines"`
+}
+
+// ListOrdersForDate returns orders (optionally filtered by ?status= and ?date=)
+// with line items + per-unit weights for AI_LM routing/load planning. Read-only.
+func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	date := r.URL.Query().Get("date")
+
+	sqlQuery := `
+		SELECT o.id, o.status,
+		       ol.product_id, p.sku, ol.quantity, COALESCE(p.weight_lbs, 0),
+		       d.latitude, d.longitude
+		FROM orders o
+		JOIN order_lines ol ON ol.order_id = o.id
+		JOIN products p ON p.id = ol.product_id
+		LEFT JOIN deliveries d ON d.order_id = o.id
+		WHERE 1=1`
+	args := []interface{}{}
+	argIdx := 1
+	if status != "" {
+		sqlQuery += fmt.Sprintf(" AND o.status = $%d", argIdx)
+		args = append(args, status)
+		argIdx++
+	}
+	if date != "" {
+		sqlQuery += fmt.Sprintf(" AND o.created_at::date = $%d::date", argIdx)
+		args = append(args, date)
+		argIdx++
+	}
+	sqlQuery += " ORDER BY o.created_at, o.id, ol.product_id"
+
+	rows, err := h.db.Pool.Query(r.Context(), sqlQuery, args...)
+	if err != nil {
+		slog.Error("failed to query orders", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to query orders")
+		return
+	}
+	defer rows.Close()
+
+	ordersByID := map[string]*IntegrationOrderResponse{}
+	var order_order []string
+	for rows.Next() {
+		var (
+			orderID, orderStatus, productID, sku string
+			qty, weight                          float64
+			lat, lng                             *float64
+		)
+		if err := rows.Scan(&orderID, &orderStatus, &productID, &sku, &qty, &weight, &lat, &lng); err != nil {
+			slog.Error("failed to scan order row", "error", err, "method", r.Method, "path", r.URL.Path)
+			writeError(w, http.StatusInternalServerError, "failed to read order data")
+			return
+		}
+		o, ok := ordersByID[orderID]
+		if !ok {
+			o = &IntegrationOrderResponse{ID: orderID, Status: orderStatus, Latitude: lat, Longitude: lng}
+			ordersByID[orderID] = o
+			order_order = append(order_order, orderID)
+		}
+		if o.Latitude == nil && lat != nil {
+			o.Latitude, o.Longitude = lat, lng
+		}
+		o.Lines = append(o.Lines, IntegrationOrderLine{
+			ProductID: productID,
+			SKU:       sku,
+			Quantity:  qty,
+			WeightLbs: weight,
+		})
+	}
+
+	resp := make([]IntegrationOrderResponse, 0, len(order_order))
+	for _, id := range order_order {
+		resp = append(resp, *ordersByID[id])
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DeliveryRouteRequest is the approved-plan write-back body from AI_LM.
+type DeliveryRouteRequest struct {
+	VehicleID     string              `json:"vehicle_id"`
+	DriverID      string              `json:"driver_id"`
+	ScheduledDate string              `json:"scheduled_date"` // YYYY-MM-DD
+	Notes         string              `json:"notes"`
+	Stops         []DeliveryStopInput `json:"stops"`
+}
+
+type DeliveryStopInput struct {
+	OrderID  string   `json:"order_id"`
+	Sequence int      `json:"sequence"`
+	Lat      *float64 `json:"lat"`
+	Lng      *float64 `json:"lng"`
+}
+
+type DeliveryRouteResponse struct {
+	RouteID   string `json:"route_id"`
+	StopCount int    `json:"stop_count"`
+	Created   bool   `json:"created"` // false when an existing route was returned (idempotent)
+}
+
+// CreateDeliveryRoute persists an AI_LM-approved route as a GableLBM
+// delivery_routes row + deliveries rows. Idempotent on (vehicle_id, scheduled_date):
+// if a route already exists for that pair it is returned unchanged.
+func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
+	if h.deliverySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "delivery service not configured")
+		return
+	}
+	var req DeliveryRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	vehicleID, err := uuid.Parse(req.VehicleID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid vehicle_id")
+		return
+	}
+	if _, err := uuid.Parse(req.DriverID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid driver_id")
+		return
+	}
+	if req.ScheduledDate == "" {
+		writeError(w, http.StatusBadRequest, "scheduled_date required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Idempotency: reuse an existing route for the same vehicle + date.
+	existing, err := h.deliverySvc.ListRoutes(ctx, &req.ScheduledDate, nil)
+	if err != nil {
+		slog.Error("failed to list routes", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to check existing routes")
+		return
+	}
+	for _, route := range existing {
+		if route.VehicleID == vehicleID {
+			writeJSON(w, http.StatusOK, DeliveryRouteResponse{
+				RouteID:   route.ID.String(),
+				StopCount: route.StopCount,
+				Created:   false,
+			})
+			return
+		}
+	}
+
+	var notes *string
+	if req.Notes != "" {
+		notes = &req.Notes
+	}
+	route, err := h.deliverySvc.CreateRoute(ctx, delivery.CreateRouteRequest{
+		VehicleID:     vehicleID,
+		DriverID:      uuid.MustParse(req.DriverID),
+		ScheduledDate: req.ScheduledDate,
+		Notes:         notes,
+	})
+	if err != nil {
+		slog.Error("failed to create route", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to create route")
+		return
+	}
+
+	created := 0
+	for _, s := range req.Stops {
+		orderID, err := uuid.Parse(s.OrderID)
+		if err != nil {
+			continue
+		}
+		if err := h.deliverySvc.CreateDeliveryStop(ctx, route.ID, orderID, s.Sequence, s.Lat, s.Lng); err != nil {
+			slog.Warn("failed to create delivery stop", "order_id", s.OrderID, "error", err)
+			continue
+		}
+		created++
+	}
+
+	writeJSON(w, http.StatusCreated, DeliveryRouteResponse{
+		RouteID:   route.ID.String(),
+		StopCount: created,
+		Created:   true,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

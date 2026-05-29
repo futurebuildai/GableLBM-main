@@ -10,11 +10,20 @@ import (
 )
 
 type Service struct {
-	repo       Repository
-	mapsClient *MapsClient // nil if Google Maps not configured
-	notifier   DeliveryNotifierInterface
-	invoiceSvc InvoiceServiceInterface // nil if invoice service not wired
-	logger     *slog.Logger
+	repo         Repository
+	mapsClient   *MapsClient // nil if Google Maps not configured
+	notifier     DeliveryNotifierInterface
+	invoiceSvc   InvoiceServiceInterface // nil if invoice service not wired
+	exposureGate ExposureGate            // nil if lumber-index gating not wired
+	logger       *slog.Logger
+}
+
+// ExposureGate is the lumber-index pre-ship gate. Implemented by
+// pricing.PostgresExposureChecker. RequireClearForOrder returns a non-nil
+// error when the order's source quote has unresolved index exposure, blocking
+// assignment to a delivery route.
+type ExposureGate interface {
+	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
 }
 
 // InvoiceServiceInterface auto-creates invoices from orders on delivery completion.
@@ -57,6 +66,12 @@ func (s *Service) WithNotifier(n DeliveryNotifierInterface) {
 // WithInvoiceService sets the invoice service for auto-invoicing on delivery completion.
 func (s *Service) WithInvoiceService(invoiceSvc InvoiceServiceInterface) {
 	s.invoiceSvc = invoiceSvc
+}
+
+// WithExposureGate wires the lumber-index pre-ship gate. Optional: nil
+// disables exposure gating on route assignment.
+func (s *Service) WithExposureGate(gate ExposureGate) {
+	s.exposureGate = gate
 }
 
 // Fleet Management
@@ -282,6 +297,15 @@ func (s *Service) DispatchRoute(ctx context.Context, id uuid.UUID) error {
 // Delivery Management
 
 func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest) (*Delivery, *CapacityWarning, error) {
+	// Pre-ship exposure gate: block assigning an order to a route when its
+	// source quote has unresolved lumber-index exposure (ACK_REQUIRED /
+	// BLOCKED). Cleared via acknowledgment or owner override on the order.
+	if s.exposureGate != nil {
+		if err := s.exposureGate.RequireClearForOrder(ctx, req.OrderID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Verify route exists and get vehicle info
 	route, err := s.repo.GetRoute(ctx, req.RouteID)
 	if err != nil {
@@ -332,6 +356,22 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest
 		return nil, nil, err
 	}
 	return d, warning, nil
+}
+
+// CreateDeliveryStop creates a delivery stop with explicit coordinates. Used by
+// the integration write-back path (AI_LM-approved routes), which supplies
+// already-resolved lat/lng rather than relying on the mock geocoder in
+// AssignOrderToRoute.
+func (s *Service) CreateDeliveryStop(ctx context.Context, routeID, orderID uuid.UUID, sequence int, lat, lng *float64) error {
+	d := &Delivery{
+		RouteID:      routeID,
+		OrderID:      orderID,
+		StopSequence: sequence,
+		Status:       DeliveryStatusPending,
+		Latitude:     lat,
+		Longitude:    lng,
+	}
+	return s.repo.CreateDelivery(ctx, d)
 }
 
 func (s *Service) ListDeliveries(ctx context.Context, routeID uuid.UUID) ([]Delivery, error) {

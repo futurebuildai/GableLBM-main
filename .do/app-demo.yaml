@@ -60,6 +60,8 @@ services:
         value: https://demo.gablelbm.com
       - key: GABLELBM_BRANCH
         value: community
+      - key: CATEGORY_PRICING_ENABLED
+        value: "true"
       - key: DATABASE_URL
         value: ${gable-pg.DATABASE_URL}
         scope: RUN_AND_BUILD_TIME

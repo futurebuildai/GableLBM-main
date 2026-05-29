@@ -48,6 +48,24 @@ type Customer struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// EscalationPolicy mode constants (migration 072). AUTO_ESCALATE requires a
+// signed agreement; FLAG_FOR_REQUOTE is the safe default.
+const (
+	PolicyAutoEscalate   = "AUTO_ESCALATE"
+	PolicyFlagForRequote = "FLAG_FOR_REQUOTE"
+	PolicyRequireAck     = "REQUIRE_ACK"
+)
+
+// EscalationPolicy is the per-customer lumber-index price-protection policy
+// surfaced at GET/PUT /api/v1/customers/{id}/escalation-policy.
+type EscalationPolicy struct {
+	CustomerID        uuid.UUID  `json:"customer_id"`
+	Policy            string     `json:"policy"`
+	ThresholdPct      float64    `json:"threshold_pct"`
+	AgreementSignedAt *time.Time `json:"agreement_signed_at,omitempty"`
+	AgreementRef      string     `json:"agreement_ref,omitempty"`
+}
+
 type CustomerJob struct {
 	ID         uuid.UUID `json:"id"`
 	CustomerID uuid.UUID `json:"customer_id"`

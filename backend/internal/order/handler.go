@@ -2,12 +2,34 @@ package order
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/pagination"
 	"github.com/google/uuid"
 )
+
+// unresolvedExposure is the duck-typed interface pricing.ErrUnresolvedExposure
+// satisfies. Detecting it lets the handler render a structured 409 without the
+// order package importing pricing.
+type unresolvedExposure interface {
+	UnresolvedExposurePayload() map[string]any
+}
+
+// writeExposureBlock renders the 409 body when err is an unresolved-exposure
+// gate error; returns false if err is some other (or nil) error.
+func writeExposureBlock(w http.ResponseWriter, err error) bool {
+	var ue unresolvedExposure
+	if errors.As(err, &ue) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(ue.UnresolvedExposurePayload())
+		return true
+	}
+	return false
+}
 
 type Handler struct {
 	service *Service
@@ -32,6 +54,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/orders/{id}", guard(h.HandleGetOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/confirm", guard(h.HandleConfirmOrder))
 	mux.HandleFunc("POST /api/v1/orders/{id}/fulfill", guard(h.HandleFulfillOrder))
+	mux.HandleFunc("GET /api/v1/orders/{id}/exposure-gate", guard(h.HandleExposureGate))
+	mux.HandleFunc("POST /api/v1/orders/{id}/exposure-override", guard(h.HandleExposureOverride))
 }
 
 func (h *Handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +124,9 @@ func (h *Handler) HandleConfirmOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.ConfirmOrder(r.Context(), id); err != nil {
+		if writeExposureBlock(w, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to confirm order", http.StatusInternalServerError, err)
 		return
 	}
@@ -116,9 +143,61 @@ func (h *Handler) HandleFulfillOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.FulfillOrder(r.Context(), id); err != nil {
+		if writeExposureBlock(w, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to fulfill order", http.StatusInternalServerError, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleExposureGate reports whether the order is currently blocked by the
+// lumber-index pre-ship gate. 200 {"blocked":false} when clear; 409 with the
+// exposure payload when blocked.
+func (h *Handler) HandleExposureGate(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		return
+	}
+	if err := h.service.CheckExposureGate(r.Context(), id); err != nil {
+		if writeExposureBlock(w, err) {
+			return
+		}
+		httputil.RespondError(w, r, "failed to check exposure gate", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"blocked": false})
+}
+
+// HandleExposureOverride records an explicit owner override of the pre-ship
+// gate. Requires a notes justification (>= 10 chars); writes an OVERRIDDEN
+// exposure event + audit entry.
+func (h *Handler) HandleExposureOverride(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid Order ID", http.StatusBadRequest, err)
+		return
+	}
+	var body struct {
+		Notes string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	actor, role := "", ""
+	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
+		actor = claims.Subject
+		role = claims.Role
+	}
+	if err := h.service.OverrideExposure(r.Context(), id, body.Notes, actor, role); err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"overridden": true})
 }

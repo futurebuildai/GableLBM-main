@@ -56,7 +56,7 @@ func (r *PostgresRepository) CreateRFC(ctx context.Context, rfc *RFC) error {
 
 func (r *PostgresRepository) GetRFC(ctx context.Context, id uuid.UUID) (*RFC, error) {
 	query := `
-		SELECT id, title, status, problem_statement, proposed_solution, content, author_id, created_at, updated_at
+		SELECT id, title, status, problem_statement, proposed_solution, COALESCE(content, ''), author_id, created_at, updated_at
 		FROM rfcs
 		WHERE id = $1
 	`
@@ -83,7 +83,7 @@ func (r *PostgresRepository) GetRFC(ctx context.Context, id uuid.UUID) (*RFC, er
 
 func (r *PostgresRepository) ListRFCs(ctx context.Context) ([]RFC, error) {
 	query := `
-		SELECT id, title, status, problem_statement, proposed_solution, content, author_id, created_at, updated_at
+		SELECT id, title, status, problem_statement, proposed_solution, COALESCE(content, ''), author_id, created_at, updated_at
 		FROM rfcs
 		ORDER BY created_at DESC
 	`

@@ -12,7 +12,7 @@ import {
   Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search,
   ShoppingBag, Store, BookOpen, Building2, BarChart3,
   FolderOpen, Clock, Receipt, Landmark, GitCompareArrows,
-  TrendingUp, Scale
+  TrendingUp, Scale, ShieldAlert, Activity
 } from 'lucide';
 
 @customElement('gable-app-shell')
@@ -110,6 +110,7 @@ export class GableAppShell extends LitElement {
             </div>
 
             ${this._navItem('/quotes', FileText, 'Quotes')}
+            ${this._navItem('/quotes/exposure', ShieldAlert, 'At-Risk Quotes')}
             ${this._navItem('/orders', FileText, 'Orders')}
             ${this._navItem('/purchasing', ShoppingBag, 'Purchasing')}
             ${this._navItem('/purchasing/vendors', Store, 'Vendors')}
@@ -126,6 +127,7 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/reports/saved', FolderOpen, 'Saved Reports')}
             ${this._navItem('/reports/daily-till', LayoutDashboard, 'Daily Till')}
             ${this._navItem('/reports/ar-aging', Clock, 'AR Aging')}
+            ${this._navItem('/reports/exposure', BarChart3, 'Exposure Portfolio')}
             ${this._navItem('/reports/customer-statement', Receipt, 'Customer Statement')}
 
             <div class="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
@@ -139,11 +141,13 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/accounting/balance-sheet', Scale, 'Balance Sheet')}
             ${this._navItem('/accounting/bank-reconciliation', Landmark, 'Bank Reconciliation')}
             ${this._navItem('/accounting/po-matching', GitCompareArrows, 'PO Matching')}
+            ${this._navItem('/accounting/accounts-payable', Receipt, 'Accounts Payable')}
           </nav>
 
           <!-- Footer -->
           <div class="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
             ${this._navItem('/pricing', LayoutGrid, 'Pricing')}
+            ${this._navItem('/admin/market-indices', Activity, 'Market Indices')}
             ${this._navItem('/admin/branches', Building2, 'Branches')}
             ${this._navItem('/admin', Settings, 'Admin')}
           </div>

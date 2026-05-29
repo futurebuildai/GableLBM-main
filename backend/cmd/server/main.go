@@ -55,6 +55,7 @@ import (
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/eventbus"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -120,6 +121,12 @@ func main() {
 	// 3c. Initialize Audit Logger (financial operation tracking)
 	auditLog := audit.NewLogger(db)
 	logger.Info("Audit logger initialized")
+
+	// 3d. Initialize Event Bus (quote-exposure side-effects). Tries NATS when
+	// NATS_URL is set, otherwise transparently falls back to an in-process bus.
+	// The DO demo/staging deploys leave NATS_URL unset and degrade gracefully.
+	bus := eventbus.New(eventbus.Config{URL: cfg.NATSURL})
+	logger.Info("Event bus initialized", "backend", bus.Backend())
 
 	// 4. Initialize Auth Middleware
 	// Fail-closed: JWKS_URL is required unless AUTH_MODE=dev is explicitly set.
@@ -303,6 +310,28 @@ func main() {
 	escalatorHandler := pricing.NewEscalatorHandler(escalatorSvc)
 	escalatorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
+	// Lumber Index-Aware Quote Price Protection (Exposure Module).
+	// Snapshots a baseline index at quote-send, detects index moves beyond the
+	// per-customer threshold, and applies the snapshotted policy (auto-escalate
+	// / flag / require-ack). Side-effects (notifications) are decoupled via the
+	// event bus. The pre-ship gate (checker) is wired into order/delivery below.
+	exposureRepo := pricing.NewExposureRepository(db)
+	exposureChecker := pricing.NewExposureChecker(db)
+	exposureAudit := &exposureAuditAdapter{auditLog: auditLog}
+	exposureScanner := pricing.NewExposureScanner(exposureRepo, escalatorRepo, quoteRepo, exposureAudit, db, logger).
+		WithEventBus(bus)
+	exposureSvc := pricing.NewExposureService(exposureRepo, escalatorRepo, quoteRepo, exposureAudit, exposureChecker, logger).
+		WithEventBus(bus)
+	exposureHandler := pricing.NewExposureHandler(exposureScanner, exposureChecker, exposureRepo, exposureSvc)
+	exposureHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	indexAdminHandler := pricing.NewIndexAdminHandler(escalatorRepo, exposureRepo, exposureScanner, db, logger)
+	indexAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+
+	// Wire the snapshot service into the quote module so SENT quotes capture a
+	// baseline index. Best-effort (mirrors the auto-PO fire-and-forget hook).
+	snapshotSvc := pricing.NewSnapshotService(escalatorRepo, exposureRepo, quoteRepo, db, logger)
+	quoteSvc.WithSnapshotService(snapshotSvc)
+
 	// Vendor Module
 	vendorRepo := vendor.NewRepository(db)
 	vendorSvc := vendor.NewService(vendorRepo)
@@ -337,6 +366,15 @@ func main() {
 		logger.Error("reorder scheduler failed to start", "error", err)
 	}
 
+	// Exposure safety-net scheduler. Disabled by default; an operator activates
+	// it by setting exposure.enabled=true in system_settings. Re-evaluates open
+	// commodity quotes nightly to backstop missed real-time index events. Stops
+	// in graceful shutdown before the bus closes.
+	exposureScheduler := quote.NewExposureScheduler(db, exposureScanner)
+	if err := exposureScheduler.Start(context.Background()); err != nil {
+		logger.Error("exposure scheduler failed to start", "error", err)
+	}
+
 	// Auto-PO: wire quote service to create POs when quotes are accepted
 	quoteSvc.WithAutoPO(&autoPOAdapter{poSvc: poSvc, productSvc: productSvc})
 
@@ -350,11 +388,22 @@ func main() {
 
 	orderSvc := order.NewService(orderRepo, inventorySvc, invoiceSvc, customerSvc, poSvc, db)
 	orderSvc.WithAuditLog(auditLog)
+	// Pre-ship gate: block confirm/fulfill when the source quote has unresolved
+	// lumber-index exposure (ACK_REQUIRED/BLOCKED). The overrider adapter drops
+	// the *QuoteExposureEvent return so it satisfies order.ExposureOverrider.
+	orderSvc.WithExposureGate(exposureChecker, &exposureOverriderAdapter{svc: exposureSvc})
 	orderHandler := order.NewHandler(orderSvc)
 	orderHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
+
+	// Exposure notifier: subscribe to quote.exposure.> so index-exposure events
+	// fan out to salesperson alerts + customer notices. Idempotent on EventID.
+	exposureNotifier := notification.NewExposureNotifier(emailSvc, db, logger)
+	if err := bus.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", exposureNotifier.Handle); err != nil {
+		logger.Error("failed to subscribe exposure notifier", "error", err)
+	}
 
 	// Document Module
 	docSvc := document.NewService(productRepo)
@@ -417,6 +466,12 @@ func main() {
 	reportingHandler.RegisterBuilderRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
 
+	// Report Scheduler
+	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc)
+	if err := reportScheduler.Start(context.Background()); err != nil {
+		logger.Error("reporting scheduler failed to start", "error", err)
+	}
+
 	// Sales Tax Module (Avalara AvaTax)
 	taxExemptionRepo := tax.NewExemptionRepo(db)
 	var avalaraClient *tax.AvalaraClient
@@ -438,6 +493,9 @@ func main() {
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)
 	deliverySvc := delivery.NewService(deliveryRepo)
+	// Pre-ship gate: block route assignment (dispatch) for orders whose source
+	// quote has unresolved lumber-index exposure.
+	deliverySvc.WithExposureGate(exposureChecker)
 
 	// Wire Google Maps for route optimization if API key is set
 	if cfg.GoogleMapsAPIKey != "" {
@@ -582,7 +640,7 @@ func main() {
 			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
 		}
 	}
-	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, integrationAPIKey)
+	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, deliverySvc, integrationAPIKey)
 	integrationHandler.RegisterRoutes(mux)
 
 	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch
@@ -763,6 +821,24 @@ func main() {
 	reorderScheduler.Stop()
 	logger.Info("Shutdown step 3.5/4: reorder scheduler stopped")
 
+	// Step 3.6: Stop the reporting scheduler
+	logger.Info("Shutdown step 3.6/4: stopping reporting scheduler...")
+	reportScheduler.Stop()
+	logger.Info("Shutdown step 3.6/4: reporting scheduler stopped")
+
+	// Step 3.7: Stop the exposure safety-net scheduler, then close the event
+	// bus (flushes in-flight publishes / drains the in-process worker) before
+	// the DB pool closes so any subscriber DB lookups still have a live pool.
+	logger.Info("Shutdown step 3.7/4: stopping exposure scheduler...")
+	exposureScheduler.Stop()
+	logger.Info("Shutdown step 3.7/4: exposure scheduler stopped")
+
+	logger.Info("Shutdown step 3.8/4: closing event bus...")
+	if err := bus.Close(ctx); err != nil {
+		logger.Error("event bus close error", "error", err)
+	}
+	logger.Info("Shutdown step 3.8/4: event bus closed")
+
 	// Step 4: Close database connection pool
 	logger.Info("Shutdown step 4/4: closing database pool...")
 	db.Close()
@@ -924,4 +1000,37 @@ func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid
 		return basePrice, nil
 	}
 	return cp.FinalPrice, nil
+}
+
+// exposureAuditAdapter bridges the async pkg/audit.Logger to the narrow
+// pricing.AuditWriter interface (which re-declares the audit entry to avoid a
+// pricing→pkg/audit import). EntityID arrives as a string; non-UUID values map
+// to uuid.Nil rather than dropping the audit entry.
+type exposureAuditAdapter struct {
+	auditLog *audit.Logger
+}
+
+func (a *exposureAuditAdapter) LogEntry(ctx context.Context, e pricing.AuditEntry) {
+	entityID, err := uuid.Parse(e.EntityID)
+	if err != nil {
+		entityID = uuid.Nil
+	}
+	a.auditLog.Log(ctx, audit.Entry{
+		Action:     e.Action,
+		EntityType: e.EntityType,
+		EntityID:   entityID,
+		UserID:     e.UserID,
+		Changes:    e.Changes,
+	})
+}
+
+// exposureOverriderAdapter bridges pricing.ExposureService.OverrideForOrder
+// (which returns the created event) to order.ExposureOverrider (error-only).
+type exposureOverriderAdapter struct {
+	svc *pricing.ExposureService
+}
+
+func (a *exposureOverriderAdapter) OverrideForOrder(ctx context.Context, orderID uuid.UUID, notes, actor, role string) error {
+	_, err := a.svc.OverrideForOrder(ctx, orderID, notes, actor, role)
+	return err
 }

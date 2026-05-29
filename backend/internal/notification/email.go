@@ -40,3 +40,14 @@ func (s *LogEmailService) SendDeliveryNotification(ctx context.Context, to strin
 	)
 	return nil
 }
+
+func (s *LogEmailService) SendEmailWithAttachment(ctx context.Context, to []string, subject, body string, filename string, content []byte) error {
+	s.logger.Info("MOCK EMAIL WITH ATTACHMENT SENT",
+		"to", to,
+		"subject", subject,
+		"body", body,
+		"filename", filename,
+		"attachment_size", len(content),
+	)
+	return nil
+}

@@ -14,14 +14,32 @@ import (
 	"github.com/google/uuid"
 )
 
+// ExposureGate is the narrow pre-ship gate the order module depends on,
+// implemented by pricing.PostgresExposureChecker. RequireClearForOrder returns
+// a non-nil error when the order's source quote has unresolved index exposure
+// (ACK_REQUIRED / BLOCKED), blocking confirm/fulfill until acknowledged or
+// overridden.
+type ExposureGate interface {
+	RequireClearForOrder(ctx context.Context, orderID uuid.UUID) error
+}
+
+// ExposureOverrider records an explicit owner override of the pre-ship gate,
+// implemented by pricing.ExposureService. The override writes an OVERRIDDEN
+// exposure event + audit entry, after which the gate clears.
+type ExposureOverrider interface {
+	OverrideForOrder(ctx context.Context, orderID uuid.UUID, notes, actor, role string) error
+}
+
 type Service struct {
-	repo         Repository
-	db           *database.DB
-	inventorySvc *inventory.Service
-	invoiceSvc   *invoice.Service
-	customerSvc  *customer.Service
-	poSvc        *purchase_order.Service
-	auditLog     *audit.Logger
+	repo              Repository
+	db                *database.DB
+	inventorySvc      *inventory.Service
+	invoiceSvc        *invoice.Service
+	customerSvc       *customer.Service
+	poSvc             *purchase_order.Service
+	auditLog          *audit.Logger
+	exposureGate      ExposureGate
+	exposureOverrider ExposureOverrider
 }
 
 func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *invoice.Service, customerSvc *customer.Service, poSvc *purchase_order.Service, db ...*database.DB) *Service {
@@ -41,6 +59,14 @@ func NewService(repo Repository, inventorySvc *inventory.Service, invoiceSvc *in
 // WithAuditLog sets the audit logger for financial operation tracking.
 func (s *Service) WithAuditLog(l *audit.Logger) *Service {
 	s.auditLog = l
+	return s
+}
+
+// WithExposureGate wires the lumber-index pre-ship gate. Optional: nil
+// disables exposure gating entirely (e.g. tests, or builds without pricing).
+func (s *Service) WithExposureGate(gate ExposureGate, overrider ExposureOverrider) *Service {
+	s.exposureGate = gate
+	s.exposureOverrider = overrider
 	return s
 }
 
@@ -141,6 +167,15 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("cannot confirm order in status %s", o.Status)
 	}
 
+	// 1.25 Pre-ship exposure gate: block confirm when the source quote has
+	// unresolved lumber-index exposure (ACK_REQUIRED / BLOCKED). Cleared via
+	// acknowledgment or an explicit owner override.
+	if s.exposureGate != nil {
+		if err := s.exposureGate.RequireClearForOrder(ctx, id); err != nil {
+			return err
+		}
+	}
+
 	// 1.5 Check Credit Limit
 	cust, err := s.customerSvc.GetCustomer(ctx, o.CustomerID)
 	if err != nil {
@@ -209,6 +244,45 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// CheckExposureGate reports whether the order is currently blocked by the
+// lumber-index pre-ship gate. Returns nil when clear (or gating disabled).
+func (s *Service) CheckExposureGate(ctx context.Context, id uuid.UUID) error {
+	if s.exposureGate == nil {
+		return nil
+	}
+	return s.exposureGate.RequireClearForOrder(ctx, id)
+}
+
+// OverrideExposure records an explicit owner override of the pre-ship gate for
+// an order, writing an OVERRIDDEN exposure event + audit entry via the pricing
+// service. After this succeeds the gate clears for the order's source quote.
+func (s *Service) OverrideExposure(ctx context.Context, id uuid.UUID, notes, actor, role string) error {
+	if s.exposureOverrider == nil {
+		return fmt.Errorf("exposure override not available")
+	}
+	if len(notes) < 10 {
+		return fmt.Errorf("override notes must be at least 10 characters")
+	}
+	if err := s.exposureOverrider.OverrideForOrder(ctx, id, notes, actor, role); err != nil {
+		return err
+	}
+	// Mirror into the order audit trail so the override is discoverable from
+	// the order even though the exposure event lives on the quote.
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "order.exposure.overridden",
+			EntityType: "order",
+			EntityID:   id,
+			UserID:     actor,
+			Changes: map[string]interface{}{
+				"notes": notes,
+				"role":  role,
+			},
+		})
+	}
+	return nil
+}
+
 func (s *Service) ListOrders(ctx context.Context) ([]Order, error) {
 	return s.repo.ListOrders(ctx)
 }
@@ -230,6 +304,14 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 
 	if o.Status != StatusConfirmed {
 		return fmt.Errorf("cannot fulfill order in status %s (must be CONFIRMED)", o.Status)
+	}
+
+	// 1.25 Pre-ship exposure gate (re-checked at fulfill in case the index
+	// moved between confirm and ship).
+	if s.exposureGate != nil {
+		if err := s.exposureGate.RequireClearForOrder(ctx, id); err != nil {
+			return err
+		}
 	}
 
 	// 1.5 Check Credit Limit

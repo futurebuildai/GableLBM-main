@@ -62,6 +62,8 @@ services:
         value: https://staging.gablelbm.com
       - key: GABLELBM_BRANCH
         value: staging
+      - key: CATEGORY_PRICING_ENABLED
+        value: "true"
       - key: DATABASE_URL
         value: ${gable-pg.DATABASE_URL}
         scope: RUN_AND_BUILD_TIME

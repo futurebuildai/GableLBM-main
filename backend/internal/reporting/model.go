@@ -75,6 +75,7 @@ ReportID       string                 `json:"report_id"`
 CronExpression string                 `json:"cron_expression"`
 Recipients     []string               `json:"recipients"`
 Status         string                 `json:"status"`
+Format         string                 `json:"format"`
 LastRunAt      *string                `json:"last_run_at,omitempty"`
 NextRunAt      *string                `json:"next_run_at,omitempty"`
 CreatedAt      string                 `json:"created_at"`
