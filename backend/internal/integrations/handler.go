@@ -74,13 +74,18 @@ func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // ProductResponse is the integration-facing product model
 type ProductResponse struct {
-	ID        string  `json:"id"`
-	SKU       string  `json:"sku"`
-	Name      string  `json:"name"`
-	Category  string  `json:"category"`
-	UOM       string  `json:"uom"`
-	Price     int64   `json:"price"`      // cents
-	WeightLbs float64 `json:"weight_lbs"` // per-unit weight (lb)
+	ID             string   `json:"id"`
+	SKU            string   `json:"sku"`
+	Name           string   `json:"name"`
+	Category       string   `json:"category"`
+	UOM            string   `json:"uom"`
+	Price          int64    `json:"price"`      // cents
+	WeightLbs      float64  `json:"weight_lbs"` // per-unit weight (lb)
+	LengthIn       *float64 `json:"length_in"`  // PIM-canonical geometry (inches); null = unset
+	WidthIn        *float64 `json:"width_in"`   // PIM-canonical geometry (inches); null = unset
+	HeightIn       *float64 `json:"height_in"`  // PIM-canonical geometry (inches); null = unset
+	Stackable      bool     `json:"stackable"`
+	GeometrySource string   `json:"geometry_source"`
 }
 
 // ListProductsByCategory returns products filtered by category and/or text search
@@ -93,7 +98,8 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0), COALESCE(p.weight_lbs, 0)
+	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0), COALESCE(p.weight_lbs, 0),
+		p.length_in, p.width_in, p.height_in, COALESCE(p.stackable, TRUE), COALESCE(p.geometry_source, 'parametric')
 		FROM products p WHERE 1=1`
 	args := []interface{}{}
 	argIdx := 1
@@ -122,7 +128,7 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var p ProductResponse
 		var priceFloat float64
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat, &p.WeightLbs); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat, &p.WeightLbs, &p.LengthIn, &p.WidthIn, &p.HeightIn, &p.Stackable, &p.GeometrySource); err != nil {
 			slog.Error("failed to scan product row", "error", err, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "failed to read product data")
 			return

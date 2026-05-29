@@ -26,6 +26,11 @@ export interface Product {
     vendor_id?: string;      // Canonical FK -> vendors.id
     upc?: string;
     weight_lbs?: number;
+    length_in?: number | null;      // Parametric geometry (inches); null = not set
+    width_in?: number | null;       // Parametric geometry (inches); null = not set
+    height_in?: number | null;      // Parametric geometry (inches); null = not set
+    stackable?: boolean;            // Whether units may stack in a load
+    geometry_source?: string;       // 'parametric' (future: 'mesh')
     reorder_point?: number;
     reorder_qty?: number;
     total_quantity?: number;

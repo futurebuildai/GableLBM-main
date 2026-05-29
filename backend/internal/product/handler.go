@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/products/reorder-alerts", guard(h.HandleReorderAlerts))
 	mux.HandleFunc("GET /api/v1/products/{id}", guard(h.HandleGetProduct))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
+	mux.HandleFunc("PATCH /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
 }
 
 // HandleGetProduct handles GET /products/{id}
@@ -133,6 +134,42 @@ func (h *Handler) HandleUpdateMarginRules(w http.ResponseWriter, r *http.Request
 
 	if err := h.service.UpdateMarginRules(r.Context(), id, req.TargetMargin, req.CommissionRate); err != nil {
 		httputil.RespondError(w, r, "Failed to update margin rules", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// HandleUpdateDimensions handles PATCH /products/{id}/dimensions — writes the
+// parametric 3D geometry that the PIM owns as the canonical digital-twin source.
+func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		httputil.RespondError(w, r, "id is required", http.StatusBadRequest, nil)
+		return
+	}
+
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		return
+	}
+
+	var req struct {
+		LengthIn       *float64 `json:"length_in"`
+		WidthIn        *float64 `json:"width_in"`
+		HeightIn       *float64 `json:"height_in"`
+		Stackable      bool     `json:"stackable"`
+		GeometrySource string   `json:"geometry_source"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.UpdateDimensions(r.Context(), id, req.LengthIn, req.WidthIn, req.HeightIn, req.Stackable, req.GeometrySource); err != nil {
+		httputil.RespondError(w, r, "Failed to update dimensions", http.StatusInternalServerError, err)
 		return
 	}
 

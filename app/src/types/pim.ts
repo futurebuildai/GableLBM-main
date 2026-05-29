@@ -77,6 +77,14 @@ export interface GenerateCollateralRequest {
     audience: string;
 }
 
+export interface UpdateDimensionsRequest {
+    length_in: number | null;
+    width_in: number | null;
+    height_in: number | null;
+    stackable: boolean;
+    geometry_source: string;
+}
+
 export interface UpdateContentRequest {
     short_description?: string;
     long_description?: string;

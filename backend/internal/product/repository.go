@@ -20,6 +20,7 @@ type Repository interface {
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
+	UpdateDimensions(ctx context.Context, id uuid.UUID, lengthIn, widthIn, heightIn *float64, stackable bool, geometrySource string) error
 }
 
 // PostgresRepository implements Repository using pgx
@@ -35,11 +36,11 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // CreateProduct inserts a new product into the database
 func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) error {
 	query := `
-		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc, length_in, width_in, height_in, stackable, geometry_source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(NULLIF($12, ''), 'parametric'))
 		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
 
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource).Scan(
 		&p.ID,
 		&p.CreatedAt,
 		&p.UpdatedAt,
@@ -59,7 +60,9 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0), p.length_in, p.width_in, p.height_in,
+		       COALESCE(p.stackable, TRUE), COALESCE(p.geometry_source, 'parametric'),
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -80,6 +83,11 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		&p.VendorID,
 		&p.UPC,
 		&p.WeightLbs,
+		&p.LengthIn,
+		&p.WidthIn,
+		&p.HeightIn,
+		&p.Stackable,
+		&p.GeometrySource,
 		&p.ReorderPoint,
 		&p.ReorderQty,
 		&p.CreatedAt,
@@ -105,7 +113,9 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error) {
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0), p.length_in, p.width_in, p.height_in,
+		       COALESCE(p.stackable, TRUE), COALESCE(p.geometry_source, 'parametric'),
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -134,6 +144,11 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 			&p.ReorderPoint,
 			&p.ReorderQty,
 			&p.CreatedAt,
@@ -167,7 +182,9 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 
 	query := `
 		SELECT p.id, p.sku, p.description, p.uom_primary, p.base_price, p.vendor, p.vendor_id, p.upc,
-		       COALESCE(p.weight_lbs, 0), COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
+		       COALESCE(p.weight_lbs, 0), p.length_in, p.width_in, p.height_in,
+		       COALESCE(p.stackable, TRUE), COALESCE(p.geometry_source, 'parametric'),
+		       COALESCE(p.reorder_point, 0), COALESCE(p.reorder_qty, 0),
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
@@ -197,6 +214,11 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 			&p.VendorID,
 			&p.UPC,
 			&p.WeightLbs,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 			&p.ReorderPoint,
 			&p.ReorderQty,
 			&p.CreatedAt,
@@ -285,5 +307,16 @@ func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID
 func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
+	return err
+}
+
+// UpdateDimensions writes the parametric 3D geometry (inches) that the PIM owns
+// as the canonical digital-twin source consumed by AI_LM's Load Builder.
+func (r *PostgresRepository) UpdateDimensions(ctx context.Context, id uuid.UUID, lengthIn, widthIn, heightIn *float64, stackable bool, geometrySource string) error {
+	if geometrySource == "" {
+		geometrySource = "parametric"
+	}
+	query := `UPDATE products SET length_in = $1, width_in = $2, height_in = $3, stackable = $4, geometry_source = $5, updated_at = NOW() WHERE id = $6`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, lengthIn, widthIn, heightIn, stackable, geometrySource, id)
 	return err
 }
