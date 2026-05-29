@@ -94,3 +94,9 @@ func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMar
 func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
 }
+
+// UpdateDimensions writes the parametric 3D geometry (inches) for a product. The
+// PIM owns this as the canonical digital-twin source consumed by AI_LM.
+func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, lengthIn, widthIn, heightIn *float64, stackable bool, geometrySource string) error {
+	return s.repo.UpdateDimensions(ctx, id, lengthIn, widthIn, heightIn, stackable, geometrySource)
+}

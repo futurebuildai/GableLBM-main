@@ -68,6 +68,11 @@ type ProductDetail struct {
 	Vendor          *string         `json:"vendor"`
 	UPC             *string         `json:"upc"`
 	WeightLbs       float64         `json:"weight_lbs"`
+	LengthIn        *float64        `json:"length_in"`
+	WidthIn         *float64        `json:"width_in"`
+	HeightIn        *float64        `json:"height_in"`
+	Stackable       bool            `json:"stackable"`
+	GeometrySource  string          `json:"geometry_source"`
 	ReorderPoint    float64         `json:"reorder_point"`
 	ReorderQty      float64         `json:"reorder_qty"`
 	TotalQuantity   float64         `json:"total_quantity"`

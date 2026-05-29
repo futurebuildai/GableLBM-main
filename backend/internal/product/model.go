@@ -39,6 +39,11 @@ type Product struct {
 	VendorID        *uuid.UUID `json:"vendor_id"`  // Canonical FK -> vendors.id
 	UPC             *string    `json:"upc"`
 	WeightLbs       float64    `json:"weight_lbs"`
+	LengthIn        *float64   `json:"length_in"`       // Parametric geometry (inches); nil = not set
+	WidthIn         *float64   `json:"width_in"`        // Parametric geometry (inches); nil = not set
+	HeightIn        *float64   `json:"height_in"`       // Parametric geometry (inches); nil = not set
+	Stackable       bool       `json:"stackable"`       // Whether units may stack in a load
+	GeometrySource  string     `json:"geometry_source"` // 'parametric' (future: 'mesh')
 	ReorderPoint    float64    `json:"reorder_point"`
 	ReorderQty      float64    `json:"reorder_qty"`
 	TotalQuantity   float64    `json:"total_quantity" db:"-"` // Aggregated from inventory

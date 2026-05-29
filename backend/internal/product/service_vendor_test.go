@@ -48,6 +48,9 @@ func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _, _, _ *float64, _ bool, _ string) error {
+	return nil
+}
 
 // fakeVendorRepo is an in-memory vendor.Repository.
 type fakeVendorRepo struct {

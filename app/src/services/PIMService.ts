@@ -8,6 +8,7 @@ import type {
     GenerateImageRequest,
     GenerateCollateralRequest,
     UpdateContentRequest,
+    UpdateDimensionsRequest,
 } from '../types/pim';
 import { fetchWithAuth } from './fetchClient';
 
@@ -34,6 +35,15 @@ export const PIMService = {
         });
         if (!res.ok) throw new Error('Failed to update PIM content');
         return res.json();
+    },
+
+    async updateDimensions(id: string, data: UpdateDimensionsRequest): Promise<void> {
+        const res = await fetchWithAuth(`${API_URL}/api/v1/products/${id}/dimensions`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error('Failed to update dimensions');
     },
 
     async generateDescriptions(id: string, data: GenerateDescriptionsRequest): Promise<PIMContent> {
