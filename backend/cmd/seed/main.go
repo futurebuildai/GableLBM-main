@@ -1147,6 +1147,180 @@ func main() {
 	}
 	fmt.Printf("Seed: %d Saved Report Templates\n", len(savedReports))
 
+	// =========================================================================
+	// 18. PRICE-EXPOSURE DEMO DATA (lumber index-aware quote protection)
+	//     Populates the salesperson "At-Risk Quotes" view and the owner
+	//     "Exposure Portfolio" rollup with deterministic, idempotent rows.
+	//
+	//     Each scenario is a SENT quote on a commodity line whose tracking
+	//     index has risen above the customer's frozen threshold since the
+	//     quote was snapshotted, leaving the dealer bound to a stale price.
+	//     We write the quote + line + active price_escalator (the baseline
+	//     snapshot) + a ledger event so the quote-detail timeline renders too.
+	//
+	//     Deterministic UUIDs + ON CONFLICT (id) DO UPDATE keep this safe to
+	//     re-run on every demo/staging deploy (per the seed upsert convention).
+	// =========================================================================
+
+	// Resolve the active market indices by their stable index_code → (id, current_value).
+	type mIdx struct {
+		ID      uuid.UUID
+		Current float64
+	}
+	indexByCode := make(map[string]mIdx)
+	idxRows, err := db.Query(`SELECT id, index_code, current_value FROM market_indices WHERE is_active`)
+	if err == nil {
+		for idxRows.Next() {
+			var id, code string
+			var cur float64
+			if err := idxRows.Scan(&id, &code, &cur); err == nil {
+				indexByCode[code] = mIdx{ID: uuid.MustParse(id), Current: cur}
+			}
+		}
+		idxRows.Close()
+	}
+
+	// Per-customer escalation policy. AUTO_ESCALATE requires a signed agreement
+	// (enforced by a CHECK constraint in migration 072), so we set the agreement
+	// columns in the same UPDATE for those customers.
+	type custPolicy struct {
+		Customer  string
+		Policy    string
+		Threshold float64
+		Signed    bool // AUTO_ESCALATE only
+	}
+	policies := []custPolicy{
+		{"Okanagan Homes Ltd", "AUTO_ESCALATE", 5.0, true},
+		{"Mission Hill Custom", "REQUIRE_ACK", 6.0, false},
+		{"Vernon Valley Construction", "REQUIRE_ACK", 5.0, false},
+		{"Kelbrook Construction", "FLAG_FOR_REQUOTE", 4.0, false},
+		{"Peachland Framing Crew", "FLAG_FOR_REQUOTE", 4.0, false},
+		{"Summerland Roofers", "FLAG_FOR_REQUOTE", 5.0, false},
+	}
+	for _, p := range policies {
+		cid, ok := customerIDs[p.Customer]
+		if !ok {
+			continue
+		}
+		if p.Signed {
+			db.Exec(`UPDATE customers SET price_escalation_policy=$1, escalation_threshold_pct=$2,
+				escalation_agreement_signed_at=NOW(), escalation_agreement_ref=$3 WHERE id=$4`,
+				p.Policy, p.Threshold, "MSA-"+p.Customer[:3]+"-2026", cid)
+		} else {
+			db.Exec(`UPDATE customers SET price_escalation_policy=$1, escalation_threshold_pct=$2 WHERE id=$3`,
+				p.Policy, p.Threshold, cid)
+		}
+	}
+
+	// Exposure scenarios. BaseIndex is the snapshotted baseline (below the index's
+	// current value, so the delta is a positive — adverse — move for the dealer).
+	type expScenario struct {
+		N             int     // deterministic-UUID discriminator
+		Customer      string  // key into customerIDs
+		IndexCode     string  // tracking index (key into indexByCode)
+		SKU           string  // commodity product on the line
+		Qty           int     // line quantity
+		BaseIndex     float64 // frozen baseline index value at snapshot
+		ThresholdPct  float64 // frozen per-customer threshold
+		Policy        string  // policy_at_snapshot
+		ExposureState string  // quote + escalator current_state
+		EventType     string  // ledger event_type
+	}
+	scenarios := []expScenario{
+		{1, "Okanagan Homes Ltd", "RL_SPF_2X4", "LUM-248-PREM", 600, 380.0, 5.0, "AUTO_ESCALATE", "ESCALATED", "ESCALATED"},
+		{2, "Mission Hill Custom", "RL_OSB_716", "OSB-12", 320, 468.0, 6.0, "REQUIRE_ACK", "ACK_REQUIRED", "ACK_REQUIRED"},
+		{3, "Vernon Valley Construction", "RL_SYP_2X4", "LUM-2610-PREM", 240, 438.0, 5.0, "REQUIRE_ACK", "ACK_REQUIRED", "ACK_REQUIRED"},
+		{4, "Kelbrook Construction", "RL_SPF_2X4", "LUM-248-PREM", 480, 388.0, 4.0, "FLAG_FOR_REQUOTE", "FLAGGED", "FLAGGED"},
+		{5, "Peachland Framing Crew", "RL_OSB_716", "OSB-34-TG", 200, 498.0, 4.0, "FLAG_FOR_REQUOTE", "FLAGGED", "FLAGGED"},
+		{6, "Summerland Roofers", "RL_SPF_2X4", "LUM-2412-PREM", 160, 392.0, 5.0, "FLAG_FOR_REQUOTE", "FLAGGED", "FLAGGED"},
+	}
+
+	exposureSeeded := 0
+	for _, sc := range scenarios {
+		cid, ok := customerIDs[sc.Customer]
+		if !ok {
+			continue
+		}
+		idx, ok := indexByCode[sc.IndexCode]
+		if !ok || idx.Current <= 0 {
+			continue
+		}
+		pid, ok := skuToID[sc.SKU]
+		if !ok {
+			continue
+		}
+		unitPrice := productPrices[sc.SKU]
+		lineTotal := float64(sc.Qty) * unitPrice
+		// Adverse delta of the index since the baseline snapshot.
+		deltaPct := (idx.Current - sc.BaseIndex) / sc.BaseIndex * 100
+		// Exposure dollars: the share of this line's value put at risk by the move.
+		exposure := lineTotal * deltaPct / 100
+
+		branchID := custToBranch[cid]
+		if branchID == uuid.Nil {
+			branchID = kelMainID
+		}
+		qDate := recentDate(20)
+		expires := qDate.AddDate(0, 0, 30)
+
+		quoteID := uuid.MustParse(fmt.Sprintf("e1000000-0000-4000-8000-0000000000%02d", sc.N))
+		lineID := uuid.MustParse(fmt.Sprintf("e2000000-0000-4000-8000-0000000000%02d", sc.N))
+		escID := uuid.MustParse(fmt.Sprintf("e3000000-0000-4000-8000-0000000000%02d", sc.N))
+
+		// Quote (SENT, with denormalized exposure rollup for fast list filtering).
+		_, err := db.Exec(`INSERT INTO quotes
+			(id, customer_id, branch_id, state, total_amount, created_by, sent_at, expires_at, created_at,
+			 exposure_state, exposure_dollars, exposure_last_checked_at)
+			VALUES ($1,$2,$3,'SENT',$4,$5,$6,$7,$6,$8,$9,NOW())
+			ON CONFLICT (id) DO UPDATE SET
+				customer_id=$2, branch_id=$3, total_amount=$4, sent_at=$6, expires_at=$7,
+				exposure_state=$8, exposure_dollars=$9, exposure_last_checked_at=NOW()`,
+			quoteID, cid, branchID, lineTotal, demoUserID, qDate, expires, sc.ExposureState, exposure)
+		if err != nil {
+			log.Printf("Exposure quote %d: %v", sc.N, err)
+			continue
+		}
+
+		// Commodity line.
+		desc := sc.SKU
+		uom := "PCS"
+		db.Exec(`INSERT INTO quote_lines (id, quote_id, product_id, sku, description, quantity, uom, unit_price, line_total)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			ON CONFLICT (id) DO UPDATE SET quote_id=$2, product_id=$3, quantity=$6, unit_price=$8, line_total=$9`,
+			lineID, quoteID, pid, sc.SKU, desc, sc.Qty, uom, unitPrice, lineTotal)
+
+		// Active price escalator = the baseline snapshot captured at send time.
+		// NB: pass effective_date as its own param ($11) rather than reusing $6 —
+		// pgx infers a single type per placeholder, and using $6 as both TIMESTAMPTZ
+		// and ::date in one statement yields an inconsistent-type error.
+		db.Exec(`INSERT INTO price_escalators
+			(id, quote_line_id, market_index_id, escalation_type, escalation_rate, base_price,
+			 base_index_value, base_index_recorded_at, last_checked_at, current_state,
+			 policy_at_snapshot, threshold_pct_at_snapshot, effective_date, expiration_date, is_active)
+			VALUES ($1,$2,$3,'INDEX_DELTA',0,$4,$5,$6,NOW(),$7,$8,$9,$11::date,$10::date,TRUE)
+			ON CONFLICT (id) DO UPDATE SET
+				market_index_id=$3, base_price=$4, base_index_value=$5, base_index_recorded_at=$6,
+				last_checked_at=NOW(), current_state=$7, policy_at_snapshot=$8,
+				threshold_pct_at_snapshot=$9, is_active=TRUE`,
+			escID, lineID, idx.ID, unitPrice, sc.BaseIndex, qDate, sc.ExposureState,
+			sc.Policy, sc.ThresholdPct, expires, qDate)
+
+		// Ledger event (drives the quote-detail exposure timeline). Idempotent on
+		// the unique idempotency_key so re-seeding never duplicates the ledger.
+		db.Exec(`INSERT INTO quote_exposure_events
+			(quote_id, quote_line_id, market_index_id, event_type, base_index_value, current_index_value,
+			 delta_pct, exposure_dollars, threshold_pct, policy, actor_user_id, actor_role, method, notes, idempotency_key)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'seed','system','SEED',$11,$12)
+			ON CONFLICT (idempotency_key) DO NOTHING`,
+			quoteID, lineID, idx.ID, sc.EventType, sc.BaseIndex, idx.Current, deltaPct, exposure,
+			sc.ThresholdPct, sc.Policy,
+			fmt.Sprintf("%s rose %.1f%% past the %.0f%% threshold since snapshot", sc.IndexCode, deltaPct, sc.ThresholdPct),
+			fmt.Sprintf("seed-exposure-%d", sc.N))
+
+		exposureSeeded++
+	}
+	fmt.Printf("Seed: %d Price-Exposure Demo Quotes\n", exposureSeeded)
+
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE LUMBER & SUPPLY (KELOWNA, BC)  ")
 	fmt.Println("==================================================")
