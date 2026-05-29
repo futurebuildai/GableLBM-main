@@ -420,6 +420,42 @@ func main() {
 		db.Exec(`UPDATE customers SET balance_due = credit_limit + 4500 WHERE id = $1`, ghr)
 	}
 
+	// Realistic Okanagan delivery coordinates per customer site. These power
+	// the deliveries.latitude/longitude columns consumed by the AI_LM routing &
+	// compliance microservice (GET /api/integration/orders). Keyed by customer
+	// name and resolved to UUIDs so both delivery seed paths can geolocate stops.
+	custCoords := map[string][2]float64{
+		"Kelbrook Construction":      {49.8888, -119.4597}, // Spall Rd, Kelowna
+		"Okanagan Homes Ltd":         {49.9201, -119.3950}, // Summit Pkwy, Kelowna (UBCO)
+		"Lake Country Builders":      {50.0490, -119.4060}, // Bottom Wood Lake Rd, Lake Country
+		"Predator Ridge Renos":       {50.1830, -119.3940}, // Predator Ridge, Vernon
+		"Big White Cabin Co":         {49.7160, -118.9360}, // Whitefoot Way, Big White
+		"Mission Hill Custom":        {49.8350, -119.5760}, // Mission Hill Rd, West Kelowna
+		"Westbank Decks & Fence":     {49.8330, -119.6190}, // Boucherie Rd, West Kelowna
+		"Vernon Valley Construction": {50.2530, -119.2750}, // Polson Dr, Vernon
+		"Glenmore Heritage Reno":     {49.8880, -119.4960}, // Bernard Ave, Kelowna
+		"Knox Mountain Landscapes":   {49.9050, -119.4900}, // Knox Mountain Dr, Kelowna
+		"Peachland Framing Crew":     {49.7730, -119.7280}, // Beach Ave, Peachland
+		"Summerland Roofers":         {49.6000, -119.6800}, // Prairie Valley Rd, Summerland
+		"Okanagan DIY Owner":         {50.0530, -119.4100}, // Maple Ln, Lake Country
+	}
+	coordByCustID := make(map[uuid.UUID][2]float64, len(custCoords))
+	for name, c := range custCoords {
+		if id, ok := customerIDs[name]; ok {
+			coordByCustID[id] = c
+		}
+	}
+	// deliveryCoord returns a customer's site coordinate jittered ~±1 km so
+	// co-located deliveries don't stack on a single map pin. Falls back to the
+	// Kelowna Main yard for any customer without an explicit coordinate.
+	deliveryCoord := func(custID uuid.UUID) (float64, float64) {
+		c, ok := coordByCustID[custID]
+		if !ok {
+			c = [2]float64{49.8880, -119.4960} // Kelowna Main yard
+		}
+		return c[0] + (rand.Float64()-0.5)*0.02, c[1] + (rand.Float64()-0.5)*0.02
+	}
+
 	// =========================================================================
 	// 6. CUSTOMER CONTRACTS (Special SKU pricing for top customers)
 	// =========================================================================
@@ -752,14 +788,66 @@ func main() {
 					podSigner = &n
 					podTS = &t
 				}
-				db.Exec(`INSERT INTO deliveries (route_id, order_id, stop_sequence, status, pod_proof_url, pod_signed_by, pod_timestamp, delivery_instructions)
-					VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-					routeID, oID, s+1, dStatus, podURL, podSigner, podTS, "Call 30 min before arrival")
+				dlat, dlng := deliveryCoord(orderCustMap[oID])
+				db.Exec(`INSERT INTO deliveries (route_id, order_id, stop_sequence, status, latitude, longitude, pod_proof_url, pod_signed_by, pod_timestamp, delivery_instructions)
+					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+					routeID, oID, s+1, dStatus, dlat, dlng, podURL, podSigner, podTS, "Call 30 min before arrival")
 				deliveryCount++
 			}
 		}
 	}
 	fmt.Printf("Seed: 15 Routes, %d Deliveries\n", deliveryCount)
+
+	// =========================================================================
+	// 10b. AI_LM SAME-DAY ROUTABLE ORDERS
+	// The AI_LM load-management & compliance microservice pulls confirmed orders
+	// for a single day via GET /api/integration/orders?date=<today>&status=CONFIRMED
+	// and only orders that carry delivery geolocation become routable stops. The
+	// random orders above are spread over 180 days and the delivery seed only
+	// links FULFILLED orders, so without this block AI_LM's dispatcher (which
+	// defaults to today) sees zero stops. Create a today-dated CONFIRMED order
+	// per customer on one SCHEDULED route, each with a geolocated delivery.
+	// =========================================================================
+	aiRoutable := 0
+	if len(vehicleIDs) > 0 && len(driverIDs) > 0 && len(products) > 0 {
+		today := time.Now()
+		var aiRouteID string
+		db.QueryRow(`INSERT INTO delivery_routes (vehicle_id, driver_id, scheduled_date, status, notes)
+			VALUES ($1,$2,$3,'SCHEDULED',$4) RETURNING id`,
+			vehicleIDs[0], driverIDs[0], today, "AI_LM same-day dispatch demo").Scan(&aiRouteID)
+		if aiRouteID != "" {
+			rID := uuid.MustParse(aiRouteID)
+			seq := 0
+			for name, custID := range customerIDs {
+				branchID := custToBranch[custID]
+				if branchID == uuid.Nil {
+					branchID = kelMainID
+				}
+				orderID := uuid.New()
+				if _, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, status, salesperson_id, created_at)
+					VALUES ($1,$2,$3,0,'CONFIRMED',$4,$5)`, orderID, custID, branchID, custSalesperson[custID], today); err != nil {
+					continue
+				}
+				var orderTotal float64
+				numLines := 3 + rand.Intn(4)
+				for j := 0; j < numLines; j++ {
+					prod := products[rand.Intn(len(products))]
+					qty := 5 + rand.Intn(40)
+					orderTotal += float64(qty) * prod.Price
+					db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each)
+						VALUES ($1,$2,$3,$4)`, orderID, skuToID[prod.SKU], qty, prod.Price)
+				}
+				db.Exec("UPDATE orders SET total_amount=$1 WHERE id=$2", orderTotal, orderID)
+				seq++
+				dlat, dlng := deliveryCoord(custID)
+				db.Exec(`INSERT INTO deliveries (route_id, order_id, stop_sequence, status, latitude, longitude, delivery_instructions)
+					VALUES ($1,$2,$3,'PENDING',$4,$5,$6)`,
+					rID, orderID, seq, dlat, dlng, "AI_LM optimized stop — "+name)
+				aiRoutable++
+			}
+		}
+	}
+	fmt.Printf("Seed: %d AI_LM same-day routable CONFIRMED orders (geolocated)\n", aiRoutable)
 
 	// =========================================================================
 	// 11. PURCHASE ORDERS — branch-scoped, rotated across the three yards.
