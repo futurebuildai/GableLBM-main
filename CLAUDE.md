@@ -31,7 +31,7 @@ docs/         → Architecture, design system, and database specs
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
 - **PDF:** maroto v2 | **Excel:** excelize v2 | **Cron:** robfig/cron v3 | **Metrics:** Prometheus
-- **Note:** `docker-compose.yml` runs a `nats` container, but no NATS client is imported in Go code — the event bus described in `docs/architecture.md` is aspirational / not yet wired
+- **Event bus:** `pkg/eventbus` wraps NATS JetStream behind a `Bus` seam with a transparent **in-process fallback**. `NATS_URL` selects the backend (unset → in-process; the DO demo/staging manifests leave it unset). Boot never blocks or hard-fails when NATS is down. First consumer is the quote price-exposure feature (`quote.exposure.*` subjects → `notification.ExposureNotifier`)
 
 ### Frontend
 - **Framework:** Lit 3 Web Components + TypeScript 5.9 + Vite 7
@@ -44,9 +44,33 @@ docs/         → Architecture, design system, and database specs
 ## Architecture
 - **Pattern:** Modular monolith — single Go binary, ~50 modules under `backend/internal/<module>/`
 - **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), `handler.go` + `routes.go` (HTTP). Wired together in `backend/cmd/server/main.go`
-- **Cross-module:** Synchronous Go interfaces (writes via NATS events are not implemented yet)
+- **Cross-module:** Synchronous Go interfaces for reads/writes; asynchronous side-effects via `pkg/eventbus` (NATS JetStream or in-process fallback). The quote price-exposure feature publishes `quote.exposure.*` events consumed by the notification module
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
 - **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `backend/cmd/server/main.go`
+
+## Product Geometry & the AI_LM Digital Twin
+
+GableLBM's PIM is the **canonical source of per-product 3D geometry**. The `products`
+table carries optional `length_in` / `width_in` / `height_in` (`DECIMAL(19,4)`),
+`stackable` (`BOOLEAN`), and `geometry_source` (`TEXT`, default `parametric`) columns
+(migration `073_product_dimensions.sql`). These describe each SKU as a scaled
+**digital twin** — a parametric L×W×H box that renders identically in the PIM's Geometry
+tab (`<gable-product-twin-3d>`) and in the AI_LM Load Builder next to the truck bed.
+
+- **Shared scaling contract:** `1 inch = 1/12 Three.js world unit`. Both the PIM preview
+  and AI_LM's `Load3DVisualizer` use the same factor, so a 96″ board is `8` world units
+  in either app. Never change one side without the other.
+- **Editing:** Inventory → product → **Geometry** tab, persisted via
+  `PATCH /api/v1/products/{id}/dimensions`. The demo seed sets a few representative lumber
+  SKUs (`backend/cmd/seed/main.go`, `productDims` map) so dims survive redeploys.
+- **Consumption:** dims are exposed over the integration API (`/api/integration/products`)
+  and consumed by AI_LM, which resolves geometry as OVERRIDE → PIM → FALLBACK. Nullable
+  dims mean "no geometry yet" → AI_LM flags the item rather than rendering a zero-size box.
+- `geometry_source` is the forward-compat seam for a future `mesh` value + `mesh_url`
+  (GLTF asset upload) — parametric boxes only for now.
+
+See `INTEGRATIONS.md` for the full contract and `docs/architecture.md` for where this sits
+in the module map.
 
 ## Key Conventions
 
@@ -157,9 +181,13 @@ The denormalized `customers.balance_due` column is **not kept in sync** by the s
 `backend/cmd/seed/main.go` runs on every demo/staging deploy via the DO post-deploy job. Rows seeded with `ON CONFLICT DO NOTHING` will **not** pick up future edits to names, emails, etc. Sales reps (line 468), drivers (line 689), and any other deterministic-UUID seed data use `ON CONFLICT (id) DO UPDATE SET ...` so rebrand commits actually overwrite existing demo data. If you're touching seed strings on a row that already exists in production demo, verify the upsert clause names every column you changed.
 
 ## Detailed Specs
-See `docs/architecture.md`, `docs/design-system.md`, and `docs/database-erd.md` for deeper documentation.
+- `docs/architecture.md` — system principles, module map, the AI_LM digital-twin integration.
+- `docs/design-system.md`, `docs/database-erd.md` — design tokens and schema.
+- `INTEGRATIONS.md` — every `/api/integration/*` contract (AI_LM, Brain A2A, portal), auth, and the geometry payload.
+- `DEVOPS.md` — deployment source-of-truth: branches → DO apps, `doctl` runbook, app IDs, post-deploy migrate/seed, rollback.
+- `.do/README.md` — first-time App Platform setup (DNS, cluster, secrets).
 
-## Tier 1 Backlog (next-up work)
+## Roadmap & Recommended Next Work
 
 Each item below is grounded in evidence in this repo. Scope is approximate;
 read the referenced files before sizing.
@@ -168,6 +196,9 @@ read the referenced files before sizing.
 - **#7** Canonical `products.vendor_id` UUID FK to vendors (commit `f100454`).
 - **#8** PO source attribution column + `/purchase-orders/source-summary` endpoint for the replenishment-automation KPI (commit `1315a37`).
 - **#9** Scheduled auto-reorder via robfig/cron + real demand signal from `order_lines` velocity, with `reorder_runs` observability table and manual triggers at `/purchase-orders/refresh-reorder-targets` and `/purchase-orders/reorder-runs` (commit `078a4cc`).
+- **Lumber index price protection** Quote lines snapshot a baseline market-index value at SEND; the `pricing` exposure scanner detects index moves past a per-customer threshold and applies the customer policy (AUTO_ESCALATE / FLAG_FOR_REQUOTE / REQUIRE_ACK). Migration `072`, `pkg/eventbus` (`quote.exposure.*`), salesperson at-risk view (`/quotes/exposure`), owner portfolio rollup (`/reports/exposure`), market-index admin (`/admin/market-indices`), quote-detail exposure banner + margin-erosion fold-in, in-app acknowledgment modal, and the non-bypassable pre-ship gate on orders/delivery.
+- **#11** Canonical per-product 3D geometry (`products.length_in/width_in/height_in/stackable/geometry_source`, migration `073`), the PIM Geometry tab (`<gable-product-twin-3d>`), `PATCH /api/v1/products/{id}/dimensions`, and exposure over `/api/integration/products` so AI_LM renders scaled digital twins (commits `14210d6`, `915b26e`).
+- **#12** Unfiltered bulk product catalog pull on `/api/integration/products` (no `category`/`q` → `LIMIT 1000`) so AI_LM can hydrate its full load-planning catalog in one call (commit `b5170de`).
 
 ### #10 candidates — pick one based on the active discovery doc
 
@@ -179,9 +210,15 @@ read the referenced files before sizing.
 
 **D. Customer credit hold enforcement.** `customer.credit_limit` exists with a known `float64` TODO around money. Order-create path doesn't hard-block when `current_balance + order_total > credit_limit`. Needs: blocking check in `order.Service.Create`, manual override with audit-log entry (`pkg/audit.Logger`), AR aging integration so the balance is real, and a UI surface on the order page. Direct AR-risk reduction for dealers.
 
+### Digital-twin / AI_LM geometry follow-ups
+- **Bulk-set geometry from UOM defaults.** Most SKUs have no dims (AI_LM falls back). Add a backfill that seeds parametric L/W/H from nominal lumber dimensions (a "2x4" → actual 1.5″×3.5″) keyed on SKU/category so the Load Builder loads more of the catalog as twins without per-product manual entry.
+- **Mesh/GLTF geometry source.** `geometry_source` already reserves a non-`parametric` value; add a `mesh_url` column + asset upload + a Three.js GLTF loader path in `<gable-product-twin-3d>` for irregular products (trusses, fixtures) that a box can't represent.
+- **Per-line geometry on the integration orders endpoint.** `IntegrationOrderLine` carries weight but not dims; folding L/W/H in lets AI_LM build a load straight from an order pull without a second catalog call.
+- **Bundle/kit composition.** Geometry is per-product only; composite products (door units, framing packages) need a BOM-aware bounding-box or sub-box layout before they render correctly.
+
 ### Cross-cutting / lower-priority backlog
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
 - Frontend admin UI for `system_settings` (currently operators edit via psql). Unblocks self-service for the `reorder.*` keys added in #9.
 - Add an SMTP/SendGrid `EmailSender` implementation (currently only `LogEmailService` exists). Required before scheduled reports and customer-facing email features are useful in prod.
-- Wire NATS or remove the orphan container from `docker-compose.yml` (`docs/architecture.md` describes an event bus that isn't implemented).
+- ~~Wire NATS or remove the orphan container~~ DONE: `pkg/eventbus` wires NATS JetStream with an in-process fallback (first consumer: quote price-exposure events).
 - Pre-existing `inventory.MockRepository` is missing `DeallocateStock`, so `go vet ./internal/inventory/...` fails on master (pre-existing, unrelated to #9). Trivial fix.
