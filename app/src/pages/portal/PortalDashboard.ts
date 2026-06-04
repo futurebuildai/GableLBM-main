@@ -1,9 +1,10 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
-import { DollarSign, CreditCard, AlertTriangle, ShoppingCart, ArrowRight, RefreshCw } from 'lucide';
+import { DollarSign, CreditCard, AlertTriangle, ShoppingCart, ArrowRight, RefreshCw, Plus } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalDashboard as DashboardData } from '../../types/portal';
+import '../../components/portal/QuickQuoteModal.ts';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -23,6 +24,7 @@ export class PortalDashboard extends LitElement {
     @state() private data: DashboardData | null = null;
     @state() private loading = true;
     @state() private error = '';
+    @state() private quoteModalOpen = false;
 
     connectedCallback() {
         super.connectedCallback();
@@ -90,13 +92,26 @@ export class PortalDashboard extends LitElement {
                         <h1 class="text-display-large text-white">Welcome back, ${this._userName}</h1>
                         <p class="text-zinc-400 mt-2 text-lg">Here's your account overview.</p>
                     </div>
-                    <a
-                        href="/portal/account"
-                        class="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors"
-                    >
-                        My Account ${icon(ArrowRight, 16)}
-                    </a>
+                    <div class="flex items-center gap-3">
+                        <button
+                            @click=${() => this.quoteModalOpen = true}
+                            class="flex items-center gap-2 px-4 py-2 bg-gable-green hover:bg-[#00e693] text-black font-medium rounded-lg transition-colors"
+                        >
+                            ${icon(Plus, 16)} Quick Quote
+                        </button>
+                        <a
+                            href="/portal/account"
+                            class="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-colors"
+                        >
+                            My Account ${icon(ArrowRight, 16)}
+                        </a>
+                    </div>
                 </div>
+
+                <gable-quick-quote-modal
+                    .open=${this.quoteModalOpen}
+                    @close=${() => this.quoteModalOpen = false}
+                ></gable-quick-quote-modal>
 
                 <!-- Stats Row -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

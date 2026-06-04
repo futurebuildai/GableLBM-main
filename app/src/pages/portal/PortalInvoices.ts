@@ -4,6 +4,7 @@ import { icon } from '../../lib/icons.ts';
 import { FileText, Download, RefreshCw, AlertTriangle } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalInvoice } from '../../types/portal';
+import '../../components/portal/PaymentModal.ts';
 
 const formatCurrency = (cents: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
@@ -34,6 +35,20 @@ export class PortalInvoices extends LitElement {
     @state() private invoices: PortalInvoice[] = [];
     @state() private loading = true;
     @state() private error = '';
+    @state() private selectedInvoices = new Set<string>();
+    @state() private paymentModalOpen = false;
+    @state() private totalToPay = 0;
+
+    private _toggleInvoice(id: string, amount: number) {
+        if (this.selectedInvoices.has(id)) {
+            this.selectedInvoices.delete(id);
+            this.totalToPay -= amount;
+        } else {
+            this.selectedInvoices.add(id);
+            this.totalToPay += amount;
+        }
+        this.requestUpdate();
+    }
 
     connectedCallback() {
         super.connectedCallback();
@@ -97,10 +112,31 @@ export class PortalInvoices extends LitElement {
 
         return html`
             <div>
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-white">Invoices</h1>
-                    <p class="text-zinc-400 text-sm mt-1">${this.invoices.length} invoice${this.invoices.length !== 1 ? 's' : ''} found</p>
+                <div class="mb-6 flex justify-between items-end">
+                    <div>
+                        <h1 class="text-2xl font-bold text-white">Invoices</h1>
+                        <p class="text-zinc-400 text-sm mt-1">${this.invoices.length} invoice${this.invoices.length !== 1 ? 's' : ''} found</p>
+                    </div>
+                    ${this.selectedInvoices.size > 0 ? html`
+                        <button 
+                            @click=${() => this.paymentModalOpen = true}
+                            class="px-4 py-2 rounded-lg font-medium text-black bg-gable-green hover:bg-[#00e693] transition-colors"
+                        >
+                            Pay Selected ($${formatCurrency(this.totalToPay)})
+                        </button>
+                    ` : ''}
                 </div>
+
+                <gable-payment-modal
+                    .open=${this.paymentModalOpen}
+                    .amount=${this.totalToPay}
+                    @close=${() => this.paymentModalOpen = false}
+                    @payment-success=${() => {
+                        this.selectedInvoices.clear();
+                        this.totalToPay = 0;
+                        this._fetchInvoices();
+                    }}
+                ></gable-payment-modal>
 
                 ${this.invoices.length === 0
                     ? html`
@@ -117,6 +153,14 @@ export class PortalInvoices extends LitElement {
                                 <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
                                     <div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
                                         <div class="flex items-center gap-4">
+                                            ${inv.status === 'UNPAID' || inv.status === 'PARTIAL' ? html`
+                                                <input 
+                                                    type="checkbox" 
+                                                    class="w-5 h-5 rounded border-white/20 bg-black/20 text-gable-green focus:ring-gable-green focus:ring-offset-0 cursor-pointer"
+                                                    .checked=${this.selectedInvoices.has(inv.id)}
+                                                    @change=${() => this._toggleInvoice(inv.id, inv.total_amount)}
+                                                />
+                                            ` : html`<div class="w-5 h-5"></div>`}
                                             <div
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center"
                                                 style="background-color: ${statusConfig(inv.status).bgColor}"
