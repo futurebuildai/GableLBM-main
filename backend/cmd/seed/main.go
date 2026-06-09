@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,6 +56,55 @@ func dedupeBranches(db *sql.DB) {
 	log.Printf("Seed: dedupeBranches reset; downstream steps will rebuild location-dependent tables")
 }
 
+// resetTransactionalData clears the demo's generated transactional tables at the
+// start of every seed run so they do NOT accumulate across redeploys. Orders,
+// invoices, quotes, deliveries, etc. are inserted with fresh random UUIDs and no
+// ON CONFLICT, so without this each deploy stacked another full demo dataset on
+// top of the previous one (which inflates every customer's AR balance and, with
+// live-balance credit checks, parks every new order ON_HOLD).
+//
+// Reference data (customers, products, vendors, locations, price levels, the
+// chart of accounts, sales team, …) is upserted by natural key elsewhere and is
+// intentionally NOT touched here. CASCADE clears any child/related transactional
+// tables not listed explicitly; it cannot reach reference tables because those
+// are never referenced BY the transactional tables. Errors are logged, not fatal
+// (mirrors dedupeBranches).
+func resetTransactionalData(db *sql.DB) {
+	candidates := []string{
+		"orders", "order_lines", "invoices",
+		"quotes", "quote_lines", "quote_exposure_events",
+		"deliveries", "delivery_routes",
+		"customer_transactions", "payments", "credit_memos",
+		"purchase_orders", "purchase_order_lines", "reorder_runs",
+		"gl_journal_entries", "gl_journal_lines",
+		"pos_transactions", "pos_sync_log",
+		"projects", "crm_activities", "customer_contacts",
+		"rebate_programs", "rebate_tiers", "rebate_claims",
+		"saved_reports", "edi_trading_partners",
+	}
+	// Only truncate tables that actually exist — the schema differs across
+	// branches/forks, and a single TRUNCATE fails atomically on the first
+	// missing table. Filtering keeps the reset working everywhere.
+	var existing []string
+	for _, t := range candidates {
+		var ok bool
+		if err := db.QueryRow(
+			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, t,
+		).Scan(&ok); err == nil && ok {
+			existing = append(existing, t)
+		}
+	}
+	if len(existing) == 0 {
+		return
+	}
+	stmt := "TRUNCATE TABLE " + strings.Join(existing, ", ") + " RESTART IDENTITY CASCADE"
+	if _, err := db.Exec(stmt); err != nil {
+		log.Printf("resetTransactionalData: %v", err)
+		return
+	}
+	log.Printf("Seed: resetTransactionalData cleared %d transactional tables (prevents cross-deploy accumulation)", len(existing))
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -98,6 +148,10 @@ func main() {
 	// We do this inside the seed (rather than as a migration) so existing demo
 	// databases self-heal on the next deploy without manual psql intervention.
 	dedupeBranches(db)
+
+	// Clear generated transactional data so redeploys reset to a single clean
+	// dataset instead of accumulating (see resetTransactionalData).
+	resetTransactionalData(db)
 
 	// Idempotent branch upsert. We can't rely on ON CONFLICT (parent_id, code)
 	// because parent_id is NULL for branches and NULL != NULL in unique indexes.
