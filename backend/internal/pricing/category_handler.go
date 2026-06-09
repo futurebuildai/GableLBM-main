@@ -35,13 +35,16 @@ func (h *CategoryHandler) RegisterCategoryRoutes(mux *http.ServeMux, roleGuard .
 		return handler
 	}
 
-	// Category tree management (reads are unguarded)
+	// Category tree management. The tree itself is structural reference data
+	// (category names/hierarchy) and stays open, but everything that exposes
+	// markups/margins/negotiated pricing below is guarded at the same level as
+	// the writes (the guard is nil/pass-through in dev mode).
 	mux.HandleFunc("GET /api/v1/pricing/categories", h.HandleListCategories)
 	mux.HandleFunc("POST /api/v1/pricing/categories", guard(h.HandleCreateCategory))
 	mux.HandleFunc("PUT /api/v1/pricing/categories/{id}", guard(h.HandleUpdateCategory))
 
 	// Category pricing rules CRUD
-	mux.HandleFunc("GET /api/v1/pricing/category-rules", h.HandleListCategoryRules)
+	mux.HandleFunc("GET /api/v1/pricing/category-rules", guard(h.HandleListCategoryRules))
 	mux.HandleFunc("POST /api/v1/pricing/category-rules", guard(h.HandleCreateCategoryRule))
 	mux.HandleFunc("PUT /api/v1/pricing/category-rules/{id}", guard(h.HandleUpdateCategoryRule))
 	mux.HandleFunc("DELETE /api/v1/pricing/category-rules/{id}", guard(h.HandleDeleteCategoryRule))
@@ -51,13 +54,13 @@ func (h *CategoryHandler) RegisterCategoryRoutes(mux *http.ServeMux, roleGuard .
 	mux.HandleFunc("DELETE /api/v1/pricing/category-rules/bulk", guard(h.HandleBulkDeleteRules))
 
 	// Audit trail
-	mux.HandleFunc("GET /api/v1/pricing/category-rules/{id}/audit", h.HandleGetRuleAudit)
+	mux.HandleFunc("GET /api/v1/pricing/category-rules/{id}/audit", guard(h.HandleGetRuleAudit))
 
 	// Matrix view (admin grid)
-	mux.HandleFunc("GET /api/v1/pricing/matrix", h.HandleGetMatrix)
+	mux.HandleFunc("GET /api/v1/pricing/matrix", guard(h.HandleGetMatrix))
 
 	// Resolution preview
-	mux.HandleFunc("GET /api/v1/pricing/resolve", h.HandleResolvePreview)
+	mux.HandleFunc("GET /api/v1/pricing/resolve", guard(h.HandleResolvePreview))
 }
 
 // --- Category Endpoints ---

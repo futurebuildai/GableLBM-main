@@ -22,6 +22,14 @@ func (m *MockRepository) ListAccounts(ctx context.Context) ([]GLAccount, error) 
 	return m.accounts, nil
 }
 
+func (m *MockRepository) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+	return &BalanceSheetReport{}, nil
+}
+
+func (m *MockRepository) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+	return &ProfitAndLossReport{}, nil
+}
+
 func (m *MockRepository) GetAccount(ctx context.Context, id uuid.UUID) (*GLAccount, error) {
 	for _, a := range m.accounts {
 		if a.ID == id {

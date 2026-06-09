@@ -61,6 +61,10 @@ func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string
 	return nil
 }
 
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _, _, _ *float64, _ bool, _ string) error {
+	return nil
+}
+
 // TestRefreshReorderTargets_Math pins the reorder-point formula
 // (avg_daily * lead_time * 1.5, ceil'd) for a known velocity. If a refactor
 // changes the safety factor or the lookback divisor, this test surfaces the

@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
@@ -25,11 +26,10 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 	}
 
 	if inv == nil {
-		// Create new record
+		// Create new record. On a non-existent record a delta starts from base 0.
 		newQty := req.Quantity
-		if req.IsDelta {
-			// If delta on non-existent record, assume base 0
-			newQty = req.Quantity
+		if newQty < 0 {
+			return fmt.Errorf("adjustment would create negative stock for product %s (resulting quantity %g)", req.ProductID, newQty)
 		}
 
 		inv = &Inventory{
@@ -48,10 +48,13 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 		inv.Quantity = req.Quantity
 	}
 
-	// Prevent negative stock?
-	// Depending on business rule. For now allow negative (backorder/error) or strict?
-	// Let's allow negative for now to reflect reality vs system, but warn?
-	// User requested "Basic In/Out".
+	// Floor on-hand stock at zero. A negative result means an out-adjustment (or
+	// over-large move) exceeded what is physically on hand — reject it rather
+	// than persist negative inventory, which corrupts availability math
+	// downstream (Allocate/Fulfill) and the double-entry move total.
+	if inv.Quantity < 0 {
+		return fmt.Errorf("adjustment would drive stock negative for product %s (resulting quantity %g)", req.ProductID, inv.Quantity)
+	}
 
 	return s.repo.UpdateInventory(ctx, inv)
 }
@@ -75,6 +78,27 @@ func (s *Service) MoveStock(ctx context.Context, req StockMovementRequest) error
 	}
 	if fromBranch != nil && toBranch != nil && *fromBranch != *toBranch {
 		return fmt.Errorf("cross-branch stock moves are not allowed: source=%s destination=%s", fromBranch, toBranch)
+	}
+
+	if req.Quantity <= 0 {
+		return fmt.Errorf("move quantity must be positive")
+	}
+
+	// Only unallocated (available) stock may be relocated. Moving reserved stock
+	// would strand the allocation at the source (available goes negative) while
+	// the moved units arrive unreserved at the destination and can be re-sold —
+	// double-promising the same physical units.
+	if req.FromLocationID != nil {
+		src, err := s.repo.GetInventory(ctx, req.ProductID, req.FromLocationID)
+		if err != nil {
+			return fmt.Errorf("failed to read source inventory: %w", err)
+		}
+		if src == nil {
+			return fmt.Errorf("no inventory at source location for product %s", req.ProductID)
+		}
+		if avail := src.Quantity - src.Allocated; req.Quantity > avail {
+			return fmt.Errorf("cannot move %g: only %g unallocated at source (reserved stock cannot be moved)", req.Quantity, avail)
+		}
 	}
 
 	return s.repo.ExecuteInTx(ctx, func(ctx context.Context) error {
@@ -106,17 +130,13 @@ func (s *Service) MoveStock(ctx context.Context, req StockMovementRequest) error
 	})
 }
 
-// Allocate reserves stock for a product.
-// For MVP, it picks the first available inventory record (or largest).
-// In reality, this should be smarter or explicit.
+// Allocate reserves stock for a product, spanning multiple locations within the
+// active branch when no single location has enough free stock (mirroring how
+// Fulfill consumes across locations). A nil branch context means "all branches".
 func (s *Service) Allocate(ctx context.Context, productID uuid.UUID, quantity float64) error {
 	if quantity <= 0 {
 		return fmt.Errorf("allocation quantity must be positive")
 	}
-
-	// 1. Find inventory with enough stock? Or just any stock.
-	// Simple strategy: Get all locations within the active branch, pick one
-	// with most stock. A nil branch context means "all branches" (admin).
 
 	items, err := s.repo.ListInventoryByProductAndBranch(ctx, productID, branchctx.IDForQuery(ctx))
 	if err != nil {
@@ -127,25 +147,49 @@ func (s *Service) Allocate(ctx context.Context, productID uuid.UUID, quantity fl
 		return fmt.Errorf("no inventory found for product %s", productID)
 	}
 
-	// Strategy: Pick the one with highest (Quantity - Allocated)
-	var best *Inventory
-	var maxAvail float64 = -1
-
+	// Reject up-front if total available across all locations is insufficient,
+	// so we never leave a partial allocation on a non-transactional caller.
+	var totalAvail float64
 	for i := range items {
-		avail := items[i].Quantity - items[i].Allocated
-		if avail > maxAvail {
-			maxAvail = avail
-			best = &items[i]
+		if a := items[i].Quantity - items[i].Allocated; a > 0 {
+			totalAvail += a
 		}
 	}
-
-	if best == nil {
-		// Should not happen if list not empty
-		best = &items[0]
+	if totalAvail < quantity {
+		return fmt.Errorf("insufficient available stock for product %s: need %g, have %g across %d location(s)", productID, quantity, totalAvail, len(items))
 	}
 
-	// 2. Update allocation
-	return s.repo.AllocateStock(ctx, best.ID, quantity)
+	// Allocate fullest-location-first until the quantity is satisfied. Each
+	// AllocateStock is atomic with a `(quantity-allocated) >= delta` guard, so a
+	// concurrent allocation that drains a row surfaces as an error and (within
+	// the caller's transaction) rolls back the whole allocation.
+	sort.SliceStable(items, func(a, b int) bool {
+		return (items[a].Quantity - items[a].Allocated) > (items[b].Quantity - items[b].Allocated)
+	})
+
+	remaining := quantity
+	for i := range items {
+		if remaining <= 0 {
+			break
+		}
+		avail := items[i].Quantity - items[i].Allocated
+		if avail <= 0 {
+			continue
+		}
+		take := remaining
+		if avail < remaining {
+			take = avail
+		}
+		if err := s.repo.AllocateStock(ctx, items[i].ID, take); err != nil {
+			return fmt.Errorf("failed to allocate %g from inventory %s: %w", take, items[i].ID, err)
+		}
+		remaining -= take
+	}
+
+	if remaining > 0 {
+		return fmt.Errorf("insufficient available stock for product %s (could not allocate remaining %g)", productID, remaining)
+	}
+	return nil
 }
 
 func (s *Service) Release(ctx context.Context, productID uuid.UUID, quantity float64) error {
