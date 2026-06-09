@@ -20,6 +20,7 @@ type Repository interface {
 	UpdateInvoice(ctx context.Context, inv *Invoice) error
 	ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error)
 	SumOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error)
+	GetBranchTaxRate(ctx context.Context, branchID *uuid.UUID) (float64, bool)
 	CreateCreditMemo(ctx context.Context, cm *CreditMemo) error
 	ListCreditMemos(ctx context.Context, customerID uuid.UUID) ([]CreditMemo, error)
 	UpdateCreditMemo(ctx context.Context, cm *CreditMemo) error
@@ -127,6 +128,33 @@ func (r *PostgresRepository) SumOpenBalanceCents(ctx context.Context, customerID
 		return 0, fmt.Errorf("failed to sum open balance: %w", err)
 	}
 	return int64(math.Round(dollars * 100)), nil
+}
+
+// GetBranchTaxRate returns the default sales tax rate configured on a branch
+// (locations.default_tax_rate, e.g. 0.12 for BC). branchID may be nil, in which
+// case the active branch context — or the system default branch — is used.
+// Returns (rate, true) only when a positive rate is found; callers fall back to
+// invoice.DefaultTaxRate otherwise. default_tax_rate is a nullable NUMERIC.
+func (r *PostgresRepository) GetBranchTaxRate(ctx context.Context, branchID *uuid.UUID) (float64, bool) {
+	bid := branchID
+	if bid == nil || *bid == uuid.Nil {
+		bid = middleware.BranchIDForQuery(ctx)
+	}
+
+	var rate *float64
+	var err error
+	if bid != nil {
+		err = r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT default_tax_rate FROM locations WHERE id = $1`, *bid).Scan(&rate)
+	} else {
+		err = r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT default_tax_rate FROM locations
+			 WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`).Scan(&rate)
+	}
+	if err != nil || rate == nil || *rate <= 0 {
+		return 0, false
+	}
+	return *rate, true
 }
 
 func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {
