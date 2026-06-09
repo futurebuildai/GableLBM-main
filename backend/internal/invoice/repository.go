@@ -3,6 +3,7 @@ package invoice
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -17,10 +18,19 @@ type Repository interface {
 	ListInvoices(ctx context.Context) ([]Invoice, error)
 	ListInvoicesPaginated(ctx context.Context, limit, offset int) ([]Invoice, int, error)
 	UpdateInvoice(ctx context.Context, inv *Invoice) error
+	ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error)
+	SumOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	CreateCreditMemo(ctx context.Context, cm *CreditMemo) error
 	ListCreditMemos(ctx context.Context, customerID uuid.UUID) ([]CreditMemo, error)
 	UpdateCreditMemo(ctx context.Context, cm *CreditMemo) error
 }
+
+// OpenInvoiceStatuses is the canonical set of invoice statuses that contribute
+// to a customer's outstanding AR balance. The portal, dashboard, reporting, and
+// credit-limit surfaces all use this same set so their "current balance" agrees.
+// NOTE: this sums full invoice totals and does not yet net partial payments on
+// PARTIAL invoices — a known follow-up shared by all those surfaces.
+const OpenInvoiceStatuses = "'UNPAID','PARTIAL','OVERDUE'"
 
 type PostgresRepository struct {
 	db *database.DB
@@ -92,6 +102,31 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 	}
 
 	return nil
+}
+
+// ExistsInvoiceForOrder reports whether an invoice already exists for the order.
+// Used to prevent double-invoicing (an order fulfilled and then delivered would
+// otherwise produce two invoices and double the customer's AR).
+func (r *PostgresRepository) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM invoices WHERE order_id = $1)`, orderID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check existing invoice for order: %w", err)
+	}
+	return exists, nil
+}
+
+// SumOpenBalanceCents returns the customer's outstanding AR balance, computed
+// live from open invoices (the column customers.balance_due is unmaintained).
+// total_amount is stored as dollars; convert to cents for the app convention.
+func (r *PostgresRepository) SumOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	var dollars float64
+	query := `SELECT COALESCE(SUM(total_amount), 0) FROM invoices WHERE customer_id = $1 AND status IN (` + OpenInvoiceStatuses + `)`
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID).Scan(&dollars); err != nil {
+		return 0, fmt.Errorf("failed to sum open balance: %w", err)
+	}
+	return int64(math.Round(dollars * 100)), nil
 }
 
 func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {

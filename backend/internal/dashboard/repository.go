@@ -197,7 +197,7 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 
 	// Recent orders
 	queryRecent := `
-		SELECT o.id, c.name, o.total_amount::bigint, o.status, o.created_at
+		SELECT o.id, c.name, (o.total_amount * 100)::bigint, o.status, o.created_at
 		FROM orders o
 		LEFT JOIN customers c ON o.customer_id = c.id
 		WHERE ($2::uuid IS NULL OR o.branch_id = $2)

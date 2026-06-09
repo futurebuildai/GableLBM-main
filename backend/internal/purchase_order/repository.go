@@ -2,12 +2,14 @@ package purchase_order
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type Repository struct {
@@ -63,6 +65,38 @@ func (r *Repository) AddPOLine(ctx context.Context, line *PurchaseOrderLine) err
 		line.LinkedSOLineID,
 	)
 	return err
+}
+
+// GetPOLineByProduct returns the existing line for a product on a PO, or
+// (nil, nil) if there is none. Used to dedup auto-reorder lines.
+func (r *Repository) GetPOLineByProduct(ctx context.Context, poID, productID uuid.UUID) (*PurchaseOrderLine, error) {
+	query := `
+		SELECT id, po_id, product_id, description, quantity, cost
+		FROM purchase_order_lines
+		WHERE po_id = $1 AND product_id = $2
+		LIMIT 1
+	`
+	var line PurchaseOrderLine
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, poID, productID).Scan(
+		&line.ID, &line.POID, &line.ProductID, &line.Description, &line.Quantity, &line.Cost,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PO line by product: %w", err)
+	}
+	return &line, nil
+}
+
+// UpdatePOLineQuantity sets the quantity for an existing PO line.
+func (r *Repository) UpdatePOLineQuantity(ctx context.Context, lineID uuid.UUID, quantity float64) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE purchase_order_lines SET quantity = $1 WHERE id = $2`, quantity, lineID)
+	if err != nil {
+		return fmt.Errorf("failed to update PO line quantity: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID) (*PurchaseOrder, error) {

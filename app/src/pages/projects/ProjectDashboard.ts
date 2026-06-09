@@ -57,10 +57,11 @@ export class ProjectDashboard extends LitElement {
         }
     }
 
-    // total_amount on orders/invoices arrives from the ERP API as int64 cents;
-    // divide before formatting (see app/src/lib/utils.ts formatCents).
-    private _formatCurrency(cents: number): string {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
+    // This page is served by the portal/project module, which returns total_amount
+    // as float64 DOLLARS (see backend project/model.go), NOT ERP int64 cents.
+    // Format directly — do NOT divide by 100.
+    private _formatCurrency(dollars: number): string {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(dollars || 0);
     }
 
     private _renderItemRow(item: ProjectItem, iconData: Parameters<typeof icon>[0], colorClass: string, linkPrefix: string) {

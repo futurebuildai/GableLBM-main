@@ -164,12 +164,6 @@ func (r *PostgresRepository) UpdateAccount(ctx context.Context, acct *GLAccount)
 // --- Journal Entries ---
 
 func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *JournalEntry) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
 	}
@@ -177,42 +171,49 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 
-	queryHeader := `
-		INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING entry_number
-	`
-	err = tx.QueryRow(ctx, queryHeader,
-		entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
-		entry.Status, entry.PostedBy, entry.CreatedAt, entry.UpdatedAt,
-	).Scan(&entry.EntryNumber)
-	if err != nil {
-		return fmt.Errorf("failed to insert journal entry: %w", err)
-	}
+	// Run within the caller's transaction when one is present. RunInTx joins an
+	// existing ctx transaction (running inline) and otherwise opens its own, so
+	// the header + all lines stay atomic. Previously this opened a separate
+	// Pool.Begin transaction that committed independently of the outer tx,
+	// leaving an orphaned GL posting when the caller later rolled back.
+	return r.db.RunInTx(ctx, func(ctx context.Context) error {
+		ex := r.db.GetExecutor(ctx)
 
-	queryLine := `
-		INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	for i := range entry.Lines {
-		line := &entry.Lines[i]
-		if line.ID == uuid.Nil {
-			line.ID = uuid.New()
+		queryHeader := `
+			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			RETURNING entry_number
+		`
+		if err := ex.QueryRow(ctx, queryHeader,
+			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
+			entry.Status, entry.PostedBy, entry.CreatedAt, entry.UpdatedAt,
+		).Scan(&entry.EntryNumber); err != nil {
+			return fmt.Errorf("failed to insert journal entry: %w", err)
 		}
-		line.EntryID = entry.ID
 
-		debitFloat := float64(line.Debit) / 100.0
-		creditFloat := float64(line.Credit) / 100.0
+		queryLine := `
+			INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`
+		for i := range entry.Lines {
+			line := &entry.Lines[i]
+			if line.ID == uuid.Nil {
+				line.ID = uuid.New()
+			}
+			line.EntryID = entry.ID
 
-		_, err = tx.Exec(ctx, queryLine,
-			line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert journal line: %w", err)
+			debitFloat := float64(line.Debit) / 100.0
+			creditFloat := float64(line.Credit) / 100.0
+
+			if _, err := ex.Exec(ctx, queryLine,
+				line.ID, line.EntryID, line.AccountID, line.Description, debitFloat, creditFloat,
+			); err != nil {
+				return fmt.Errorf("failed to insert journal line: %w", err)
+			}
 		}
-	}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error) {

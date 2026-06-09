@@ -321,14 +321,9 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 
 	ctx := r.Context()
 
-	// 1. Accept the quote
-	if err := h.quoteSvc.UpdateState(ctx, quoteID, quote.QuoteStateAccepted); err != nil {
-		slog.Error("failed to accept quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
-		writeError(w, http.StatusInternalServerError, "failed to accept quote")
-		return
-	}
-
-	// 2. Get the quote to build order
+	// 1. Load the quote first. We intentionally do NOT mark it ACCEPTED yet —
+	//    QuoteStateAccepted is terminal, so accepting it before the order is
+	//    created would strand the quote un-reconvertible if order creation fails.
 	q, err := h.quoteSvc.GetQuote(ctx, quoteID)
 	if err != nil {
 		slog.Error("failed to get quote", "error", err, "quote_id", idStr, "method", r.Method, "path", r.URL.Path)
@@ -336,7 +331,7 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 3. Convert to order — PriceEach is now int64 cents
+	// 2. Convert to order — PriceEach is now int64 cents
 	// TODO: align with int64 cents — quote.UnitPrice is still float64 dollars
 	var orderLines []order.OrderLineRequest
 	for _, ql := range q.Lines {
@@ -358,16 +353,31 @@ func (h *Handler) AcceptAndConvertQuote(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 4. Confirm the order
-	if err := h.confirmOrder(ctx, o.ID); err != nil {
-		// Order created but not confirmed - still return success
-		slog.Warn("order created but not confirmed", "order_id", o.ID, "error", err)
+	// 3. Now that the order exists, mark the quote accepted.
+	if err := h.quoteSvc.UpdateState(ctx, quoteID, quote.QuoteStateAccepted); err != nil {
+		slog.Error("order created but quote not marked accepted", "error", err, "order_id", o.ID, "quote_id", idStr)
+		writeError(w, http.StatusInternalServerError, "order "+o.ID.String()+" created but quote could not be accepted")
+		return
+	}
+
+	// 4. Confirm the order. A failure here is reported (not silently masked as a
+	//    200 success) — the order exists in DRAFT and confirmation can be retried.
+	if err := h.orderSvc.ConfirmOrder(ctx, o.ID); err != nil {
+		slog.Error("order created but not confirmed", "order_id", o.ID, "error", err)
+		writeError(w, http.StatusConflict, "order "+o.ID.String()+" created from quote but could not be confirmed: "+err.Error())
+		return
+	}
+
+	// Reflect the true post-confirmation status in the response.
+	status := "CONFIRMED"
+	if confirmed, gErr := h.orderSvc.GetOrder(ctx, o.ID); gErr == nil {
+		status = string(confirmed.Status)
 	}
 
 	writeJSON(w, http.StatusOK, OrderResponse{
 		ID:      o.ID.String(),
 		QuoteID: quoteID.String(),
-		Status:  string(o.Status),
+		Status:  status,
 	})
 }
 

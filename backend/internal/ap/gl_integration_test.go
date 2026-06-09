@@ -85,6 +85,12 @@ func (m *MockGLRepository) GetAccount(ctx context.Context, id uuid.UUID) (*gl.GL
 }
 func (m *MockGLRepository) CreateAccount(ctx context.Context, acct *gl.GLAccount) error { return nil }
 func (m *MockGLRepository) UpdateAccount(ctx context.Context, acct *gl.GLAccount) error { return nil }
+func (m *MockGLRepository) GetBalanceSheet(ctx context.Context, asOfDate string) (*gl.BalanceSheetReport, error) {
+	return &gl.BalanceSheetReport{}, nil
+}
+func (m *MockGLRepository) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*gl.ProfitAndLossReport, error) {
+	return &gl.ProfitAndLossReport{}, nil
+}
 func (m *MockGLRepository) GetTrialBalance(ctx context.Context, asOf time.Time) ([]gl.TrialBalanceRow, error) {
 	return nil, nil
 }
