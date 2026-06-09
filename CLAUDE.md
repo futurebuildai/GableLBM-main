@@ -174,11 +174,45 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 
 When rendering money on **ERP pages**, use `formatCents()` from `app/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.07. Portal/quotes pages already get dollars from the API and should format directly.
 
-### `customers.balance_due` is unmaintained — compute live
-The denormalized `customers.balance_due` column is **not kept in sync** by the seed pipeline or the invoice write paths. Reading it returns stale zeros for fresh seed data. The portal AR summary (`backend/internal/portal/repository.go:GetCustomerARSummary`) computes balance live as `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID', 'OVERDUE')` — mirror this pattern in any new AR surface. Don't trust the column.
+### AR balance: read live from invoices; `customers.balance_due` is a secondary record
+For **reads / decisions**, compute the customer's AR balance live from open invoices —
+`SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL','OVERDUE')`. The
+canonical status set lives in `invoice.OpenInvoiceStatuses`; the portal AR summary,
+dashboard, reporting, and the order **credit-limit gate** (`order.Service.overCreditLimit`)
+all go through it, so they agree. The credit gate no longer reads the denormalized
+`customers.balance_due` column.
 
-### Seed re-runs must use `ON CONFLICT (id) DO UPDATE`
-`backend/cmd/seed/main.go` runs on every demo/staging deploy via the DO post-deploy job. Rows seeded with `ON CONFLICT DO NOTHING` will **not** pick up future edits to names, emails, etc. Sales reps (line 468), drivers (line 689), and any other deterministic-UUID seed data use `ON CONFLICT (id) DO UPDATE SET ...` so rebrand commits actually overwrite existing demo data. If you're touching seed strings on a row that already exists in production demo, verify the upsert clause names every column you changed.
+The `balance_due` column **is** now written — but only as a secondary subledger figure:
+`order.FulfillOrder` posts each invoice to the GL + the AR subledger via
+`invoice.PostInvoiceToLedger` (single AR writer = `account.PostTransaction`, which updates
+`balance_due` + inserts a `customer_transactions` row), and `payment.ProcessPayment` credits
+it. It can still drift from the live-invoice figure for historical/seed rows, so don't trust
+it for decisions — derive live.
+
+> Financial posting is now wired (was aspirational): a fulfilled order produces one
+> tax-inclusive invoice + a balanced `DR Accounts Receivable / CR Sales Revenue` GL entry
+> (`gl.SyncInvoice`, accounts resolved by stable code 1010/1020/4010) + an AR subledger
+> debit, all in one transaction. POS completion posts `DR Cash / CR Sales Revenue`
+> post-commit (best-effort). An over-limit order is parked `ON_HOLD` (a valid `orders.status`
+> as of migration 074/071).
+>
+> **Known nit:** `invoice.DefaultTaxRate = 0.0825` (8.25%) is used when the fulfil path
+> doesn't set a rate, but the BC demo (seed, POS) uses **0.12**. App-fulfilled invoices are
+> taxed at 8.25% — source the rate from the branch (`locations.default_tax_rate`) to fix.
+
+### Seed resets transactional data each run; reference data upserts
+`backend/cmd/seed/main.go` runs on every demo/staging deploy via the DO post-deploy job.
+- **Transactional data** (orders, invoices, quotes, deliveries, payments, GL entries, POs,
+  POS/CRM/rebate rows, …) is **TRUNCATEd at the start of every run** by
+  `resetTransactionalData()` — these rows use random UUIDs with no upsert key, so without the
+  reset every redeploy *accumulated* another full dataset (the demo once held 1,216 invoices
+  vs the ~50 seeded, which inflated AR and parked every order `ON_HOLD`). The reset is
+  existence-filtered so it's safe across branch/fork schema differences. If you add a new
+  generated transactional table, add it to the candidate list.
+- **Reference data** (sales reps, drivers, customers, products, vendors, locations, chart of
+  accounts, …) must use `ON CONFLICT (...) DO UPDATE` keyed on a natural/deterministic key so
+  edits (names, emails, prices) overwrite existing demo rows on redeploy. `ON CONFLICT DO
+  NOTHING` will silently ignore future edits — verify the upsert names every column you change.
 
 ## Detailed Specs
 - `docs/architecture.md` — system principles, module map, the AI_LM digital-twin integration.
