@@ -294,6 +294,7 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 			inv := &invoice.Invoice{
 				OrderID:     o.ID,
 				CustomerID:  o.CustomerID,
+				BranchID:    o.BranchID, // so the invoice + its tax rate come from the order's branch
 				TotalAmount: o.TotalAmount,
 				Status:      invoice.InvoiceStatusUnpaid,
 			}
