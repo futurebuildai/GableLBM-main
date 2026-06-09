@@ -196,9 +196,11 @@ it for decisions — derive live.
 > post-commit (best-effort). An over-limit order is parked `ON_HOLD` (a valid `orders.status`
 > as of migration 074/071).
 >
-> **Known nit:** `invoice.DefaultTaxRate = 0.0825` (8.25%) is used when the fulfil path
-> doesn't set a rate, but the BC demo (seed, POS) uses **0.12**. App-fulfilled invoices are
-> taxed at 8.25% — source the rate from the branch (`locations.default_tax_rate`) to fix.
+> **Invoice tax rate:** `invoice.CreateInvoice` resolves the rate from the invoice's branch
+> (`locations.default_tax_rate`, e.g. 0.12 in BC) via `repo.GetBranchTaxRate`; the
+> order-fulfil and delivery paths stamp the invoice with the order's `branch_id` so it
+> resolves correctly. `invoice.DefaultTaxRate = 0.0825` is only the fallback when the branch
+> has no configured rate.
 
 ### Seed resets transactional data each run; reference data upserts
 `backend/cmd/seed/main.go` runs on every demo/staging deploy via the DO post-deploy job.

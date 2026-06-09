@@ -970,6 +970,7 @@ func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uui
 	inv := &invoice.Invoice{
 		CustomerID: ord.CustomerID,
 		OrderID:    ord.ID,
+		BranchID:   ord.BranchID, // invoice + tax rate come from the order's branch
 		Lines:      lines,
 	}
 
