@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// SystemApproverID is the stable, well-known actor ID recorded when the system
+// (not a human) approves a vendor invoice via automatic 3-way matching.
+var SystemApproverID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
 // Service handles 3-way PO matching business logic.
 type Service struct {
 	db     *database.DB
@@ -179,7 +183,10 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 
 	// 8. Auto-approve vendor invoice if fully matched
 	if result.Status == MatchStatusMatched && cfg.AutoApproveOnMatch && vendorInvoice != nil {
-		approverID := uuid.New() // System auto-approve
+		// Use a stable, well-known system actor ID so the approval audit trail
+		// consistently identifies machine auto-approvals (previously a fresh
+		// random UUID per run, which mapped to no actor and was untraceable).
+		approverID := SystemApproverID
 		_, err := s.apSvc.ApproveInvoice(ctx, vendorInvoice.ID, approverID)
 		if err != nil {
 			s.logger.Warn("Auto-approve failed after match",

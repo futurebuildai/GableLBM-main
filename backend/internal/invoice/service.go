@@ -140,6 +140,51 @@ func (s *Service) FinalizeInvoice(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
+// ExistsInvoiceForOrder reports whether the order already has an invoice.
+func (s *Service) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	return s.repo.ExistsInvoiceForOrder(ctx, orderID)
+}
+
+// GetCustomerOpenBalanceCents returns the customer's live outstanding AR balance
+// (sum of open invoices), in cents. Use this for credit-limit checks instead of
+// the unmaintained customers.balance_due column.
+func (s *Service) GetCustomerOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
+	return s.repo.SumOpenBalanceCents(ctx, customerID)
+}
+
+// PostInvoiceToLedger posts an already-created invoice to the GL (DR Accounts
+// Receivable / CR Sales Revenue) and the customer AR subledger (a debit + a
+// customer_transactions row). It is intended to run inside the caller's
+// transaction so the invoice, GL entry, and subledger commit atomically — both
+// postings are required (the chart of accounts is seeded by migration 025).
+// This is the single AR writer for the order-fulfilment path, replacing the old
+// raw, pre-tax customers.balance_due bump that left the recorded balance
+// disagreeing with the tax-inclusive invoice total.
+func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *Invoice) error {
+	if s.gl != nil {
+		if err := s.gl.SyncInvoice(ctx, inv.ID.String(), inv.TotalAmount); err != nil {
+			return fmt.Errorf("failed to post invoice to GL: %w", err)
+		}
+	}
+	if s.account != nil {
+		if _, err := s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypeInvoice, inv.TotalAmount, &inv.ID, "Invoice #"+inv.ID.String()); err != nil {
+			return fmt.Errorf("failed to post invoice to account ledger: %w", err)
+		}
+	}
+	return nil
+}
+
+// PostCashSaleToGL posts a POS cash sale to the GL (DR Cash / CR Sales Revenue).
+// POS already depends on invoice.Service, so this lets the till book revenue
+// without taking a direct GL dependency. Intended to be called best-effort
+// AFTER the sale commits (a GL failure must never block a till transaction).
+func (s *Service) PostCashSaleToGL(ctx context.Context, posTxID string, amountCents int64) error {
+	if s.gl == nil {
+		return nil
+	}
+	return s.gl.SyncCashSale(ctx, posTxID, amountCents)
+}
+
 // C2: Credit memo workflow
 func (s *Service) CreateCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
 	if amountCents <= 0 {

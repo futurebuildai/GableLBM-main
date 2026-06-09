@@ -135,7 +135,15 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 	// Async Email Dispatch
 	// L8 Requirement: Do not block HTTP thread on external SMTP calls.
+	// This goroutine runs outside the HTTP recovery middleware, so a panic in
+	// the email path (e.g. a future real SMTP sender) would crash the whole
+	// process — recover here to contain it.
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic sending invoice email", "recover", rec, "invoice_id", id)
+			}
+		}()
 		bgCtx := context.Background()
 		if err := h.emailSvc.SendInvoice(bgCtx, email, inv.ID.String(), pdfBytes); err != nil {
 			slog.Error("Failed to send invoice email", "error", err, "invoice_id", id)

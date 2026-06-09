@@ -44,10 +44,11 @@ export const ReportingService = {
     },
 
     async createCreditMemo(invoiceId: string, amount: number, reason: string): Promise<CreditMemo> {
+        // `amount` is entered in dollars; the backend expects integer cents (`amount_cents`).
         const response = await fetchWithAuth(`${API_URL}/api/v1/invoices/${invoiceId}/credit-memo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount, reason }),
+            body: JSON.stringify({ amount_cents: Math.round(amount * 100), reason }),
         });
         if (!response.ok) throw new Error('Failed to create credit memo');
         return response.json();

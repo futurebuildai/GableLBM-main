@@ -387,6 +387,7 @@ func main() {
 	posRepo := pos.NewRepository(db)
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
+	posSvc.WithAuditLog(auditLog)
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
@@ -865,6 +866,15 @@ type invoiceServiceAdapter struct {
 }
 
 func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uuid.UUID) error {
+	// Double-invoice guard: if the order was already invoiced (the normal path
+	// invoices it at fulfilment), do NOT create a second invoice on delivery.
+	// AR is summed from invoices, so a duplicate would double-bill the customer.
+	if exists, err := a.invoiceSvc.ExistsInvoiceForOrder(ctx, orderID); err != nil {
+		return fmt.Errorf("check existing invoice: %w", err)
+	} else if exists {
+		return nil
+	}
+
 	ord, err := a.orderSvc.GetOrder(ctx, orderID)
 	if err != nil {
 		return fmt.Errorf("get order for invoice: %w", err)
@@ -886,7 +896,11 @@ func (a *invoiceServiceAdapter) CreateFromOrder(ctx context.Context, orderID uui
 		Lines:      lines,
 	}
 
-	return a.invoiceSvc.CreateInvoice(ctx, inv)
+	if err := a.invoiceSvc.CreateInvoice(ctx, inv); err != nil {
+		return err
+	}
+	// Book a delivery-created invoice to the GL + AR subledger too.
+	return a.invoiceSvc.PostInvoiceToLedger(ctx, inv)
 }
 
 // autoPOAdapter bridges purchase_order.Service to quote.AutoPOService.

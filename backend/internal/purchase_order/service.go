@@ -119,6 +119,24 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 			}
 
 			productID := item.ProductID
+
+			// Dedup on (po_id, product_id): when reusing an existing DRAFT, a
+			// prior reorder run may already have a line for this product. Update
+			// its quantity to the freshly computed target instead of appending a
+			// duplicate line each tick (which otherwise doubles on-order qty).
+			existing, err := s.repo.GetPOLineByProduct(ctx, po.ID, productID)
+			if err != nil {
+				return createdCount, fmt.Errorf("lookup existing PO line: %w", err)
+			}
+			if existing != nil {
+				if existing.Quantity != qty {
+					if err := s.repo.UpdatePOLineQuantity(ctx, existing.ID, qty); err != nil {
+						return createdCount, fmt.Errorf("update PO line: %w", err)
+					}
+				}
+				continue
+			}
+
 			line := &PurchaseOrderLine{
 				ID:          uuid.New(),
 				POID:        po.ID,

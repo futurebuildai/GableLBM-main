@@ -11,6 +11,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -29,12 +30,20 @@ type Service struct {
 	invoiceSvc   *invoice.Service
 	paymentSvc   *payment.Service
 	priceCalc    PriceCalculator
+	auditLog     *audit.Logger
 	logger       *slog.Logger
 }
 
 // WithPricing enables customer-specific pricing resolution for POS line items.
 func (s *Service) WithPricing(calc PriceCalculator) {
 	s.priceCalc = calc
+}
+
+// WithAuditLog attaches an audit logger so money-moving till operations
+// (sale completion and voids) are recorded in the financial audit trail.
+func (s *Service) WithAuditLog(l *audit.Logger) *Service {
+	s.auditLog = l
+	return s
 }
 
 // NewService creates a new POS service.
@@ -216,6 +225,33 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 	if err != nil {
 		return nil, err
 	}
+
+	// Book the sale revenue to the GL (DR Cash / CR Sales Revenue) AFTER the
+	// sale commits. Best-effort and post-commit by design: a GL/chart-of-accounts
+	// issue must never block or roll back a completed till sale. Previously a POS
+	// sale only deducted stock and recorded no revenue/AR/GL at all.
+	// NOTE: voiding a completed sale does not yet post a reversing GL entry — a
+	// known follow-up; the dominant completed-sale path is now booked.
+	if s.invoiceSvc != nil && result != nil && result.Total > 0 {
+		if err := s.invoiceSvc.PostCashSaleToGL(ctx, txID.String(), result.Total); err != nil {
+			s.logger.Error("failed to post POS sale to GL", "transaction_id", txID, "error", err)
+		}
+	}
+
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "pos.transaction.completed",
+			EntityType: "pos_transaction",
+			EntityID:   txID,
+			Changes: map[string]interface{}{
+				"total_cents": result.Total,
+				"register_id": result.RegisterID,
+				"customer_id": result.CustomerID,
+				"tenders":     len(tenders),
+			},
+		})
+	}
+
 	return result, nil
 }
 
@@ -264,6 +300,18 @@ func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTran
 
 	if err != nil {
 		return nil, err
+	}
+
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "pos.transaction.voided",
+			EntityType: "pos_transaction",
+			EntityID:   txID,
+			Changes: map[string]interface{}{
+				"total_cents": result.Total,
+				"register_id": result.RegisterID,
+			},
+		})
 	}
 
 	s.logger.Info("POS transaction voided", "id", txID)

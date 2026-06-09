@@ -2,6 +2,8 @@ package account
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -85,11 +87,15 @@ func (r *PostgresRepository) GetBalance(ctx context.Context, customerID uuid.UUI
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID).Scan(&balanceFloat)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return 0, nil // Or error?
+			// A missing row means the customer does not exist — surface it
+			// rather than silently returning a zero balance, which would let
+			// PostTransaction write a phantom ledger entry / available credit
+			// against a non-existent customer.
+			return 0, fmt.Errorf("customer %s not found", customerID)
 		}
 		return 0, err
 	}
-	return int64(balanceFloat * 100), nil
+	return int64(math.Round(balanceFloat * 100)), nil
 }
 
 func (r *PostgresRepository) GetCreditLimit(ctx context.Context, customerID uuid.UUID) (int64, error) {
@@ -98,11 +104,11 @@ func (r *PostgresRepository) GetCreditLimit(ctx context.Context, customerID uuid
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, customerID).Scan(&limitFloat)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return 0, nil
+			return 0, fmt.Errorf("customer %s not found", customerID)
 		}
 		return 0, err
 	}
-	return int64(limitFloat * 100), nil
+	return int64(math.Round(limitFloat * 100)), nil
 }
 
 func (r *PostgresRepository) UpdateCustomerBalance(ctx context.Context, customerID uuid.UUID, newBalance int64) error {

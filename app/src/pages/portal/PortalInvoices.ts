@@ -5,8 +5,10 @@ import { FileText, Download, RefreshCw, AlertTriangle } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalInvoice } from '../../types/portal';
 
-const formatCurrency = (cents: number): string =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
+// Portal invoice amounts arrive as float64 DOLLARS (see backend portal/model.go),
+// unlike ERP /api/v1 cents. Format directly — do NOT divide by 100.
+const formatCurrency = (dollars: number): string =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(dollars || 0);
 
 const statusConfig = (status: string): { color: string; bgColor: string } => {
     const map: Record<string, { color: string; bgColor: string }> = {

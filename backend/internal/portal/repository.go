@@ -83,12 +83,15 @@ func (r *Repository) GetCustomerARSummary(ctx context.Context, customerID uuid.U
 		return 0, 0, 0, fmt.Errorf("failed to get customer credit limit: %w", err)
 	}
 
-	// Current balance: sum of all open invoices (unpaid or overdue), regardless of due date.
+	// Current balance: sum of all open invoices. Includes PARTIAL so this agrees
+	// with the dashboard/reporting AR summaries and the credit-limit check (see
+	// invoice.OpenInvoiceStatuses) — previously this excluded PARTIAL and the
+	// same customer's balance differed across surfaces.
 	balanceQuery := `
 		SELECT COALESCE(SUM(total_amount), 0)::float8
 		FROM invoices
 		WHERE customer_id = $1
-		  AND status IN ('UNPAID', 'OVERDUE')
+		  AND status IN ('UNPAID', 'PARTIAL', 'OVERDUE')
 	`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, balanceQuery, customerID).Scan(&balance)
 	if err != nil {
