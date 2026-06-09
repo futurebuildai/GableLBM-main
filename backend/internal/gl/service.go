@@ -24,6 +24,39 @@ func NewService(repo Repository, adapter integration.GLAdapter, logger *slog.Log
 	return &Service{repo: repo, adapter: adapter, logger: logger}
 }
 
+// Stable chart-of-accounts codes used for auto-posting. These rows are seeded
+// by migration 025 and are matched by code (not by free-text name) so a rename
+// of an account never silently breaks posting.
+const (
+	AccountCodeCash    = "1010"
+	AccountCodeAR      = "1020"
+	AccountCodeRevenue = "4010"
+)
+
+// resolveAccountIDs loads the chart of accounts and returns the IDs for the
+// requested codes, failing if any are missing. We never post a journal line
+// with a nil account_id — the gl_journal_lines.account_id FK would reject it,
+// and historically that error was swallowed, silently dropping the posting.
+func (s *Service) resolveAccountIDs(ctx context.Context, codes ...string) (map[string]uuid.UUID, error) {
+	accounts, err := s.repo.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chart of accounts: %w", err)
+	}
+	byCode := make(map[string]uuid.UUID, len(accounts))
+	for _, a := range accounts {
+		byCode[a.Code] = a.ID
+	}
+	out := make(map[string]uuid.UUID, len(codes))
+	for _, c := range codes {
+		id, ok := byCode[c]
+		if !ok {
+			return nil, fmt.Errorf("required GL account %q not found in chart of accounts", c)
+		}
+		out[c] = id
+	}
+	return out, nil
+}
+
 // --- Account Operations ---
 
 func (s *Service) ListAccounts(ctx context.Context) ([]GLAccount, error) {
@@ -159,6 +192,12 @@ func (s *Service) CloseFiscalPeriod(ctx context.Context, id uuid.UUID) error {
 // This replaces the old stub that only forwarded to external GL.
 func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(invoiceID)
+
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeAR, AccountCodeRevenue)
+	if err != nil {
+		return err
+	}
+
 	entry := &JournalEntry{
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Invoice %s", invoiceID),
@@ -167,29 +206,16 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
-			{AccountID: uuid.Nil, Description: "Accounts Receivable", Debit: amount, Credit: 0},
-			{AccountID: uuid.Nil, Description: "Sales Revenue", Debit: 0, Credit: amount},
+			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue", Debit: 0, Credit: amount},
 		},
 	}
 
-	// Resolve account IDs by code
-	accounts, err := s.repo.ListAccounts(ctx)
-	if err == nil {
-		acctMap := make(map[string]uuid.UUID)
-		for _, a := range accounts {
-			acctMap[a.Name] = a.ID
-		}
-		for i := range entry.Lines {
-			if id, ok := acctMap[entry.Lines[i].Description]; ok {
-				entry.Lines[i].AccountID = id
-			}
-		}
-	}
-
-	// Post to internal GL
+	// Post to internal GL. Propagate the error so the caller decides whether a
+	// GL failure is fatal (FinalizeInvoice) or best-effort (order fulfilment) —
+	// previously this was swallowed, hiding posting failures.
 	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
-		s.logger.Warn("Failed to post invoice to internal GL", "error", err, "invoice_id", invoiceID)
-		// Don't fail the invoice for GL errors
+		return fmt.Errorf("failed to post invoice to internal GL: %w", err)
 	}
 
 	// Also post to external GL if adapter is configured
@@ -216,6 +242,12 @@ func (s *Service) SyncInvoice(ctx context.Context, invoiceID string, amount int6
 // SyncPayment creates a journal entry: DR Cash / CR Accounts Receivable.
 func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int64) error {
 	sourceRefID, _ := uuid.Parse(paymentID)
+
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeAR)
+	if err != nil {
+		return err
+	}
+
 	entry := &JournalEntry{
 		EntryDate:   time.Now(),
 		Memo:        fmt.Sprintf("Payment %s", paymentID),
@@ -224,28 +256,46 @@ func (s *Service) SyncPayment(ctx context.Context, paymentID string, amount int6
 		Status:      StatusPosted,
 		PostedBy:    "system",
 		Lines: []JournalLine{
-			{AccountID: uuid.Nil, Description: "Cash", Debit: amount, Credit: 0},
-			{AccountID: uuid.Nil, Description: "Accounts Receivable", Debit: 0, Credit: amount},
+			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: 0, Credit: amount},
 		},
 	}
 
-	accounts, err := s.repo.ListAccounts(ctx)
-	if err == nil {
-		acctMap := make(map[string]uuid.UUID)
-		for _, a := range accounts {
-			acctMap[a.Name] = a.ID
-		}
-		for i := range entry.Lines {
-			if id, ok := acctMap[entry.Lines[i].Description]; ok {
-				entry.Lines[i].AccountID = id
-			}
-		}
+	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
+		return fmt.Errorf("failed to post payment to internal GL: %w", err)
+	}
+
+	return nil
+}
+
+// SyncCashSale posts a point-of-sale cash sale: DR Cash / CR Sales Revenue.
+// Unlike an on-account sale there is no AR leg — the sale is paid at the till.
+// Tagged with the PAYMENT source (cash received) to satisfy the source CHECK
+// constraint. The amount is the full sale total in cents.
+func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64) error {
+	sourceRefID, _ := uuid.Parse(posTxID)
+
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeRevenue)
+	if err != nil {
+		return err
+	}
+
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("POS Sale %s", posTxID),
+		Source:      SourcePayment,
+		SourceRefID: &sourceRefID,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines: []JournalLine{
+			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue", Debit: 0, Credit: amount},
+		},
 	}
 
 	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
-		s.logger.Warn("Failed to post payment to internal GL", "error", err, "payment_id", paymentID)
+		return fmt.Errorf("failed to post POS cash sale to internal GL: %w", err)
 	}
-
 	return nil
 }
 

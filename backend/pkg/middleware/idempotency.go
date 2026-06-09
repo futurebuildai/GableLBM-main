@@ -109,10 +109,31 @@ func (w *idempotencyResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-// Idempotency returns middleware that caches POST/PUT responses keyed by
-// the X-Idempotency-Key header. If the same key is seen again within 24
-// hours, the cached response is replayed without calling the downstream
-// handler. Requests without the header pass through uncached.
+// principalScope derives a per-caller namespace from the authenticated
+// identity already injected into the request context by the auth middleware
+// (this middleware runs after auth). The idempotency cache key is namespaced
+// by this scope so that one caller's X-Idempotency-Key can never collide with
+// another's — without it, the global cache would replay caller A's response
+// body to caller B who reused the same key (cross-tenant disclosure).
+func principalScope(r *http.Request) string {
+	ctx := r.Context()
+	if pc, ok := ctx.Value(PortalClaimsKey).(*PortalClaims); ok && pc != nil {
+		return "portal:" + pc.CustomerID.String() + ":" + pc.CustomerUserID.String()
+	}
+	if claims := ClaimsFromContext(ctx); claims != nil && claims.Subject != "" {
+		return "user:" + claims.Subject
+	}
+	if tenant := TenantIDFromContext(ctx); tenant != "" {
+		return "tenant:" + tenant
+	}
+	return "anon"
+}
+
+// Idempotency returns middleware that caches POST/PUT responses keyed by the
+// X-Idempotency-Key header scoped to the authenticated caller. If the same
+// caller reuses the same key within 24 hours, the cached response is replayed
+// without calling the downstream handler. Requests without the header pass
+// through uncached.
 func Idempotency() func(http.Handler) http.Handler {
 	store := newIdempotencyStore()
 
@@ -124,12 +145,15 @@ func Idempotency() func(http.Handler) http.Handler {
 				return
 			}
 
-			key := r.Header.Get(IdempotencyHeader)
-			if key == "" {
+			clientKey := r.Header.Get(IdempotencyHeader)
+			if clientKey == "" {
 				// No idempotency key — pass through
 				next.ServeHTTP(w, r)
 				return
 			}
+			// Namespace the key by the authenticated caller so keys cannot
+			// collide across tenants/users.
+			key := principalScope(r) + "\x00" + clientKey
 
 			// Check cache
 			if cached, ok := store.get(key); ok {

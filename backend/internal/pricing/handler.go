@@ -31,9 +31,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return handler
 	}
 
-	mux.HandleFunc("GET /api/v1/pricing/calculate", h.HandleCalculatePrice)
+	// These reads expose per-customer negotiated pricing and the rule set, so
+	// they are guarded at the same level as the writes (in dev mode the guard
+	// is nil and passes through). Server-side order/quote/POS pricing uses the
+	// Go service directly and is unaffected.
+	mux.HandleFunc("GET /api/v1/pricing/calculate", guard(h.HandleCalculatePrice))
 	mux.HandleFunc("POST /api/v1/pricing/rules", guard(h.HandleCreateRule))
-	mux.HandleFunc("GET /api/v1/pricing/rules", h.HandleListRules)
+	mux.HandleFunc("GET /api/v1/pricing/rules", guard(h.HandleListRules))
 }
 
 func (h *Handler) HandleCalculatePrice(w http.ResponseWriter, r *http.Request) {

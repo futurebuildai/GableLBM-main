@@ -147,11 +147,13 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("failed to get customer details: %w", err)
 	}
 
-	// If Credit Limit is set (> 0) and (Balance + OrderTotal > Limit)
-	// TODO: align with int64 cents — customer.CreditLimit and BalanceDue are still float64 dollars
-	orderDollars := float64(o.TotalAmount) / 100.0
-	if cust.CreditLimit > 0 && (cust.BalanceDue+orderDollars) > cust.CreditLimit {
-		// Place On Hold
+	// If a credit limit is set and the live open balance + this order would
+	// exceed it, place the order ON HOLD.
+	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimit, o.TotalAmount)
+	if err != nil {
+		return err
+	}
+	if over {
 		if err := s.repo.UpdateStatus(ctx, id, StatusOnHold); err != nil {
 			return fmt.Errorf("failed to update order status to ON_HOLD: %w", err)
 		}
@@ -209,6 +211,22 @@ func (s *Service) ConfirmOrder(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// overCreditLimit reports whether posting orderTotalCents would push the
+// customer past their credit limit. The current balance is computed live from
+// open invoices — the denormalized customers.balance_due column is unmaintained
+// (stale for seed data, never updated by invoicing/POS) and must not gate credit.
+func (s *Service) overCreditLimit(ctx context.Context, customerID uuid.UUID, creditLimit float64, orderTotalCents int64) (bool, error) {
+	if creditLimit <= 0 {
+		return false, nil // no limit configured
+	}
+	openCents, err := s.invoiceSvc.GetCustomerOpenBalanceCents(ctx, customerID)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute current balance: %w", err)
+	}
+	limitCents := int64(math.Round(creditLimit * 100))
+	return openCents+orderTotalCents > limitCents, nil
+}
+
 func (s *Service) ListOrders(ctx context.Context) ([]Order, error) {
 	return s.repo.ListOrders(ctx)
 }
@@ -237,10 +255,12 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("failed to get customer: %w", err)
 	}
-	// TODO: align with int64 cents — customer.CreditLimit and BalanceDue are still float64 dollars
-	fulfillOrderDollars := float64(o.TotalAmount) / 100.0
-	if cust.CreditLimit > 0 && (cust.BalanceDue+fulfillOrderDollars) > cust.CreditLimit {
-		return fmt.Errorf("credit limit exceeded: balance %.2f + order %.2f > limit %.2f", cust.BalanceDue, fulfillOrderDollars, cust.CreditLimit)
+	over, err := s.overCreditLimit(ctx, o.CustomerID, cust.CreditLimit, o.TotalAmount)
+	if err != nil {
+		return err
+	}
+	if over {
+		return fmt.Errorf("credit limit exceeded: order total %d cents would push the customer over their limit", o.TotalAmount)
 	}
 
 	// 2. Wrap all DB mutations in a single transaction:
@@ -260,29 +280,41 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 			fulfilled = append(fulfilled, line)
 		}
 
-		// 2b. Create Invoice — TotalAmount and PriceEach are already in cents
-		inv := &invoice.Invoice{
-			OrderID:     o.ID,
-			CustomerID:  o.CustomerID,
-			TotalAmount: o.TotalAmount,
-			Status:      invoice.InvoiceStatusUnpaid,
+		// 2b. Create the invoice + post it to the ledgers — but only if the order
+		//     was not already invoiced (e.g. via the delivery-completion path).
+		//     AR is summed from invoices, so a second invoice would double-bill
+		//     the customer. Skipping is idempotent and safe.
+		alreadyInvoiced, err := s.invoiceSvc.ExistsInvoiceForOrder(txCtx, o.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check existing invoice: %w", err)
 		}
-		for _, ol := range o.Lines {
-			inv.Lines = append(inv.Lines, invoice.InvoiceLine{
-				ProductID: ol.ProductID,
-				Quantity:  ol.Quantity,
-				PriceEach: ol.PriceEach,
-			})
-		}
-		if err := s.invoiceSvc.CreateInvoice(txCtx, inv); err != nil {
-			return fmt.Errorf("failed to create invoice: %w", err)
-		}
+		if !alreadyInvoiced {
+			// TotalAmount and PriceEach are already in cents. CreateInvoice
+			// recomputes subtotal/tax and sets the tax-inclusive TotalAmount.
+			inv := &invoice.Invoice{
+				OrderID:     o.ID,
+				CustomerID:  o.CustomerID,
+				TotalAmount: o.TotalAmount,
+				Status:      invoice.InvoiceStatusUnpaid,
+			}
+			for _, ol := range o.Lines {
+				inv.Lines = append(inv.Lines, invoice.InvoiceLine{
+					ProductID: ol.ProductID,
+					Quantity:  ol.Quantity,
+					PriceEach: ol.PriceEach,
+				})
+			}
+			if err := s.invoiceSvc.CreateInvoice(txCtx, inv); err != nil {
+				return fmt.Errorf("failed to create invoice: %w", err)
+			}
 
-		// 2c. Update Customer Balance
-		// TODO: align with int64 cents — customer.UpdateBalance accepts float64 dollars
-		balanceDelta := float64(o.TotalAmount) / 100.0
-		if err := s.customerSvc.UpdateBalance(txCtx, o.CustomerID, balanceDelta); err != nil {
-			return fmt.Errorf("failed to update customer balance: %w", err)
+			// 2c. Post to the GL + customer AR subledger using the tax-inclusive
+			//     invoice total (the single AR writer for this path). This
+			//     replaces the old raw, pre-tax customers.balance_due bump that
+			//     left the recorded balance disagreeing with the invoice total.
+			if err := s.invoiceSvc.PostInvoiceToLedger(txCtx, inv); err != nil {
+				return fmt.Errorf("failed to post invoice to ledgers: %w", err)
+			}
 		}
 
 		// 2d. Update Order Status
@@ -302,6 +334,22 @@ func (s *Service) FulfillOrder(ctx context.Context, id uuid.UUID) error {
 		if err := txFn(ctx); err != nil {
 			return err
 		}
+	}
+
+	// Audit log: order fulfilled (after commit). This is the money-moving step
+	// — it issues the invoice, posts AR/GL, and depletes stock — so it belongs
+	// in the financial audit trail alongside order.confirmed.
+	if s.auditLog != nil {
+		s.auditLog.Log(ctx, audit.Entry{
+			Action:     "order.fulfilled",
+			EntityType: "order",
+			EntityID:   id,
+			Changes: map[string]interface{}{
+				"customer_id":  o.CustomerID,
+				"total_amount": o.TotalAmount,
+				"line_count":   len(o.Lines),
+			},
+		})
 	}
 
 	return nil
