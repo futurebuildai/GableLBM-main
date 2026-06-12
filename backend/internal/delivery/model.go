@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,6 +99,18 @@ type Route struct {
 	VehicleName *string `json:"vehicle_name,omitempty" db:"vehicle_name"`
 	DriverName  *string `json:"driver_name,omitempty" db:"driver_name"`
 	StopCount   int     `json:"stop_count" db:"stop_count"`
+
+	// True when AI_LM pushed a 3D packing manifest with this route (powers the
+	// yard "Pack Trucks" instructions).
+	HasManifest bool `json:"has_manifest" db:"has_manifest"`
+}
+
+// RouteManifest is the yard-facing packing view of a route: the route header,
+// its stops, and the AI_LM load manifest (per-placement pack steps) verbatim.
+type RouteManifest struct {
+	Route      *Route          `json:"route"`
+	Deliveries []Delivery      `json:"deliveries"`
+	Manifest   json.RawMessage `json:"manifest"`
 }
 
 type Delivery struct {
@@ -238,6 +251,7 @@ type Repository interface {
 	GetRoute(ctx context.Context, id uuid.UUID) (*Route, error)
 	ListRoutes(ctx context.Context, date *time.Time, driverID *uuid.UUID) ([]Route, error)
 	UpdateRouteStatus(ctx context.Context, id uuid.UUID, status RouteStatus) error
+	GetRouteManifest(ctx context.Context, id uuid.UUID) (json.RawMessage, error)
 
 	// Deliveries
 	CreateDelivery(ctx context.Context, delivery *Delivery) error

@@ -55,6 +55,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
 	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
 	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
+	mux.HandleFunc("POST /api/integration/demo/seed-orders", h.authMiddleware(h.SeedDemoOrders))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -467,11 +468,14 @@ type IntegrationOrderLine struct {
 // IntegrationOrderResponse is an order plus its line items and (when a delivery
 // stop has been geocoded) its destination coordinates.
 type IntegrationOrderResponse struct {
-	ID        string                 `json:"id"`
-	Status    string                 `json:"status"`
-	Latitude  *float64               `json:"latitude,omitempty"`
-	Longitude *float64               `json:"longitude,omitempty"`
-	Lines     []IntegrationOrderLine `json:"lines"`
+	ID            string                 `json:"id"`
+	Status        string                 `json:"status"`
+	CustomerName  string                 `json:"customer_name,omitempty"`
+	Address       string                 `json:"address,omitempty"`
+	ScheduledDate string                 `json:"scheduled_date,omitempty"`
+	Latitude      *float64               `json:"latitude,omitempty"`
+	Longitude     *float64               `json:"longitude,omitempty"`
+	Lines         []IntegrationOrderLine `json:"lines"`
 }
 
 // ListOrdersForDate returns orders (optionally filtered by ?status= and ?date=)
@@ -481,10 +485,13 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 	date := r.URL.Query().Get("date")
 
 	sqlQuery := `
-		SELECT o.id, o.status,
+		SELECT o.id, o.status, c.name,
+		       COALESCE(o.delivery_address, c.address, ''),
+		       COALESCE(to_char(o.scheduled_delivery_date, 'YYYY-MM-DD'), ''),
 		       ol.product_id, p.sku, ol.quantity, COALESCE(p.weight_lbs, 0),
-		       d.latitude, d.longitude
+		       COALESCE(o.delivery_latitude, d.latitude), COALESCE(o.delivery_longitude, d.longitude)
 		FROM orders o
+		JOIN customers c ON c.id = o.customer_id
 		JOIN order_lines ol ON ol.order_id = o.id
 		JOIN products p ON p.id = ol.product_id
 		LEFT JOIN deliveries d ON d.order_id = o.id
@@ -497,7 +504,9 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 		argIdx++
 	}
 	if date != "" {
-		sqlQuery += fmt.Sprintf(" AND o.created_at::date = $%d::date", argIdx)
+		// Scheduled delivery date is canonical; created_at::date is the
+		// fallback for orders that predate migration 075.
+		sqlQuery += fmt.Sprintf(" AND COALESCE(o.scheduled_delivery_date, o.created_at::date) = $%d::date", argIdx)
 		args = append(args, date)
 		argIdx++
 	}
@@ -515,18 +524,18 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 	var order_order []string
 	for rows.Next() {
 		var (
-			orderID, orderStatus, productID, sku string
-			qty, weight                          float64
-			lat, lng                             *float64
+			orderID, orderStatus, customerName, address, schedDate, productID, sku string
+			qty, weight                                                            float64
+			lat, lng                                                               *float64
 		)
-		if err := rows.Scan(&orderID, &orderStatus, &productID, &sku, &qty, &weight, &lat, &lng); err != nil {
+		if err := rows.Scan(&orderID, &orderStatus, &customerName, &address, &schedDate, &productID, &sku, &qty, &weight, &lat, &lng); err != nil {
 			slog.Error("failed to scan order row", "error", err, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "failed to read order data")
 			return
 		}
 		o, ok := ordersByID[orderID]
 		if !ok {
-			o = &IntegrationOrderResponse{ID: orderID, Status: orderStatus, Latitude: lat, Longitude: lng}
+			o = &IntegrationOrderResponse{ID: orderID, Status: orderStatus, CustomerName: customerName, Address: address, ScheduledDate: schedDate, Latitude: lat, Longitude: lng}
 			ordersByID[orderID] = o
 			order_order = append(order_order, orderID)
 		}
@@ -555,6 +564,9 @@ type DeliveryRouteRequest struct {
 	ScheduledDate string              `json:"scheduled_date"` // YYYY-MM-DD
 	Notes         string              `json:"notes"`
 	Stops         []DeliveryStopInput `json:"stops"`
+	// LoadManifest is AI_LM's 3D packing manifest (pack steps + securement),
+	// stored verbatim and rendered by the yard "Pack Trucks" surface.
+	LoadManifest json.RawMessage `json:"load_manifest,omitempty"`
 }
 
 type DeliveryStopInput struct {
@@ -599,7 +611,9 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Idempotency: reuse an existing route for the same vehicle + date.
+	// Idempotency: a not-yet-dispatched route for the same vehicle + date is
+	// REPLACED (re-approving a plan in AI_LM updates the board instead of
+	// silently keeping the stale stops); in-transit/completed routes are kept.
 	existing, err := h.deliverySvc.ListRoutes(ctx, &req.ScheduledDate, nil)
 	if err != nil {
 		slog.Error("failed to list routes", "error", err, "method", r.Method, "path", r.URL.Path)
@@ -607,12 +621,23 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, route := range existing {
-		if route.VehicleID == vehicleID {
+		if route.VehicleID != vehicleID {
+			continue
+		}
+		if route.Status != delivery.RouteStatusDraft && route.Status != delivery.RouteStatusScheduled {
 			writeJSON(w, http.StatusOK, DeliveryRouteResponse{
 				RouteID:   route.ID.String(),
 				StopCount: route.StopCount,
 				Created:   false,
 			})
+			return
+		}
+		if _, err := h.db.Pool.Exec(ctx, `DELETE FROM deliveries WHERE route_id = $1`, route.ID); err == nil {
+			_, err = h.db.Pool.Exec(ctx, `DELETE FROM delivery_routes WHERE id = $1`, route.ID)
+		}
+		if err != nil {
+			slog.Error("failed to replace existing route", "error", err, "route_id", route.ID)
+			writeError(w, http.StatusInternalServerError, "failed to replace existing route")
 			return
 		}
 	}
@@ -644,6 +669,13 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		created++
+	}
+
+	// AI_LM-approved routes arrive dispatch-ready with their packing manifest.
+	if _, err := h.db.Pool.Exec(ctx, `
+		UPDATE delivery_routes SET status='SCHEDULED', load_manifest=$2, updated_at=NOW()
+		WHERE id=$1`, route.ID, req.LoadManifest); err != nil {
+		slog.Warn("failed to store load manifest", "route_id", route.ID, "error", err)
 	}
 
 	writeJSON(w, http.StatusCreated, DeliveryRouteResponse{

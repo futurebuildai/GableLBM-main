@@ -141,6 +141,8 @@ export class GableApp extends LitElement {
       '/driver/deliveries/:id': 'gable-delivery-detail',
       '/yard': 'gable-pick-queue',
       '/yard/pick/:id': 'gable-pick-detail',
+      '/yard/loading': 'gable-pack-queue',
+      '/yard/loading/:id': 'gable-pack-truck',
       '/yard/inventory': 'gable-yard-inventory-lookup',
       '/yard/count': 'gable-cycle-count',
       '/yard/receiving': 'gable-receive-po',

@@ -2,11 +2,16 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func (m *MockRepository) GetRouteManifest(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	return nil, nil
+}
 
 type MockRepository struct {
 	routes []Route

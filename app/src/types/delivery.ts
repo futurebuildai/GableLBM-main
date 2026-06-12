@@ -53,6 +53,75 @@ export interface Route {
     vehicle_name?: string;
     driver_name?: string;
     stop_count: number;
+
+    // True when AI_LM pushed a 3D packing manifest with this route (powers the
+    // yard "Pack Trucks" instructions).
+    has_manifest?: boolean;
+}
+
+// --- AI_LM packing manifest (stored verbatim on delivery_routes.load_manifest) ---
+
+export interface PackStep {
+    step: number;
+    item_id: string;
+    sku: string;
+    order_id?: string;
+    stop_sequence?: number;
+    x: number;
+    y: number;
+    z: number;
+    length_in: number;
+    width_in: number;
+    height_in: number;
+    weight_lbs: number;
+    axle_group: number;
+}
+
+export interface ManifestStop {
+    order_id: string;
+    sequence: number;
+    customer_name?: string;
+    address?: string;
+    weight_lbs: number;
+    piece_count: number;
+}
+
+export interface ManifestStrap {
+    number: number;
+    position_in: number;
+    over_height_in: number;
+    required_wll_lbs: number;
+}
+
+export interface ManifestSecurement {
+    cargo_weight_lbs: number;
+    min_aggregate_wll_lbs: number;
+    straps: ManifestStrap[];
+    recommended_strap: string;
+    notes: string[];
+}
+
+export interface LoadManifest {
+    version: number;
+    plan_date: string;
+    vehicle_id: string;
+    vehicle_name: string;
+    driver_name?: string;
+    bed?: { length_in: number; width_in: number; height_in: number };
+    total_weight_lbs: number;
+    gvw_status: 'PASS' | 'WARN' | 'FAIL';
+    max_load_height_in: number;
+    axle_loads: { axle_number: number; weight_lbs: number; max_weight_lbs: number; utilization: number; status: string }[];
+    stops: ManifestStop[];
+    steps: PackStep[];
+    sku_names?: Record<string, string>;
+    securement?: ManifestSecurement | null;
+}
+
+export interface RouteManifest {
+    route: Route;
+    deliveries: Delivery[];
+    manifest: LoadManifest | null;
 }
 
 export interface Delivery {
