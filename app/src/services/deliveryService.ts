@@ -1,5 +1,5 @@
 import type {
-    Vehicle, Driver, Route, Delivery, CapacityWarning,
+    Vehicle, Driver, Route, Delivery, CapacityWarning, RouteManifest,
     CreateVehicleRequest, UpdateVehicleRequest,
     CreateDriverRequest, UpdateDriverRequest,
     CreateRouteRequest,
@@ -93,6 +93,12 @@ export const deliveryService = {
 
         const res = await fetchWithAuth(`${API_BASE}/api/v1/delivery/routes?${params.toString()}`);
         if (!res.ok) throw new Error('Failed to fetch routes');
+        return res.json();
+    },
+
+    getRouteManifest: async (routeId: string): Promise<RouteManifest> => {
+        const res = await fetchWithAuth(`${API_BASE}/api/v1/delivery/routes/${routeId}/manifest`);
+        if (!res.ok) throw new Error('Failed to fetch route manifest');
         return res.json();
     },
 

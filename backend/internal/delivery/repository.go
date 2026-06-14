@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -246,7 +247,8 @@ func (r *PostgresRepository) GetRoute(ctx context.Context, id uuid.UUID) (*Route
 	query := `
 		SELECT r.id, r.vehicle_id, r.driver_id, r.scheduled_date, r.status, r.notes, r.created_at, r.updated_at,
 		       v.name as vehicle_name, d.name as driver_name,
-		       (SELECT COUNT(*) FROM deliveries WHERE route_id = r.id) as stop_count
+		       (SELECT COUNT(*) FROM deliveries WHERE route_id = r.id) as stop_count,
+		       (r.load_manifest IS NOT NULL) as has_manifest
 		FROM delivery_routes r
 		JOIN vehicles v ON r.vehicle_id = v.id
 		JOIN drivers d ON r.driver_id = d.id
@@ -255,7 +257,7 @@ func (r *PostgresRepository) GetRoute(ctx context.Context, id uuid.UUID) (*Route
 	var route Route
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&route.ID, &route.VehicleID, &route.DriverID, &route.ScheduledDate, &route.Status, &route.Notes, &route.CreatedAt, &route.UpdatedAt,
-		&route.VehicleName, &route.DriverName, &route.StopCount,
+		&route.VehicleName, &route.DriverName, &route.StopCount, &route.HasManifest,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -266,11 +268,25 @@ func (r *PostgresRepository) GetRoute(ctx context.Context, id uuid.UUID) (*Route
 	return &route, nil
 }
 
+func (r *PostgresRepository) GetRouteManifest(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	var manifest []byte
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT load_manifest FROM delivery_routes WHERE id = $1`, id).Scan(&manifest)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("route not found")
+		}
+		return nil, err
+	}
+	return json.RawMessage(manifest), nil
+}
+
 func (r *PostgresRepository) ListRoutes(ctx context.Context, date *time.Time, driverID *uuid.UUID) ([]Route, error) {
 	query := `
 		SELECT r.id, r.vehicle_id, r.driver_id, r.scheduled_date, r.status, r.notes, r.created_at, r.updated_at,
 		       v.name as vehicle_name, d.name as driver_name,
-		       (SELECT COUNT(*) FROM deliveries WHERE route_id = r.id) as stop_count
+		       (SELECT COUNT(*) FROM deliveries WHERE route_id = r.id) as stop_count,
+		       (r.load_manifest IS NOT NULL) as has_manifest
 		FROM delivery_routes r
 		JOIN vehicles v ON r.vehicle_id = v.id
 		JOIN drivers d ON r.driver_id = d.id
@@ -304,7 +320,7 @@ func (r *PostgresRepository) ListRoutes(ctx context.Context, date *time.Time, dr
 		var route Route
 		if err := rows.Scan(
 			&route.ID, &route.VehicleID, &route.DriverID, &route.ScheduledDate, &route.Status, &route.Notes, &route.CreatedAt, &route.UpdatedAt,
-			&route.VehicleName, &route.DriverName, &route.StopCount,
+			&route.VehicleName, &route.DriverName, &route.StopCount, &route.HasManifest,
 		); err != nil {
 			return nil, err
 		}
