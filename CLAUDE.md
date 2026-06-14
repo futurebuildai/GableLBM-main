@@ -72,6 +72,34 @@ tab (`<gable-product-twin-3d>`) and in the AI_LM Load Builder next to the truck 
 See `INTEGRATIONS.md` for the full contract and `docs/architecture.md` for where this sits
 in the module map.
 
+## AI_LM Dispatch Integration
+
+Beyond geometry, GableLBM is the source of truth for AI_LM's **guided dispatch workflow**
+(ingest a day's orders → assign trucks → 3D-pack → route-compliance review → push). The
+integration surface lives in `backend/internal/integrations/` (`handler.go` + `ailm_demo.go`),
+all `X-Integration-Key` gated. Migration `075_ai_lm_dispatch.sql` adds:
+
+- `orders.scheduled_delivery_date` + per-order delivery geopoint
+  (`delivery_address`/`delivery_latitude`/`delivery_longitude`) + `demo_seed` flag.
+- `delivery_routes.load_manifest` (`JSONB`) — AI_LM's 3D packing manifest (pack steps +
+  securement plan), stored verbatim.
+
+Endpoints AI_LM consumes:
+- `GET /api/integration/orders?date=&status=` — filters on `scheduled_delivery_date`
+  (`created_at::date` fallback for pre-075 rows); returns customer name, delivery address,
+  order-level coordinates, and per-unit line weights.
+- `GET /api/integration/{vehicles,drivers}` — the fleet for assignment + write-back.
+- `POST /api/integration/delivery-routes` — approved-plan write-back: creates a SCHEDULED
+  route + stops, **replaces** any not-yet-dispatched route for the same `(vehicle, date)`
+  (re-approving updates the board instead of duplicating), and stores the packing manifest.
+- `POST /api/integration/demo/seed-orders` — demo: next-day CONFIRMED lumber orders with
+  jobsite geopoints + actual-size dims stamped on the lumber SKUs.
+
+Yard **Pack Trucks** surface (`/yard/loading`, `<gable-pack-queue>` / `<gable-pack-truck>`):
+step-by-step bundle loading instructions + a tie-down securement checklist, driven by
+`GET /api/v1/delivery/routes/{id}/manifest` (route + stops + manifest; `Route.has_manifest`
+flags eligible routes). The companion AI_LM service deploys to **load.gablelbm.com**.
+
 ## Key Conventions
 
 ### Database
@@ -235,6 +263,7 @@ read the referenced files before sizing.
 - **Lumber index price protection** Quote lines snapshot a baseline market-index value at SEND; the `pricing` exposure scanner detects index moves past a per-customer threshold and applies the customer policy (AUTO_ESCALATE / FLAG_FOR_REQUOTE / REQUIRE_ACK). Migration `072`, `pkg/eventbus` (`quote.exposure.*`), salesperson at-risk view (`/quotes/exposure`), owner portfolio rollup (`/reports/exposure`), market-index admin (`/admin/market-indices`), quote-detail exposure banner + margin-erosion fold-in, in-app acknowledgment modal, and the non-bypassable pre-ship gate on orders/delivery.
 - **#11** Canonical per-product 3D geometry (`products.length_in/width_in/height_in/stackable/geometry_source`, migration `073`), the PIM Geometry tab (`<gable-product-twin-3d>`), `PATCH /api/v1/products/{id}/dimensions`, and exposure over `/api/integration/products` so AI_LM renders scaled digital twins (commits `14210d6`, `915b26e`).
 - **#12** Unfiltered bulk product catalog pull on `/api/integration/products` (no `category`/`q` → `LIMIT 1000`) so AI_LM can hydrate its full load-planning catalog in one call (commit `b5170de`).
+- **#13** AI_LM dispatch workflow support (migration `075`): scheduled-delivery-date + geopoint on orders, `/api/integration/{vehicles,drivers,orders}` + delivery-route write-back with packing-manifest storage (replace-on-repush) + `demo/seed-orders`, `GET /api/v1/delivery/routes/{id}/manifest`, and the yard **Pack Trucks** surface (`/yard/loading`) with step-by-step loading + securement instructions. See `## AI_LM Dispatch Integration` and GableLBM PR #16.
 
 ### #10 candidates — pick one based on the active discovery doc
 
