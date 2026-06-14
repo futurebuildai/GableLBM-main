@@ -192,6 +192,40 @@ it for decisions — derive live.
   edits (names, emails, prices) overwrite existing demo rows on redeploy. `ON CONFLICT DO
   NOTHING` will silently ignore future edits — verify the upsert names every column you change.
 
+## AI_LM (Load Management) integration
+
+GableLBM is the source of truth for the sidecar **AI_LM** service (separate repo in
+this workspace). Everything lives behind `X-Integration-Key` (`INTEGRATION_API_KEY`,
+dev fallback `fb-brain-demo-key-2026` when `AUTH_MODE=dev`):
+
+- `GET /api/integration/products` — with **no params** it is the bulk catalog pull
+  (LIMIT 1000) carrying `weight_lbs` + the PIM digital-twin geometry
+  (`length_in/width_in/height_in/stackable/geometry_source`, migration 072).
+- `GET /api/integration/vehicles` / `GET /api/integration/drivers` — the fleet.
+- `GET /api/integration/orders?date=&status=` — orders by `scheduled_delivery_date`
+  with line items (per-unit weight) and the order's delivery geopoint
+  (`orders.delivery_address/latitude/longitude`, migration 072).
+- `POST /api/integration/delivery-routes` — AI_LM write-back: creates a SCHEDULED
+  `delivery_routes` row + `deliveries` stops, idempotent on
+  `(vehicle_id, scheduled_date)`, and stores the 3D packing manifest in
+  `delivery_routes.load_manifest` (JSONB).
+- `POST /api/integration/demo/seed-orders` — demo: creates next-day CONFIRMED
+  lumber orders (flagged `orders.demo_seed`) and stamps actual-size dims on the
+  lumber SKUs. Re-seeding a date replaces its own previous orders.
+
+Handlers live in `backend/internal/integrations/ailm.go`.
+
+Related surfaces:
+- **Yard "Pack Trucks"** (`/yard/loading`, `/yard/loading/:id`): step-by-step
+  visual loading instructions driven by the pushed manifest via
+  `GET /api/v1/delivery/routes/{id}/manifest` (route + stops + manifest;
+  `Route.has_manifest` flags eligible routes).
+- **PIM Digital Twin tab** on `/inventory/:id`: dims editor + true-scale
+  `<gable-product-twin-3d>` (Three.js) preview, saved via
+  `PUT /api/v1/products/{id}/dimensions`. **Shared scaling contract: 1 inch =
+  1/12 Three.js world unit** — identical in AI_LM's load visualizer; do not
+  change one side without the other.
+
 ## Detailed Specs
 See `docs/architecture.md`, `docs/design-system.md`, and `docs/database-erd.md` for deeper documentation.
 

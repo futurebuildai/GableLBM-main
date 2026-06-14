@@ -35,6 +35,20 @@ export interface Product {
     commission_rate: number;
     created_at: string;
     updated_at: string;
+
+    // Digital twin geometry (parametric box, actual inches; null = not modeled)
+    length_in?: number | null;
+    width_in?: number | null;
+    height_in?: number | null;
+    stackable?: boolean | null;
+    geometry_source?: 'NONE' | 'MANUAL' | 'AI';
+}
+
+export interface DimensionsUpdate {
+    length_in: number;
+    width_in: number;
+    height_in: number;
+    stackable: boolean;
 }
 
 export interface ReorderAlert {

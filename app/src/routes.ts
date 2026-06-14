@@ -32,6 +32,8 @@ export const routes: RouteConfig[] = [
 
   // ── Yard (yard layout) ─────────────────────────────────────────
   { path: '/yard/pick/:id', load: () => import('./pages/yard/PickDetail.ts'), layout: 'yard' },
+  { path: '/yard/loading/:id', load: () => import('./pages/yard/PackTruck.ts'), layout: 'yard' },
+  { path: '/yard/loading', load: () => import('./pages/yard/PackQueue.ts'), layout: 'yard' },
   { path: '/yard/inventory', load: () => import('./pages/yard/InventoryLookup.ts'), layout: 'yard' },
   { path: '/yard/count', load: () => import('./pages/yard/CycleCount.ts'), layout: 'yard' },
   { path: '/yard/receiving', load: () => import('./pages/yard/ReceivePO.ts'), layout: 'yard' },

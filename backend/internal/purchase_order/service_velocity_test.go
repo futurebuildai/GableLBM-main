@@ -57,6 +57,9 @@ func (f *fakeProductRepo) UpdateReorderTargets(_ context.Context, id uuid.UUID, 
 	f.updates[id] = [2]float64{point, qty}
 	return nil
 }
+func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.DimensionsUpdate) error {
+	return nil
+}
 func (f *fakeProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }

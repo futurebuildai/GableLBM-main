@@ -53,6 +53,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/reorder", guard(h.HandleReorderStops))
 	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/optimize", guard(h.HandleOptimizeRoute))
 	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/complete", guard(h.HandleCompleteRoute))
+	mux.HandleFunc("GET /api/v1/delivery/routes/{id}/manifest", guard(h.HandleGetRouteManifest))
 
 	// Deliveries
 	mux.HandleFunc("GET /api/v1/delivery/routes/{id}/deliveries", guard(h.HandleListDeliveries))
@@ -123,6 +124,23 @@ func (h *Handler) HandleCreateDriver(w http.ResponseWriter, r *http.Request) {
 }
 
 // Routes
+
+// HandleGetRouteManifest returns the route + stops + AI_LM packing manifest
+// for the yard "Pack Trucks" step-by-step loading instructions.
+func (h *Handler) HandleGetRouteManifest(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid route ID", http.StatusBadRequest, err)
+		return
+	}
+	manifest, err := h.service.GetRouteManifest(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "Route not found", http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(manifest)
+}
 
 func (h *Handler) HandleListRoutes(w http.ResponseWriter, r *http.Request) {
 	dateStr := r.URL.Query().Get("date")

@@ -77,6 +77,14 @@ type ProductDetail struct {
 	CommissionRate  float64         `json:"commission_rate"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+
+	// Digital twin geometry (parametric box, actual inches; nil = not modeled)
+	LengthIn       *float64 `json:"length_in"`
+	WidthIn        *float64 `json:"width_in"`
+	HeightIn       *float64 `json:"height_in"`
+	Stackable      *bool    `json:"stackable"`
+	GeometrySource string   `json:"geometry_source"`
+
 	Content         *PIMContent     `json:"content"`
 	Media           []PIMMedia      `json:"media"`
 	Collateral      []PIMCollateral `json:"collateral"`

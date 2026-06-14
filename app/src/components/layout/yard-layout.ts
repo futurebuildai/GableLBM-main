@@ -3,10 +3,11 @@ import { customElement, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { icon } from '../../lib/icons.ts';
-import { ClipboardList, Package, ScanBarcode } from 'lucide';
+import { ClipboardList, Package, ScanBarcode, Forklift } from 'lucide';
 
 const navItems = [
   { iconData: ClipboardList, label: 'Pick', path: '/yard' },
+  { iconData: Forklift, label: 'Pack', path: '/yard/loading' },
   { iconData: Package, label: 'Inventory', path: '/yard/inventory' },
   { iconData: ScanBarcode, label: 'Receiving', path: '/yard/receiving' },
 ];

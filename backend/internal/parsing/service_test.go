@@ -46,6 +46,9 @@ func (m *mockProductRepo) UpdateReorderTargets(_ context.Context, _ uuid.UUID, _
 	return nil
 }
 
+func (m *mockProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ product.DimensionsUpdate) error {
+	return nil
+}
 func (m *mockProductRepo) UpdateVendor(_ context.Context, _ uuid.UUID, _ *string, _ *uuid.UUID) error {
 	return nil
 }

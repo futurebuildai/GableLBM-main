@@ -45,6 +45,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/integration/quotes/bulk-price", h.authMiddleware(h.BulkCalculatePrice))
 	mux.HandleFunc("POST /api/integration/quotes", h.authMiddleware(h.CreateQuote))
 	mux.HandleFunc("POST /api/integration/quotes/{id}/accept-and-convert", h.authMiddleware(h.AcceptAndConvertQuote))
+
+	// AI_LM (Load Management) surface — see ailm.go.
+	mux.HandleFunc("GET /api/integration/vehicles", h.authMiddleware(h.ListVehiclesIntegration))
+	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDriversIntegration))
+	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersIntegration))
+	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRouteIntegration))
+	mux.HandleFunc("POST /api/integration/demo/seed-orders", h.authMiddleware(h.SeedDemoOrders))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -62,27 +69,33 @@ func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ProductResponse is the integration-facing product model
+// ProductResponse is the integration-facing product model. Weight is per-unit;
+// the L/W/H pointers are the PIM's canonical parametric geometry and stay nil
+// when no digital twin has been modeled yet (consumers fall back accordingly).
 type ProductResponse struct {
-	ID       string  `json:"id"`
-	SKU      string  `json:"sku"`
-	Name     string  `json:"name"`
-	Category string  `json:"category"`
-	UOM      string  `json:"uom"`
-	Price    int64   `json:"price"` // cents
+	ID             string   `json:"id"`
+	SKU            string   `json:"sku"`
+	Name           string   `json:"name"`
+	Category       string   `json:"category"`
+	UOM            string   `json:"uom"`
+	Price          int64    `json:"price"` // cents
+	WeightLbs      float64  `json:"weight_lbs"`
+	LengthIn       *float64 `json:"length_in"`
+	WidthIn        *float64 `json:"width_in"`
+	HeightIn       *float64 `json:"height_in"`
+	Stackable      *bool    `json:"stackable"`
+	GeometrySource string   `json:"geometry_source"`
 }
 
-// ListProductsByCategory returns products filtered by category and/or text search
+// ListProductsByCategory returns products filtered by category and/or text
+// search. With no params it is the bulk catalog pull (LIMIT 1000) AI_LM uses
+// to hydrate its load-planning catalog.
 func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	query := r.URL.Query().Get("q")
 
-	if category == "" && query == "" {
-		writeError(w, http.StatusBadRequest, "category or q query parameter required")
-		return
-	}
-
-	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0)
+	sqlQuery := `SELECT p.id, p.sku, p.description, COALESCE(p.category, ''), p.uom_primary::text, COALESCE(p.base_price, 0),
+		COALESCE(p.weight_lbs, 0), p.length_in, p.width_in, p.height_in, p.stackable, COALESCE(p.geometry_source, 'NONE')
 		FROM products p WHERE 1=1`
 	args := []interface{}{}
 	argIdx := 1
@@ -97,7 +110,11 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 		args = append(args, "%"+query+"%")
 		argIdx++
 	}
-	sqlQuery += ` ORDER BY p.sku LIMIT 20`
+	if category == "" && query == "" {
+		sqlQuery += ` ORDER BY p.sku LIMIT 1000` // unfiltered bulk pull
+	} else {
+		sqlQuery += ` ORDER BY p.sku LIMIT 20` // typeahead
+	}
 
 	rows, err := h.db.Pool.Query(r.Context(), sqlQuery, args...)
 	if err != nil {
@@ -111,7 +128,8 @@ func (h *Handler) ListProductsByCategory(w http.ResponseWriter, r *http.Request)
 	for rows.Next() {
 		var p ProductResponse
 		var priceFloat float64
-		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat); err != nil {
+		if err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.Category, &p.UOM, &priceFloat,
+			&p.WeightLbs, &p.LengthIn, &p.WidthIn, &p.HeightIn, &p.Stackable, &p.GeometrySource); err != nil {
 			slog.Error("failed to scan product row", "error", err, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "failed to read product data")
 			return

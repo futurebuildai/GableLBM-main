@@ -41,16 +41,12 @@ export default defineConfig({
       // /api/portal, /api/integration, /api/v1/a2a, /api/tax, /api/pos,
       // /api/configurator are left as-is (the backend mounts them with that
       // prefix).
-      // Backend mounts SOME modules at root (e.g. /orders, /branches, /me)
-      // and others under /api/v1/* (e.g. /api/v1/dashboard, /api/v1/delivery,
-      // /api/v1/edi, /api/v1/pricing). The frontend always calls /api/v1/*;
-      // we strip the prefix only for modules that live at the root.
-      const ROOT_MOUNTED = new Set([
-        'orders', 'quotes', 'invoices', 'customers', 'products', 'vendors',
-        'purchase-orders', 'branches', 'locations', 'me', 'users',
-        'activities', 'contacts', 'documents', 'gl', 'parsing',
-        'price_levels', 'sales-team', 'health',
-      ]);
+      // Historically the backend mounted some modules at the root (/orders,
+      // /products, …) and this list stripped the /api/v1 prefix for them.
+      // Every handler on this branch now registers under /api/..., so the
+      // list is empty — strip nothing. (Kept as a seam in case a fork still
+      // root-mounts something.)
+      const ROOT_MOUNTED = new Set<string>([]);
       return {
         '/api': {
           target,

@@ -95,7 +95,8 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
-			c.id, c.name, c.account_number, c.email, c.phone, c.address,
+			c.id, c.name, c.account_number,
+			COALESCE(c.email, ''), COALESCE(c.phone, ''), COALESCE(c.address, ''),
 			c.price_level_id, c.credit_limit, c.balance_due, c.is_active,
 			c.tier,
 			c.created_at, c.updated_at,
@@ -149,7 +150,8 @@ func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email strin
 	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
-			c.id, c.name, c.account_number, c.email, c.phone, c.address,
+			c.id, c.name, c.account_number,
+			COALESCE(c.email, ''), COALESCE(c.phone, ''), COALESCE(c.address, ''),
 			c.price_level_id, c.credit_limit, c.balance_due, c.is_active,
 			c.tier,
 			c.created_at, c.updated_at,
@@ -203,7 +205,8 @@ func (r *PostgresRepository) ListCustomers(ctx context.Context) ([]Customer, err
 	branchID := branchctx.IDForQuery(ctx)
 	query := `
 		SELECT
-			c.id, c.name, c.account_number, c.email, c.phone, c.address,
+			c.id, c.name, c.account_number,
+			COALESCE(c.email, ''), COALESCE(c.phone, ''), COALESCE(c.address, ''),
 			c.price_level_id, c.credit_limit, c.balance_due, c.is_active,
 			c.tier,
 			c.created_at, c.updated_at,
@@ -275,7 +278,8 @@ func (r *PostgresRepository) ListCustomersPaginated(ctx context.Context, limit, 
 
 	query := `
 		SELECT
-			c.id, c.name, c.account_number, c.email, c.phone, c.address,
+			c.id, c.name, c.account_number,
+			COALESCE(c.email, ''), COALESCE(c.phone, ''), COALESCE(c.address, ''),
 			c.price_level_id, c.credit_limit, c.balance_due, c.is_active,
 			c.tier,
 			c.created_at, c.updated_at,

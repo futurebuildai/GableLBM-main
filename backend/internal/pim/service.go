@@ -86,6 +86,11 @@ func (s *Service) GetProductDetail(ctx context.Context, productID uuid.UUID) (*P
 		CommissionRate:  p.CommissionRate,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
+		LengthIn:        p.LengthIn,
+		WidthIn:         p.WidthIn,
+		HeightIn:        p.HeightIn,
+		Stackable:       p.Stackable,
+		GeometrySource:  p.GeometrySource,
 	}
 
 	content, _ := s.repo.GetContent(ctx, productID)

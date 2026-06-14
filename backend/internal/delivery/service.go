@@ -256,6 +256,25 @@ func (s *Service) GetRoute(ctx context.Context, id uuid.UUID) (*Route, error) {
 	return s.repo.GetRoute(ctx, id)
 }
 
+// GetRouteManifest returns the yard packing view of a route: header, stops,
+// and the AI_LM 3D load manifest. The manifest is nil for routes that were not
+// pushed from AI_LM.
+func (s *Service) GetRouteManifest(ctx context.Context, id uuid.UUID) (*RouteManifest, error) {
+	route, err := s.repo.GetRoute(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	deliveries, err := s.repo.ListDeliveriesByRoute(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := s.repo.GetRouteManifest(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &RouteManifest{Route: route, Deliveries: deliveries, Manifest: manifest}, nil
+}
+
 func (s *Service) ListRoutes(ctx context.Context, dateStr *string, driverID *uuid.UUID) ([]Route, error) {
 	var date *time.Time
 	if dateStr != nil && *dateStr != "" {

@@ -9,6 +9,7 @@ import type {
     GenerateCollateralRequest,
     UpdateContentRequest,
 } from '../types/pim';
+import type { Product, DimensionsUpdate } from '../types/product';
 import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -17,6 +18,16 @@ export const PIMService = {
     async getProductDetail(id: string): Promise<ProductDetail> {
         const res = await fetchWithAuth(`${API_URL}/api/v1/products/${id}/detail`);
         if (!res.ok) throw new Error('Failed to fetch product detail');
+        return res.json();
+    },
+
+    async updateDimensions(id: string, dims: DimensionsUpdate): Promise<Product> {
+        const res = await fetchWithAuth(`${API_URL}/api/v1/products/${id}/dimensions`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dims),
+        });
+        if (!res.ok) throw new Error('Failed to update dimensions');
         return res.json();
     },
 

@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/products/reorder-alerts", guard(h.HandleReorderAlerts))
 	mux.HandleFunc("GET /api/v1/products/{id}", guard(h.HandleGetProduct))
 	mux.HandleFunc("PATCH /api/v1/products/{id}/margins", guard(h.HandleUpdateMarginRules))
+	mux.HandleFunc("PUT /api/v1/products/{id}/dimensions", guard(h.HandleUpdateDimensions))
 }
 
 // HandleGetProduct handles GET /products/{id}
@@ -137,4 +138,33 @@ func (h *Handler) HandleUpdateMarginRules(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// HandleUpdateDimensions handles PUT /products/{id}/dimensions — the PIM
+// digital-modeler save.
+func (h *Handler) HandleUpdateDimensions(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid id format", http.StatusBadRequest, err)
+		return
+	}
+
+	var dims DimensionsUpdate
+	if err := json.NewDecoder(r.Body).Decode(&dims); err != nil {
+		httputil.RespondError(w, r, "invalid request body", http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.service.UpdateDimensions(r.Context(), id, dims); err != nil {
+		httputil.RespondError(w, r, "Failed to update dimensions", http.StatusBadRequest, err)
+		return
+	}
+
+	p, err := h.service.GetProduct(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "product not found", http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(p)
 }

@@ -94,3 +94,11 @@ func (s *Service) UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMar
 func (s *Service) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
 	return s.repo.UpdateReorderTargets(ctx, id, reorderPoint, reorderQty)
 }
+
+// UpdateDimensions validates and stores the digital-twin geometry for a product.
+func (s *Service) UpdateDimensions(ctx context.Context, id uuid.UUID, dims DimensionsUpdate) error {
+	if dims.LengthIn <= 0 || dims.WidthIn <= 0 || dims.HeightIn <= 0 {
+		return fmt.Errorf("dimensions must be positive")
+	}
+	return s.repo.UpdateDimensions(ctx, id, dims)
+}

@@ -20,6 +20,7 @@ type Repository interface {
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64) error
 	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
+	UpdateDimensions(ctx context.Context, id uuid.UUID, dims DimensionsUpdate) error
 }
 
 // PostgresRepository implements Repository using pgx
@@ -37,7 +38,8 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 	query := `
 		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate`
+		RETURNING id, created_at, updated_at, average_unit_cost, target_margin, commission_rate,
+		          length_in, width_in, height_in, stackable, COALESCE(geometry_source, 'NONE')`
 
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, p.SKU, p.Description, p.UOMPrimary, p.BasePrice, p.Vendor, p.VendorID, p.UPC).Scan(
 		&p.ID,
@@ -46,6 +48,11 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		&p.AverageUnitCost,
 		&p.TargetMargin,
 		&p.CommissionRate,
+		&p.LengthIn,
+		&p.WidthIn,
+		&p.HeightIn,
+		&p.Stackable,
+		&p.GeometrySource,
 	)
 
 	if err != nil {
@@ -63,7 +70,8 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
+		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, COALESCE(p.geometry_source, 'NONE')
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
 		WHERE p.id = $1
@@ -89,6 +97,11 @@ func (r *PostgresRepository) GetProduct(ctx context.Context, id uuid.UUID) (*Pro
 		&p.AverageUnitCost,
 		&p.TargetMargin,
 		&p.CommissionRate,
+		&p.LengthIn,
+		&p.WidthIn,
+		&p.HeightIn,
+		&p.Stackable,
+		&p.GeometrySource,
 	)
 
 	if err != nil {
@@ -109,7 +122,8 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
+		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, COALESCE(p.geometry_source, 'NONE')
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
 		GROUP BY p.id
@@ -143,6 +157,11 @@ func (r *PostgresRepository) ListProducts(ctx context.Context) ([]Product, error
 			&p.AverageUnitCost,
 			&p.TargetMargin,
 			&p.CommissionRate,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
@@ -171,7 +190,8 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 		       p.created_at, p.updated_at,
 		       COALESCE(SUM(i.quantity), 0) as total_quantity,
 		       COALESCE(SUM(i.allocated), 0) as total_allocated,
-		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)
+		       COALESCE(p.average_unit_cost, 0), COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
+		       p.length_in, p.width_in, p.height_in, p.stackable, COALESCE(p.geometry_source, 'NONE')
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
 		GROUP BY p.id
@@ -206,6 +226,11 @@ func (r *PostgresRepository) ListProductsPaginated(ctx context.Context, limit, o
 			&p.AverageUnitCost,
 			&p.TargetMargin,
 			&p.CommissionRate,
+			&p.LengthIn,
+			&p.WidthIn,
+			&p.HeightIn,
+			&p.Stackable,
+			&p.GeometrySource,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan product: %w", err)
 		}
@@ -286,4 +311,21 @@ func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.U
 	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
 	return err
+}
+
+// UpdateDimensions stamps the PIM digital-twin geometry on a product.
+func (r *PostgresRepository) UpdateDimensions(ctx context.Context, id uuid.UUID, dims DimensionsUpdate) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE products
+		SET length_in=$2, width_in=$3, height_in=$4, stackable=$5,
+		    geometry_source='MANUAL', updated_at=NOW()
+		WHERE id=$1`,
+		id, dims.LengthIn, dims.WidthIn, dims.HeightIn, dims.Stackable)
+	if err != nil {
+		return fmt.Errorf("failed to update dimensions: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("product not found")
+	}
+	return nil
 }

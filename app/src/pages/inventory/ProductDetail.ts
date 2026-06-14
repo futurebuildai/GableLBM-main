@@ -5,15 +5,16 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
-import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse } from 'lucide';
+import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
 import './tabs/ProductOverviewTab.ts';
 import './tabs/ProductContentTab.ts';
 import './tabs/ProductMediaTab.ts';
 import './tabs/ProductCollateralTab.ts';
 import './tabs/ProductSEOTab.ts';
 import './tabs/ProductStockTab.ts';
+import './tabs/ProductTwinTab.ts';
 
-type TabId = 'overview' | 'content' | 'media' | 'collateral' | 'seo' | 'stock';
+type TabId = 'overview' | 'content' | 'twin' | 'media' | 'collateral' | 'seo' | 'stock';
 
 interface TabDef {
     id: TabId;
@@ -24,6 +25,7 @@ interface TabDef {
 const TABS: TabDef[] = [
     { id: 'overview', label: 'Overview', iconData: Package },
     { id: 'content', label: 'PIM / Content', iconData: FileText },
+    { id: 'twin', label: 'Digital Twin', iconData: Box },
     { id: 'media', label: 'Media', iconData: Image },
     { id: 'collateral', label: 'Collateral', iconData: Megaphone },
     { id: 'seo', label: 'SEO', iconData: Search },
@@ -159,6 +161,12 @@ export class GableProductDetail extends LitElement {
                             .content=${this.product.content}
                             @content-update=${(e: CustomEvent<PIMContent>) => this.handleContentUpdate(e.detail)}
                         ></gable-product-content-tab>
+                    ` : nothing}
+                    ${this.activeTab === 'twin' ? html`
+                        <gable-product-twin-tab
+                            .product=${this.product}
+                            @twin-update=${() => this.loadProduct()}
+                        ></gable-product-twin-tab>
                     ` : nothing}
                     ${this.activeTab === 'media' ? html`
                         <gable-product-media-tab

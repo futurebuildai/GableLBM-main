@@ -48,6 +48,22 @@ type Product struct {
 	CommissionRate  float64    `json:"commission_rate"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+
+	// Digital twin geometry (PIM-canonical parametric box, actual inches).
+	// nil = not modeled yet; AI_LM and the load builder fall back accordingly.
+	LengthIn       *float64 `json:"length_in"`
+	WidthIn        *float64 `json:"width_in"`
+	HeightIn       *float64 `json:"height_in"`
+	Stackable      *bool    `json:"stackable"`
+	GeometrySource string   `json:"geometry_source"` // NONE / MANUAL / AI
+}
+
+// DimensionsUpdate is the PIM digital-modeler payload.
+type DimensionsUpdate struct {
+	LengthIn  float64 `json:"length_in"`
+	WidthIn   float64 `json:"width_in"`
+	HeightIn  float64 `json:"height_in"`
+	Stackable bool    `json:"stackable"`
 }
 
 // ReorderAlert represents a product that's below its reorder point
