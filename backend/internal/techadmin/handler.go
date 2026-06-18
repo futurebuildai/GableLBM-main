@@ -3,29 +3,32 @@ package techadmin
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/pkg/httputil"
 )
 
 type Handler struct {
-	service        *Service
-	aiKeyStore     *ai.KeyStore
-	geminiKeyStore *ai.KeyStore
+	service      *Service
+	aiKeyStore   *ai.KeyStore // openrouter_api_key
+	baseURLStore *ai.KeyStore // openrouter_base_url
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// WithAIKeyStore sets the Anthropic AI key store for admin settings management.
+// WithAIKeyStore sets the OpenRouter API key store for admin settings management.
 func (h *Handler) WithAIKeyStore(ks *ai.KeyStore) {
 	h.aiKeyStore = ks
 }
 
-// WithGeminiKeyStore sets the Gemini key store for admin settings management.
-func (h *Handler) WithGeminiKeyStore(ks *ai.KeyStore) {
-	h.geminiKeyStore = ks
+// WithAIBaseURLStore sets the OpenRouter base-URL store. The base URL is a
+// separate setting key because KeyStore is single-valued, so the admin-editable
+// base URL needs its own store alongside the API key.
+func (h *Handler) WithAIBaseURLStore(ks *ai.KeyStore) {
+	h.baseURLStore = ks
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -45,9 +48,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/admin/settings/ai", guard(h.GetAISettings))
 	mux.HandleFunc("PUT /api/v1/admin/settings/ai", guard(h.SaveAISettings))
 	mux.HandleFunc("DELETE /api/v1/admin/settings/ai", guard(h.DeleteAISettings))
-	mux.HandleFunc("GET /api/v1/admin/settings/gemini", guard(h.GetGeminiSettings))
-	mux.HandleFunc("PUT /api/v1/admin/settings/gemini", guard(h.SaveGeminiSettings))
-	mux.HandleFunc("DELETE /api/v1/admin/settings/gemini", guard(h.DeleteGeminiSettings))
 }
 
 type CreateKeyRequest struct {
@@ -110,11 +110,14 @@ func (h *Handler) RevokeKey(w http.ResponseWriter, r *http.Request) {
 
 type AISettingsResponse struct {
 	Configured bool   `json:"configured"`
-	Source     string `json:"source"` // "admin", "env", or "none"
-	KeyHint   string `json:"key_hint,omitempty"` // e.g. "sk-ant-...4f2e"
+	Source     string `json:"source"`             // "admin", "env", or "none"
+	KeyHint    string `json:"key_hint,omitempty"` // e.g. "sk-or-...4f2e"
+	BaseURL    string `json:"base_url,omitempty"` // OpenRouter base URL (default or admin override)
 }
 
 func (h *Handler) GetAISettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	if h.aiKeyStore == nil {
 		json.NewEncoder(w).Encode(AISettingsResponse{Source: "none"})
 		return
@@ -145,7 +148,12 @@ func (h *Handler) GetAISettings(w http.ResponseWriter, r *http.Request) {
 		resp.Source = "none"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	// Surface the effective base URL (admin override or env/default) so the UI
+	// can prefill the optional base-URL field.
+	if h.baseURLStore != nil {
+		resp.BaseURL = h.baseURLStore.Get(ctx)
+	}
+
 	json.NewEncoder(w).Encode(resp)
 }
 
@@ -155,8 +163,11 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// base_url is a pointer so we can distinguish "omitted" (leave as-is) from
+	// "present but empty" (clear the admin override, reverting to env/default).
 	var body struct {
-		APIKey string `json:"api_key"`
+		APIKey  string  `json:"api_key"`
+		BaseURL *string `json:"base_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
@@ -171,6 +182,14 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 	if err := h.aiKeyStore.Set(r.Context(), body.APIKey); err != nil {
 		httputil.RespondError(w, r, "failed to save API key", http.StatusInternalServerError, err)
 		return
+	}
+
+	if body.BaseURL != nil && h.baseURLStore != nil {
+		// An empty string reverts the override to the env/default base URL.
+		if err := h.baseURLStore.Set(r.Context(), strings.TrimSpace(*body.BaseURL)); err != nil {
+			httputil.RespondError(w, r, "failed to save base URL", http.StatusInternalServerError, err)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -188,82 +207,13 @@ func (h *Handler) DeleteAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// --- Gemini Settings ---
-
-func (h *Handler) GetGeminiSettings(w http.ResponseWriter, r *http.Request) {
-	if h.geminiKeyStore == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(AISettingsResponse{Source: "none"})
-		return
-	}
-
-	ctx := r.Context()
-	key := h.geminiKeyStore.Get(ctx)
-	hasDB := h.geminiKeyStore.HasDBOverride(ctx)
-
-	resp := AISettingsResponse{
-		Configured: key != "",
-	}
-
-	if key != "" {
-		if len(key) > 12 {
-			resp.KeyHint = key[:10] + "..." + key[len(key)-4:]
-		} else {
-			resp.KeyHint = "****"
+	// Removing the admin AI config also clears any base-URL override so both
+	// revert to their env/defaults together.
+	if h.baseURLStore != nil {
+		if err := h.baseURLStore.Delete(r.Context()); err != nil {
+			httputil.RespondError(w, r, "failed to delete base URL", http.StatusInternalServerError, err)
+			return
 		}
-		if hasDB {
-			resp.Source = "admin"
-		} else {
-			resp.Source = "env"
-		}
-	} else {
-		resp.Source = "none"
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (h *Handler) SaveGeminiSettings(w http.ResponseWriter, r *http.Request) {
-	if h.geminiKeyStore == nil {
-		httputil.RespondError(w, r, "Gemini key store not available", http.StatusInternalServerError, nil)
-		return
-	}
-
-	var body struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	if body.APIKey == "" {
-		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
-		return
-	}
-
-	if err := h.geminiKeyStore.Set(r.Context(), body.APIKey); err != nil {
-		httputil.RespondError(w, r, "failed to save Gemini API key", http.StatusInternalServerError, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
-}
-
-func (h *Handler) DeleteGeminiSettings(w http.ResponseWriter, r *http.Request) {
-	if h.geminiKeyStore == nil {
-		httputil.RespondError(w, r, "Gemini key store not available", http.StatusInternalServerError, nil)
-		return
-	}
-
-	if err := h.geminiKeyStore.Delete(r.Context()); err != nil {
-		httputil.RespondError(w, r, "failed to delete Gemini API key", http.StatusInternalServerError, err)
-		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

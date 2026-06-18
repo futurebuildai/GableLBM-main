@@ -21,6 +21,7 @@ export interface AISettings {
     configured: boolean;
     source: 'admin' | 'env' | 'none';
     key_hint?: string;
+    base_url?: string;
 }
 
 export const techAdminService = {
@@ -64,11 +65,13 @@ export const techAdminService = {
         return response.json();
     },
 
-    async saveAIKey(apiKey: string): Promise<void> {
+    async saveAIKey(apiKey: string, baseUrl?: string): Promise<void> {
+        const body: { api_key: string; base_url?: string } = { api_key: apiKey };
+        if (baseUrl !== undefined) body.base_url = baseUrl;
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey }),
+            body: JSON.stringify(body),
         });
         if (!response.ok) {
             const text = await response.text();
@@ -81,33 +84,6 @@ export const techAdminService = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete API key');
-    },
-
-    // --- Gemini Settings ---
-
-    async getGeminiSettings(): Promise<AISettings> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/gemini`);
-        if (!response.ok) throw new Error('Failed to fetch Gemini settings');
-        return response.json();
-    },
-
-    async saveGeminiKey(apiKey: string): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/gemini`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey }),
-        });
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || 'Failed to save Gemini API key');
-        }
-    },
-
-    async deleteGeminiKey(): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/gemini`, {
-            method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('Failed to delete Gemini API key');
     },
 };
 
