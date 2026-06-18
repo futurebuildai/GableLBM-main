@@ -226,12 +226,18 @@ func (c *ORSClient) OptimizeRoute(ctx context.Context, origin LatLng, stops []La
 		return nil, fmt.Errorf("optimization error (code %d): %s", orsResp.Code, orsResp.Error)
 	}
 
+	// Unassigned stops are surfaced via WARN only: the RouteOptimizationResult
+	// JSON contract is frozen (mirrored verbatim by the TS type), so we can't add
+	// an `unassigned` field without a coordinated frontend change. With a single
+	// unconstrained vehicle the only way a stop goes unassigned is unreachability.
+	// The service still keeps every unassigned stop on the route (appended last
+	// with no ETA). Carrying the set out-of-band to the UI is a deferred follow-up.
 	if len(orsResp.Unassigned) > 0 {
 		ids := make([]int, 0, len(orsResp.Unassigned))
 		for _, u := range orsResp.Unassigned {
 			ids = append(ids, u.ID)
 		}
-		c.logger.Warn("ORS optimization left stops unassigned (capacity/time/skill/reachability)",
+		c.logger.Warn("ORS optimization left stops unassigned (likely unreachable)",
 			"unassigned_stop_indices", ids, "count", len(ids))
 	}
 
@@ -378,11 +384,11 @@ func MockOptimizeRoute(stops []LatLng) *RouteOptimizationResult {
 	return result
 }
 
-// mockGeocode produces deterministic coordinates around the San Francisco Bay
-// Area from an order's UUID. It is the keyless analogue of Geocode: with no ORS
-// key configured (e.g. the public demo) delivery stops still scatter onto the
-// map instead of vanishing. Real geocoding via Geocode is used whenever a key
-// is present.
+// mockGeocode produces deterministic coordinates scattered around the demo
+// anchor (Kelowna, BC) from an order's UUID. It is the keyless analogue of
+// Geocode: with no ORS key configured (e.g. the public demo) delivery stops
+// still scatter onto the map instead of vanishing. Real geocoding via Geocode is
+// used whenever a key is present.
 func mockGeocode(orderID uuid.UUID) LatLng {
 	b := orderID[:]
 	// Bytes 0 and 1 give a deterministic +/-0.128 deg offset from the anchor.

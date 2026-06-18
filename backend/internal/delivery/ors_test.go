@@ -169,3 +169,101 @@ func TestGeocode_ParsesLngLatAndQuery(t *testing.T) {
 }
 
 func approx(a, b float64) bool { return math.Abs(a-b) < 0.05 }
+
+func TestOptimizeRoute_ErrorPaths(t *testing.T) {
+	stops := []LatLng{{Lat: 49.1, Lng: -119.1}}
+	origin := LatLng{Lat: 49.0, Lng: -119.0}
+
+	t.Run("non-200 (413 too many vehicles)", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			io.WriteString(w, `{"error":"too many vehicles"}`)
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		if _, err := c.OptimizeRoute(context.Background(), origin, stops); err == nil {
+			t.Error("expected error on HTTP 413")
+		}
+	})
+
+	t.Run("VROOM code != 0", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"code":3,"error":"routing error"}`)
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		if _, err := c.OptimizeRoute(context.Background(), origin, stops); err == nil {
+			t.Error("expected error on code != 0")
+		}
+	})
+
+	t.Run("empty routes yields empty result", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"code":0,"summary":{},"routes":[],"unassigned":[{"id":0}]}`)
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		res, err := c.OptimizeRoute(context.Background(), origin, stops)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(res.OptimizedOrder) != 0 || len(res.Legs) != 0 {
+			t.Errorf("expected empty result for no routes, got %+v", res)
+		}
+	})
+
+	t.Run("no stops short-circuits without a call", func(t *testing.T) {
+		c := NewORSClient("k", "http://invalid.invalid", "", nil)
+		res, err := c.OptimizeRoute(context.Background(), origin, nil)
+		if err != nil || len(res.OptimizedOrder) != 0 {
+			t.Errorf("want empty result, no error; got %+v, %v", res, err)
+		}
+	})
+}
+
+func TestGeocode_ErrorPaths(t *testing.T) {
+	t.Run("no match", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"features":[]}`)
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		if _, err := c.Geocode(context.Background(), "nowhere at all"); err == nil {
+			t.Error("expected error when no feature is returned")
+		}
+	})
+
+	t.Run("non-200", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, "quota exceeded")
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		if _, err := c.Geocode(context.Background(), "123 Main St"); err == nil {
+			t.Error("expected error on HTTP 403")
+		}
+	})
+
+	t.Run("empty address short-circuits", func(t *testing.T) {
+		c := NewORSClient("k", "http://invalid.invalid", "", nil)
+		if _, err := c.Geocode(context.Background(), "   "); err == nil {
+			t.Error("expected error on empty address")
+		}
+	})
+
+	t.Run("low-confidence match is flagged", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"features":[{"geometry":{"coordinates":[-119.0,49.0]},"properties":{"confidence":0.2,"match_type":"interpolated","label":"approx"}}]}`)
+		}))
+		defer srv.Close()
+		c := NewORSClient("k", srv.URL, "", nil)
+		gc, err := c.Geocode(context.Background(), "vague road")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !gc.LowConfidence() {
+			t.Errorf("confidence 0.2 should be flagged low (threshold %v)", lowConfidenceThreshold)
+		}
+	})
+}
