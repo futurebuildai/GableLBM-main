@@ -253,3 +253,165 @@ func messageParts(t *testing.T, body map[string]any, i int) []any {
 	}
 	return parts
 }
+
+// TestSentModelSlugsUseTaskDefaults asserts the model slug actually SENT on the
+// wire for each task (not the echoed response model): text→default text, OCR→
+// default vision, image→default image. Guards against a task mapping regression.
+func TestSentModelSlugsUseTaskDefaults(t *testing.T) {
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chatRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotModel = req.Model
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{
+				"content": `{"total_amount":1,"carrier_name":"x","invoice_number":"y"}`,
+				"images":  []any{map[string]any{"image_url": map[string]any{"url": "data:image/png;base64,AA"}}},
+			}}},
+		})
+	}))
+	defer srv.Close()
+	c := NewClient("k").WithBaseURL(srv.URL)
+	ctx := context.Background()
+
+	if _, _, err := c.Generate(ctx, "s", "u", 10); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gotModel != defaultModelText {
+		t.Errorf("text slug sent = %q, want %q", gotModel, defaultModelText)
+	}
+
+	if _, _, err := c.ExtractFreightInvoice(ctx, []byte{0xFF, 0xD8}, "image/jpeg"); err != nil {
+		t.Fatalf("ExtractFreightInvoice: %v", err)
+	}
+	if gotModel != defaultModelVision {
+		t.Errorf("vision slug sent = %q, want %q", gotModel, defaultModelVision)
+	}
+
+	if _, _, err := c.GenerateImage(ctx, "barn", ""); err != nil {
+		t.Fatalf("GenerateImage: %v", err)
+	}
+	if gotModel != defaultModelImage {
+		t.Errorf("image slug sent = %q, want %q", gotModel, defaultModelImage)
+	}
+}
+
+// TestChatCompletionNon200WithErrorBody verifies a non-200 surfaces the status
+// and the upstream error message (and never leaks the key).
+func TestChatCompletionNon200WithErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "bad model slug"}})
+	}))
+	defer srv.Close()
+	c := NewClient("secret-key").WithBaseURL(srv.URL)
+	_, _, err := c.Generate(context.Background(), "s", "u", 10)
+	if err == nil || !strings.Contains(err.Error(), "bad model slug") || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("want 400 + upstream message, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-key") {
+		t.Errorf("API key leaked into error: %v", err)
+	}
+}
+
+// TestChatCompletionEmptyChoices verifies a 200 with no choices is an error.
+func TestChatCompletionEmptyChoices(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{}})
+	}))
+	defer srv.Close()
+	c := NewClient("k").WithBaseURL(srv.URL)
+	if _, _, err := c.Generate(context.Background(), "s", "u", 10); err == nil || !strings.Contains(err.Error(), "empty response") {
+		t.Fatalf("want empty-response error, got %v", err)
+	}
+}
+
+// TestGenerateImageNoImageData covers two no-image cases: an images-less message,
+// and an images entry whose URL is a remote link rather than a base64 data URI.
+func TestGenerateImageNoImageData(t *testing.T) {
+	cases := map[string]map[string]any{
+		"no images array": {"content": "sorry, no image"},
+		"non-data url": {"images": []any{map[string]any{
+			"image_url": map[string]any{"url": "https://cdn.example.com/x.png"},
+		}}},
+	}
+	for name, message := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{"message": message}},
+				})
+			}))
+			defer srv.Close()
+			c := NewClient("k").WithBaseURL(srv.URL)
+			if _, _, err := c.GenerateImage(context.Background(), "barn", ""); err == nil || !strings.Contains(err.Error(), "no image data") {
+				t.Fatalf("want no-image-data error, got %v", err)
+			}
+		})
+	}
+}
+
+// TestGetBaseURLPrecedenceAndTrailingSlash covers the base-URL resolution:
+// default when unset, static override trimmed of a trailing slash.
+func TestGetBaseURLPrecedenceAndTrailingSlash(t *testing.T) {
+	ctx := context.Background()
+	if got := NewClient("k").getBaseURL(ctx); got != defaultOpenRouterBaseURL {
+		t.Errorf("default base = %q, want %q", got, defaultOpenRouterBaseURL)
+	}
+	if got := NewClient("k").WithBaseURL("http://localhost:11434/").getBaseURL(ctx); got != "http://localhost:11434" {
+		t.Errorf("trailing slash not trimmed: %q", got)
+	}
+	if got := NewClient("k").WithBaseURL("https://api.example.com/v1/").getBaseURL(ctx); got != "https://api.example.com/v1" {
+		t.Errorf("got %q, want https://api.example.com/v1", got)
+	}
+}
+
+// TestTrailingSlashBaseHitsCorrectPath ensures a trailing-slash base URL does not
+// produce a doubled slash in the request path.
+func TestTrailingSlashBaseHitsCorrectPath(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+	c := NewClient("k").WithBaseURL(srv.URL + "/")
+	if _, _, err := c.Generate(context.Background(), "s", "u", 10); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if path != "/chat/completions" {
+		t.Errorf("request path = %q, want /chat/completions (no double slash)", path)
+	}
+}
+
+// TestValidateBaseURL guards the admin base-URL policy: https anywhere, http only
+// for loopback, everything else rejected (so the Bearer key can't be sent in
+// plaintext to an arbitrary remote host).
+func TestValidateBaseURL(t *testing.T) {
+	ok := []string{
+		"",
+		"https://openrouter.ai/api/v1",
+		"http://localhost:11434/v1",
+		"http://127.0.0.1:8080",
+		"  https://api.example.com  ",
+		"http://my-vllm.localhost:8000",
+	}
+	for _, u := range ok {
+		if err := ValidateBaseURL(u); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want nil", u, err)
+		}
+	}
+	bad := []string{
+		"http://evil.com",      // plaintext to a remote host
+		"ftp://openrouter.ai",  // wrong scheme
+		"openrouter.ai/api/v1", // no scheme/host
+		"https://",             // no host
+	}
+	for _, u := range bad {
+		if err := ValidateBaseURL(u); err == nil {
+			t.Errorf("ValidateBaseURL(%q) = nil, want error", u)
+		}
+	}
+}

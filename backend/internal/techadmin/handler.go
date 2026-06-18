@@ -148,9 +148,10 @@ func (h *Handler) GetAISettings(w http.ResponseWriter, r *http.Request) {
 		resp.Source = "none"
 	}
 
-	// Surface the effective base URL (admin override or env/default) so the UI
-	// can prefill the optional base-URL field.
-	if h.baseURLStore != nil {
+	// Only surface a base URL when it's an admin override, so the UI can tell
+	// "override set" from "using the default" (mirrors the Source derivation
+	// above) and never re-persists the default back into system_settings.
+	if h.baseURLStore != nil && h.baseURLStore.HasDBOverride(ctx) {
 		resp.BaseURL = h.baseURLStore.Get(ctx)
 	}
 
@@ -185,8 +186,19 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.BaseURL != nil && h.baseURLStore != nil {
-		// An empty string reverts the override to the env/default base URL.
-		if err := h.baseURLStore.Set(r.Context(), strings.TrimSpace(*body.BaseURL)); err != nil {
+		baseURL := strings.TrimSpace(*body.BaseURL)
+		if err := ai.ValidateBaseURL(baseURL); err != nil {
+			httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+			return
+		}
+		if baseURL == "" {
+			// Empty clears the override entirely (reverting to env/default) rather
+			// than persisting an empty row that would read back as "overridden".
+			if err := h.baseURLStore.Delete(r.Context()); err != nil {
+				httputil.RespondError(w, r, "failed to clear base URL", http.StatusInternalServerError, err)
+				return
+			}
+		} else if err := h.baseURLStore.Set(r.Context(), baseURL); err != nil {
 			httputil.RespondError(w, r, "failed to save base URL", http.StatusInternalServerError, err)
 			return
 		}

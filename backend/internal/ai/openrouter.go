@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -174,17 +175,17 @@ type ModelRouter struct {
 // NewModelRouter builds a router whose defaults come from config, with DB
 // overrides via the ai.model.* system_settings keys.
 func NewModelRouter(pool *pgxpool.Pool, d ModelDefaults) *ModelRouter {
-	orDefault := func(v, fallback string) string {
+	orDefault := func(v string, t modelTask) string {
 		if strings.TrimSpace(v) == "" {
-			return fallback
+			return defaultModelFor(t)
 		}
 		return v
 	}
 	return &ModelRouter{
-		text:   NewKeyStore(pool, "ai.model.text", orDefault(d.Text, defaultModelText)),
-		vision: NewKeyStore(pool, "ai.model.vision", orDefault(d.Vision, defaultModelVision)),
-		cheap:  NewKeyStore(pool, "ai.model.cheap", orDefault(d.Cheap, defaultModelCheap)),
-		image:  NewKeyStore(pool, "ai.model.image", orDefault(d.Image, defaultModelImage)),
+		text:   NewKeyStore(pool, "ai.model.text", orDefault(d.Text, taskText)),
+		vision: NewKeyStore(pool, "ai.model.vision", orDefault(d.Vision, taskVision)),
+		cheap:  NewKeyStore(pool, "ai.model.cheap", orDefault(d.Cheap, taskCheap)),
+		image:  NewKeyStore(pool, "ai.model.image", orDefault(d.Image, taskImage)),
 	}
 }
 
@@ -201,14 +202,12 @@ func (m *ModelRouter) resolve(ctx context.Context, t modelTask) string {
 	}
 }
 
-// model resolves the slug for a task, falling back to package defaults when no
-// router is wired (e.g. in tests).
-func (c *Client) model(ctx context.Context, t modelTask) string {
-	if c.models != nil {
-		if s := c.models.resolve(ctx, t); s != "" {
-			return s
-		}
-	}
+// defaultModelFor is the single source of truth for default model slugs. It is
+// used both by NewModelRouter (as each key's env/DB fallback) and by Client.model
+// when no router is wired — e.g. a client built via NewClient for tests or a
+// fixed-model deployment. With a router wired, the router's own defaults win, so
+// this is reached only on the no-router path.
+func defaultModelFor(t modelTask) string {
 	switch t {
 	case taskVision:
 		return defaultModelVision
@@ -219,6 +218,54 @@ func (c *Client) model(ctx context.Context, t modelTask) string {
 	default:
 		return defaultModelText
 	}
+}
+
+// model resolves the slug for a task via the router, falling back to the package
+// default when no router is wired (e.g. in tests).
+func (c *Client) model(ctx context.Context, t modelTask) string {
+	if c.models != nil {
+		if s := c.models.resolve(ctx, t); s != "" {
+			return s
+		}
+	}
+	return defaultModelFor(t)
+}
+
+// ValidateBaseURL checks an admin-supplied base URL before it is stored. An empty
+// string is valid (it reverts to the default). Otherwise the URL must be absolute
+// with an https scheme — or http only for loopback hosts — so the Bearer key is
+// never transmitted in plaintext to an arbitrary remote host.
+func ValidateBaseURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("base URL must be absolute (include scheme and host), e.g. https://openrouter.ai/api/v1")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("base URL must use https (plaintext http is only allowed for localhost endpoints)")
+	default:
+		return fmt.Errorf("base URL scheme must be http or https, got %q", u.Scheme)
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return strings.HasSuffix(strings.ToLower(host), ".localhost")
 }
 
 // --- OpenAI-compatible request / response types ---

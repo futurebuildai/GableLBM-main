@@ -557,6 +557,24 @@ type ReceiveLineInput struct {
 
 // UploadFreightInvoice processes a freight invoice file, extracts data via AI,
 // computes cost-weighted allocation across PO lines, and returns a preview.
+// extractFreight runs AI freight-invoice extraction, encapsulating the
+// graceful-degradation contract so it can be unit-tested without the DB-backed
+// PO lookup: when AI is unconfigured it returns a hard error telling the user to
+// enter the freight total manually — it never silently succeeds with a zero total.
+func (s *Service) extractFreight(ctx context.Context, fileBytes []byte, contentType string) (*ai.FreightInvoiceResult, string, error) {
+	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		return nil, "", fmt.Errorf("AI service not configured — please enter the freight total manually")
+	}
+	result, raw, err := s.aiClient.ExtractFreightInvoice(ctx, fileBytes, contentType)
+	if err != nil {
+		return nil, raw, fmt.Errorf("AI extraction failed: %w", err)
+	}
+	if result == nil {
+		return nil, raw, fmt.Errorf("AI extraction returned no result")
+	}
+	return result, raw, nil
+}
+
 func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, fileBytes []byte, contentType string, filename string) (*FreightUploadResponse, error) {
 	po, err := s.repo.GetPO(ctx, poID)
 	if err != nil {
@@ -588,25 +606,16 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 		aiContentType = http.DetectContentType(fileBytes)
 	}
 
-	// Extract freight data via AI
-	var carrierName, invoiceNumber string
-	var totalAmountCents int64
-	var aiRaw string
-
-	if s.aiClient != nil && s.aiClient.IsConfigured(ctx) {
-		result, raw, aiErr := s.aiClient.ExtractFreightInvoice(ctx, fileBytes, aiContentType)
-		aiRaw = raw
-		if aiErr != nil {
-			return nil, fmt.Errorf("AI extraction failed: %w", aiErr)
-		}
-		if result != nil {
-			carrierName = result.CarrierName
-			invoiceNumber = result.InvoiceNumber
-			totalAmountCents = int64(math.Round(result.TotalAmount * 100))
-		}
-	} else {
-		return nil, fmt.Errorf("AI service not configured — please enter the freight total manually")
+	// Extract freight data via AI. The degradation contract — unconfigured AI is a
+	// hard error so the user enters the total manually — lives in extractFreight,
+	// which is unit-tested independently of the DB-backed PO lookup above.
+	result, aiRaw, err := s.extractFreight(ctx, fileBytes, aiContentType)
+	if err != nil {
+		return nil, err
 	}
+	carrierName := result.CarrierName
+	invoiceNumber := result.InvoiceNumber
+	totalAmountCents := int64(math.Round(result.TotalAmount * 100))
 
 	if totalAmountCents <= 0 {
 		return nil, fmt.Errorf("could not extract a valid freight amount from the invoice")

@@ -116,8 +116,15 @@ export class TechAdminPage extends LitElement {
         this.aiError = null;
         this.aiSuccess = null;
         try {
-            await techAdminService.saveAIKey(this.aiNewKey.trim(), this.aiNewBaseUrl.trim());
+            // Tri-state base URL: send a value to set the override, '' to clear an
+            // existing override (revert to default), or omit it entirely when there
+            // was no override and none was typed — so the default is never persisted.
+            const typed = this.aiNewBaseUrl.trim();
+            const hadOverride = !!this.aiSettings?.base_url;
+            const baseUrlArg = typed !== '' ? typed : (hadOverride ? '' : undefined);
+            await techAdminService.saveAIKey(this.aiNewKey.trim(), baseUrlArg);
             this.aiNewKey = '';
+            this.aiNewBaseUrl = '';
             this.aiShowInput = false;
             this.aiSuccess = 'API key saved. All AI features are now active.';
             await this._loadAISettings();

@@ -305,8 +305,10 @@ Respond with ONLY valid JSON (no markdown fences):
 }
 
 // GenerateImage generates a product image via the OpenRouter image model, falling
-// back to an SVG illustration (text model) if image generation fails. A missing
-// AI key is a hard error (PIM does not silently degrade).
+// back to an SVG illustration (text model) ONLY if the image generation step
+// fails. A missing AI key is a hard error (PIM does not silently degrade), and a
+// persistence failure after a successful generation is a real error — we do not
+// fall back and discard the image we just produced.
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
 	if s.ai == nil || !s.ai.IsConfigured(ctx) {
 		return nil, fmt.Errorf("no AI configured — set the OpenRouter key in Admin > AI Settings")
@@ -321,23 +323,14 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 		prompt = fmt.Sprintf("Professional product photo of %s, lumber building material, clean white background, studio lighting, high resolution, product catalog style", p.Description)
 	}
 
-	// Prefer real image generation; fall back to an SVG illustration on failure.
-	media, err := s.generateImageModel(ctx, productID, p, style, prompt)
-	if err != nil {
+	// Image generation is the only step covered by the SVG fallback.
+	dataURI, model, genErr := s.ai.GenerateImage(ctx, prompt, style)
+	if genErr != nil {
 		return s.generateImageSVG(ctx, productID, p, style, prompt)
 	}
-	return media, nil
-}
 
-// generateImageModel calls the OpenRouter image model and persists the returned
-// base64 data URI. GenModel records the actual slug the model reports (replacing
-// the old hardcoded "gemini-2.0-flash" literal, which was wrong).
-func (s *Service) generateImageModel(ctx context.Context, productID uuid.UUID, p *product.Product, style, prompt string) (*PIMMedia, error) {
-	dataURI, model, err := s.ai.GenerateImage(ctx, prompt, style)
-	if err != nil {
-		return nil, fmt.Errorf("image generation: %w", err)
-	}
-
+	// GenModel records the actual slug the model reports (replacing the old
+	// hardcoded "gemini-2.0-flash" literal, which was wrong).
 	now := time.Now()
 	media := &PIMMedia{
 		ProductID:   productID,
@@ -352,10 +345,11 @@ func (s *Service) generateImageModel(ctx context.Context, productID uuid.UUID, p
 		GeneratedAt: &now,
 	}
 
+	// A persistence failure here is a real error, not a reason to fall back and
+	// throw away the generated image.
 	if err := s.repo.CreateMedia(ctx, media); err != nil {
 		return nil, fmt.Errorf("save media: %w", err)
 	}
-
 	return media, nil
 }
 
