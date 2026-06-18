@@ -50,15 +50,20 @@ break, how to avoid stepping on each other, and the kickoff prompts.
 Use a separate **git worktree** per thread so each has its own working directory and branch —
 no file collisions while both run.
 
+> **Base the worktrees on the docs branch** (`docs/oss-migration-plan-master`), not `master` —
+> these plan docs are not on `master` yet, and each thread needs to read them. Once the docs PR
+> is merged to `master`, base off `master` instead (then the docs are a no-op in each branch's
+> diff). Each implementation branch carrying the docs commit as an ancestor is harmless.
+
 ```bash
-# from the main checkout (this repo root), with master up to date:
-git fetch origin && git checkout master && git pull
+# from the main checkout (this repo root):
+git fetch origin
 
 # Track A — AI / OpenRouter
-git worktree add ../GableLBM-ai   -b feat/oss-ai-openrouter-master master
+git worktree add ../GableLBM-ai      -b feat/oss-ai-openrouter-master  origin/docs/oss-migration-plan-master
 
 # Track R — Routing / OpenRouteService
-git worktree add ../GableLBM-routing -b feat/oss-routing-ors-master master
+git worktree add ../GableLBM-routing -b feat/oss-routing-ors-master    origin/docs/oss-migration-plan-master
 ```
 
 Then open a Claude CLI in each worktree directory:
