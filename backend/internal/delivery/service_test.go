@@ -29,6 +29,7 @@ func (m *MockRepository) ListDrivers(ctx context.Context) ([]Driver, error) { re
 func (m *MockRepository) UpdateDriver(ctx context.Context, id uuid.UUID, d *Driver) error {
 	return nil
 }
+
 // F-01: Missing DeleteDriver stub caused go vet to fail
 func (m *MockRepository) DeleteDriver(ctx context.Context, id uuid.UUID) error { return nil }
 
@@ -74,6 +75,25 @@ func (m *MockRepository) GetRouteLoadWeight(ctx context.Context, routeID uuid.UU
 
 func (m *MockRepository) GetOrderEstimatedWeight(ctx context.Context, orderID uuid.UUID) (float64, error) {
 	return 0, nil
+}
+
+func (m *MockRepository) GetRouteBranchID(ctx context.Context, routeID uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (m *MockRepository) GetBranchOrigin(ctx context.Context, branchID uuid.UUID) (*BranchOrigin, error) {
+	return &BranchOrigin{}, nil
+}
+func (m *MockRepository) SetBranchLatLng(ctx context.Context, branchID uuid.UUID, lat, lng float64) error {
+	return nil
+}
+func (m *MockRepository) GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error) {
+	return "", nil
+}
+func (m *MockRepository) SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error {
+	return nil
+}
+func (m *MockRepository) SetDeliveryETA(ctx context.Context, deliveryID uuid.UUID, eta time.Time) error {
+	return nil
 }
 
 func (m *MockRepository) SetVehiclePhoto(ctx context.Context, id uuid.UUID, url string) error {

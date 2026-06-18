@@ -11,7 +11,7 @@ import (
 
 type Service struct {
 	repo       Repository
-	mapsClient *MapsClient // nil if Google Maps not configured
+	routing    *ORSClient // nil if OpenRouteService not configured (keyless dev/demo)
 	notifier   DeliveryNotifierInterface
 	invoiceSvc InvoiceServiceInterface // nil if invoice service not wired
 	logger     *slog.Logger
@@ -43,9 +43,10 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, logger: slog.Default()}
 }
 
-// WithMaps sets the Google Maps client for route optimization.
-func (s *Service) WithMaps(mc *MapsClient, logger *slog.Logger) {
-	s.mapsClient = mc
+// WithRouting sets the OpenRouteService client for route optimization and
+// geocoding. When unset, the service uses keyless mock fallbacks.
+func (s *Service) WithRouting(client *ORSClient, logger *slog.Logger) {
+	s.routing = client
 	s.logger = logger
 }
 
@@ -307,25 +308,20 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, req AssignOrderRequest
 		}
 	}
 
-	// Mock Geocoding (San Francisco Bay Area)
-	// Base: 37.7749, -122.4194
-	// Use simple byte math for determinism
-	b := req.OrderID[:]
-	// Use bytes 0 and 1 for offsets
-	latOffset := (float64(int(b[0])) - 128.0) / 1000.0 // +/- 0.128 deg
-	lngOffset := (float64(int(b[1])) - 128.0) / 1000.0
-
-	lat := 37.7749 + latOffset
-	lng := -122.4194 + lngOffset
-
 	d := &Delivery{
 		RouteID:              req.RouteID,
 		OrderID:              req.OrderID,
 		StopSequence:         req.StopSequence,
 		Status:               DeliveryStatusPending,
 		DeliveryInstructions: req.DeliveryInstructions,
-		Latitude:             &lat,
-		Longitude:            &lng,
+	}
+
+	// Geocode the delivery address. With an ORS key, resolve the order's
+	// customer address for real; with no key (dev/demo) fall back to a
+	// deterministic mock so stops still scatter onto the map.
+	if coord := s.geocodeOrderStop(ctx, req.OrderID); coord != nil {
+		d.Latitude = &coord.Lat
+		d.Longitude = &coord.Lng
 	}
 
 	if err := s.repo.CreateDelivery(ctx, d); err != nil {
@@ -409,8 +405,9 @@ func (s *Service) ReorderStops(ctx context.Context, routeID uuid.UUID, deliveryI
 	return s.repo.ReorderRouteDeliveries(ctx, routeID, deliveryIDs)
 }
 
-// OptimizeRoute calls Google Maps to find optimal stop ordering and ETAs.
-// Falls back to mock optimization if Maps client is not configured.
+// OptimizeRoute uses OpenRouteService (VROOM) to find the optimal stop ordering
+// and per-stop ETAs for a route, persisting both the new stop order and the
+// ETAs. Falls back to a deterministic mock when no ORS key is configured.
 func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID) (*RouteOptimizationResult, error) {
 	deliveries, err := s.repo.ListDeliveriesByRoute(ctx, routeID)
 	if err != nil {
@@ -421,54 +418,88 @@ func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID) (*RouteO
 		return &RouteOptimizationResult{}, nil
 	}
 
-	// Build stop coordinates
+	// Build the stop list, keeping each stop aligned to its delivery via a
+	// parallel slice. Previously deliveries with nil coords were silently
+	// dropped, which desynced the optimizer's indices from the deliveries slice
+	// (the optimized order then reordered the wrong deliveries). We keep the
+	// mapping explicit, and geocode-on-demand any stop missing coordinates so no
+	// stop is dropped from optimization.
 	var stops []LatLng
-	for _, d := range deliveries {
-		if d.Latitude != nil && d.Longitude != nil {
-			stops = append(stops, LatLng{Lat: *d.Latitude, Lng: *d.Longitude})
+	stopDeliveries := make([]*Delivery, 0, len(deliveries)) // stopDeliveries[i] owns stops[i]
+	for i := range deliveries {
+		d := &deliveries[i]
+		if d.Latitude == nil || d.Longitude == nil {
+			coord := s.geocodeDeliveryOnDemand(ctx, d)
+			if coord == nil {
+				continue // still no coords — excluded from optimization, not dropped from the route
+			}
+			d.Latitude = &coord.Lat
+			d.Longitude = &coord.Lng
 		}
+		stops = append(stops, LatLng{Lat: *d.Latitude, Lng: *d.Longitude})
+		stopDeliveries = append(stopDeliveries, d)
+	}
+
+	if len(stops) == 0 {
+		s.logger.Warn("OptimizeRoute: no geocoded stops to optimize", "route_id", routeID)
+		return &RouteOptimizationResult{}, nil
 	}
 
 	var result *RouteOptimizationResult
-	if s.mapsClient != nil {
-		// Use lumberyard as origin (San Francisco default)
-		origin := LatLng{Lat: 37.7749, Lng: -122.4194}
-		result, err = s.mapsClient.OptimizeRoute(ctx, origin, stops)
+	if s.routing != nil {
+		origin := s.resolveBranchOrigin(ctx, routeID)
+		result, err = s.routing.OptimizeRoute(ctx, origin, stops)
 		if err != nil {
-			s.logger.Warn("Maps optimization failed, using mock fallback", "error", err)
+			s.logger.Warn("ORS optimization failed, using mock fallback", "error", err)
 			result = MockOptimizeRoute(stops)
 		}
 	} else {
 		result = MockOptimizeRoute(stops)
 	}
 
-	// Update ETAs on deliveries and reorder
-	validIdx := 0
+	// Map optimized stop indices (into `stops`, aligned with stopDeliveries)
+	// back to delivery IDs, then append any deliveries the optimizer didn't
+	// return so every stop survives the reorder.
 	var reorderedIDs []uuid.UUID
-	for _, optIdx := range result.OptimizedOrder {
-		if optIdx < len(deliveries) {
-			reorderedIDs = append(reorderedIDs, deliveries[optIdx].ID)
+	seen := make(map[uuid.UUID]bool, len(deliveries))
+	for _, stopIdx := range result.OptimizedOrder {
+		if stopIdx < 0 || stopIdx >= len(stopDeliveries) {
+			continue
+		}
+		id := stopDeliveries[stopIdx].ID
+		if seen[id] {
+			continue
+		}
+		reorderedIDs = append(reorderedIDs, id)
+		seen[id] = true
+	}
+	for i := range deliveries {
+		if !seen[deliveries[i].ID] {
+			reorderedIDs = append(reorderedIDs, deliveries[i].ID)
+			seen[deliveries[i].ID] = true
 		}
 	}
-	// If optimized order doesn't cover all, append remaining
-	if len(reorderedIDs) < len(deliveries) {
-		for _, d := range deliveries {
-			found := false
-			for _, rid := range reorderedIDs {
-				if rid == d.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				reorderedIDs = append(reorderedIDs, d.ID)
-			}
-		}
-	}
-	_ = validIdx
 
 	if len(reorderedIDs) > 0 {
-		_ = s.repo.ReorderRouteDeliveries(ctx, routeID, reorderedIDs)
+		if err := s.repo.ReorderRouteDeliveries(ctx, routeID, reorderedIDs); err != nil {
+			s.logger.Warn("OptimizeRoute: failed to persist reordered stops", "route_id", routeID, "error", err)
+		}
+	}
+
+	// Persist per-stop ETAs. VROOM returns them for free; the
+	// deliveries.estimated_arrival column existed (migration 032) but was never
+	// written. Each leg's StopIndex is an index into `stops`.
+	for _, leg := range result.Legs {
+		if leg.StopIndex < 0 || leg.StopIndex >= len(stopDeliveries) || leg.ETA == "" {
+			continue
+		}
+		eta, parseErr := time.Parse(time.RFC3339, leg.ETA)
+		if parseErr != nil {
+			continue
+		}
+		if err := s.repo.SetDeliveryETA(ctx, stopDeliveries[leg.StopIndex].ID, eta); err != nil {
+			s.logger.Warn("OptimizeRoute: failed to persist ETA", "delivery_id", stopDeliveries[leg.StopIndex].ID, "error", err)
+		}
 	}
 
 	s.logger.Info("Route optimized",
@@ -478,6 +509,91 @@ func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID) (*RouteO
 	)
 
 	return result, nil
+}
+
+// resolveBranchOrigin returns the coordinates the optimizer should use as the
+// vehicle start/end for a route: the route's branch location. Branch coordinates
+// are backfilled lazily — if the branch has no stored lat/lng and a routing key
+// is configured, its address is geocoded once and persisted. Falls back to a
+// neutral anchor when the branch can't be resolved or geocoded (the anchor is
+// irrelevant on the keyless mock path, which ignores the origin).
+func (s *Service) resolveBranchOrigin(ctx context.Context, routeID uuid.UUID) LatLng {
+	fallback := demoAnchor
+
+	branchID, err := s.repo.GetRouteBranchID(ctx, routeID)
+	if err != nil {
+		s.logger.Warn("route origin: could not resolve branch, using fallback anchor", "route_id", routeID, "error", err)
+		return fallback
+	}
+	origin, err := s.repo.GetBranchOrigin(ctx, branchID)
+	if err != nil {
+		s.logger.Warn("route origin: could not load branch, using fallback anchor", "branch_id", branchID, "error", err)
+		return fallback
+	}
+	if origin.Latitude != nil && origin.Longitude != nil {
+		return LatLng{Lat: *origin.Latitude, Lng: *origin.Longitude}
+	}
+	// No stored coords — backfill via geocoding when a routing key is present.
+	if s.routing != nil && origin.Address != "" {
+		gc, gErr := s.routing.Geocode(ctx, origin.Address)
+		if gErr == nil {
+			if err := s.repo.SetBranchLatLng(ctx, branchID, gc.LatLng.Lat, gc.LatLng.Lng); err != nil {
+				s.logger.Warn("route origin: failed to persist branch geocode", "branch_id", branchID, "error", err)
+			}
+			s.logger.Info("route origin: backfilled branch coordinates",
+				"branch_id", branchID, "address", origin.Address, "confidence", gc.Confidence)
+			return gc.LatLng
+		}
+		s.logger.Warn("route origin: branch geocode failed, using fallback anchor",
+			"branch_id", branchID, "address", origin.Address, "error", gErr)
+	}
+	return fallback
+}
+
+// geocodeOrderStop resolves a delivery stop's coordinates for an order. With an
+// ORS key configured it geocodes the order's customer address; with no key
+// (dev/demo) it returns deterministic mock coordinates so stops still appear on
+// the map. Returns nil only when a keyed geocode is attempted and fails, so
+// production surfaces the failure (the stop is created without coordinates,
+// rather than routed to a wrong/fake point) instead of masking it.
+func (s *Service) geocodeOrderStop(ctx context.Context, orderID uuid.UUID) *LatLng {
+	if s.routing == nil {
+		ll := mockGeocode(orderID)
+		return &ll
+	}
+
+	address, err := s.repo.GetOrderDeliveryAddress(ctx, orderID)
+	if err != nil || address == "" {
+		s.logger.Warn("geocode: no delivery address for order; leaving stop uncoordinated",
+			"order_id", orderID, "error", err)
+		return nil
+	}
+	gc, err := s.routing.Geocode(ctx, address)
+	if err != nil {
+		s.logger.Error("geocode: failed to resolve delivery address; leaving stop uncoordinated",
+			"order_id", orderID, "address", address, "error", err)
+		return nil
+	}
+	if gc.LowConfidence() {
+		s.logger.Warn("geocode: low-confidence delivery match — review before dispatch",
+			"order_id", orderID, "address", address, "matched", gc.Label,
+			"confidence", gc.Confidence, "match_type", gc.MatchType)
+	}
+	return &gc.LatLng
+}
+
+// geocodeDeliveryOnDemand geocodes a delivery that is missing coordinates at
+// optimize time and best-effort persists the result so the stop appears on the
+// map afterwards. Returns nil when geocoding isn't possible.
+func (s *Service) geocodeDeliveryOnDemand(ctx context.Context, d *Delivery) *LatLng {
+	coord := s.geocodeOrderStop(ctx, d.OrderID)
+	if coord == nil {
+		return nil
+	}
+	if err := s.repo.SetDeliveryLatLng(ctx, d.ID, coord.Lat, coord.Lng); err != nil {
+		s.logger.Warn("OptimizeRoute: failed to persist on-demand geocode", "delivery_id", d.ID, "error", err)
+	}
+	return coord
 }
 
 // AdjustDeliveryQuantity handles driver on-site quantity changes (short-ship, damage, etc.)

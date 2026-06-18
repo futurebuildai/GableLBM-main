@@ -425,13 +425,15 @@ func main() {
 	deliveryRepo := delivery.NewRepository(db)
 	deliverySvc := delivery.NewService(deliveryRepo)
 
-	// Wire Google Maps for route optimization if API key is set
-	if cfg.GoogleMapsAPIKey != "" {
-		mapsClient := delivery.NewMapsClient(cfg.GoogleMapsAPIKey, logger)
-		deliverySvc.WithMaps(mapsClient, logger)
-		logger.Info("Google Maps route optimization enabled")
+	// Wire OpenRouteService for route optimization + geocoding if a key is set.
+	// Keyless: optimization falls back to a deterministic mock and delivery
+	// addresses are mock-geocoded, so the demo map still populates.
+	if cfg.ORSAPIKey != "" {
+		orsClient := delivery.NewORSClient(cfg.ORSAPIKey, cfg.ORSBaseURL, cfg.ORSProfile, logger)
+		deliverySvc.WithRouting(orsClient, logger)
+		logger.Info("OpenRouteService routing + geocoding enabled", "profile", cfg.ORSProfile)
 	} else {
-		logger.Warn("GOOGLE_MAPS_API_KEY not set — using mock route optimization")
+		logger.Warn("OPENROUTESERVICE_API_KEY not set — using mock route optimization + geocoding")
 	}
 
 	deliveryHandler := delivery.NewHandler(deliverySvc)

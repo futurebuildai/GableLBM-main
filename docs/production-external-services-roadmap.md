@@ -43,6 +43,15 @@ is the migration. Keep it that way.
 → Production realistically needs a **paid HeiGIT plan** or, more likely for a managed core,
 **self-hosting** the stack.
 
+> **Community implementation note (Track R, landed):** `delivery.ORSClient.OptimizeRoute`
+> deliberately submits **exactly one vehicle per call** (the route's branch as start/end,
+> one job per stop), so single-truck route optimization stays comfortably inside the
+> 3-vehicle cap. **Multi-truck fleet VRP** (more than one vehicle in a single optimization —
+> capacities, skills, multi-depot) is intentionally **deferred to this roadmap** (§1.5); it
+> requires either a paid plan or a self-hosted VROOM. The community geocoder is free-text
+> Pelias (`/geocode/search`) because `customers.address` is a single text column, not the
+> structured `/geocode/search/structured` endpoint.
+
 ### 1.2 The single most consequential fact
 
 > ORS's hosted **geocoder (Pelias)** and **optimization (VROOM)** are **HeiGIT "public API"
