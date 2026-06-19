@@ -19,6 +19,7 @@ type Repository interface {
 	// Media
 	ListMedia(ctx context.Context, productID uuid.UUID) ([]PIMMedia, error)
 	CreateMedia(ctx context.Context, m *PIMMedia) error
+	UpdateMediaResult(ctx context.Context, id uuid.UUID, url, genModel, genStyle, status string) error
 	DeleteMedia(ctx context.Context, id uuid.UUID) error
 	SetPrimaryMedia(ctx context.Context, productID, mediaID uuid.UUID) error
 
@@ -115,7 +116,7 @@ func (r *PostgresRepository) UpsertContent(ctx context.Context, c *PIMContent) e
 
 func (r *PostgresRepository) ListMedia(ctx context.Context, productID uuid.UUID) ([]PIMMedia, error) {
 	query := `
-		SELECT id, product_id, media_type, url, alt_text, sort_order, is_primary,
+		SELECT id, product_id, media_type, url, alt_text, sort_order, is_primary, status,
 		       gen_model, gen_prompt, gen_style, generated_at, created_at, updated_at
 		FROM pim_media
 		WHERE product_id = $1
@@ -131,7 +132,7 @@ func (r *PostgresRepository) ListMedia(ctx context.Context, productID uuid.UUID)
 	for rows.Next() {
 		var m PIMMedia
 		if err := rows.Scan(
-			&m.ID, &m.ProductID, &m.MediaType, &m.URL, &m.AltText, &m.SortOrder, &m.IsPrimary,
+			&m.ID, &m.ProductID, &m.MediaType, &m.URL, &m.AltText, &m.SortOrder, &m.IsPrimary, &m.Status,
 			&m.GenModel, &m.GenPrompt, &m.GenStyle, &m.GeneratedAt, &m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pim media: %w", err)
@@ -143,16 +144,35 @@ func (r *PostgresRepository) ListMedia(ctx context.Context, productID uuid.UUID)
 }
 
 func (r *PostgresRepository) CreateMedia(ctx context.Context, m *PIMMedia) error {
+	if m.Status == "" {
+		m.Status = "ready"
+	}
 	query := `
-		INSERT INTO pim_media (product_id, media_type, url, alt_text, sort_order, is_primary,
+		INSERT INTO pim_media (product_id, media_type, url, alt_text, sort_order, is_primary, status,
 		    gen_model, gen_prompt, gen_style, generated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, updated_at`
 
 	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		m.ProductID, m.MediaType, m.URL, m.AltText, m.SortOrder, m.IsPrimary,
+		m.ProductID, m.MediaType, m.URL, m.AltText, m.SortOrder, m.IsPrimary, m.Status,
 		m.GenModel, m.GenPrompt, m.GenStyle, m.GeneratedAt,
 	).Scan(&m.ID, &m.CreatedAt, &m.UpdatedAt)
+}
+
+// UpdateMediaResult finalizes an async-generated media row: it sets the data URI,
+// model, style, and status ('ready' or 'failed'). On 'ready' it stamps generated_at.
+func (r *PostgresRepository) UpdateMediaResult(ctx context.Context, id uuid.UUID, url, genModel, genStyle, status string) error {
+	// $5 is cast to text in both uses so Postgres deduces a single consistent type
+	// for the parameter (status = $5 would infer varchar, $5 = 'ready' would infer
+	// text → SQLSTATE 42P08 "inconsistent types deduced").
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE pim_media
+		SET url = $2, gen_model = $3, gen_style = $4, status = $5::text,
+		    generated_at = CASE WHEN $5::text = 'ready' THEN NOW() ELSE generated_at END,
+		    updated_at = NOW()
+		WHERE id = $1`,
+		id, url, genModel, genStyle, status)
+	return err
 }
 
 func (r *PostgresRepository) DeleteMedia(ctx context.Context, id uuid.UUID) error {
