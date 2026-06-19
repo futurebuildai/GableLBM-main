@@ -61,13 +61,19 @@ export class GableRouteMap extends LitElement {
     const container = this.querySelector(`#${this._mapContainerId}`) as HTMLElement;
     if (!container) return;
 
+    // Default view centers on the demo's home region (Kelowna, BC). Once a
+    // route with geocoded stops is selected, fitBounds (in _updateMap) overrides
+    // this to frame the actual stops.
     this._map = L.map(container, {
-      center: [45.5152, -122.6784],
+      center: [49.888, -119.496],
       zoom: 11,
     });
 
+    // Routes and stop coordinates are produced by OpenRouteService (VROOM
+    // optimization + Pelias geocoding); tiles are OpenStreetMap. Both must be
+    // credited per their ToS.
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: '&copy; <a href="https://openrouteservice.org/" target="_blank" rel="noopener noreferrer">openrouteservice.org</a> by HeiGIT | Map data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
     }).addTo(this._map);
 
     this._updateMap();

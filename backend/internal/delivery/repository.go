@@ -334,9 +334,9 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, d *Delivery) er
 
 func (r *PostgresRepository) GetDelivery(ctx context.Context, id uuid.UUID) (*Delivery, error) {
 	query := `
-		SELECT d.id, d.route_id, d.order_id, d.stop_sequence, d.status, 
-		       d.pod_proof_url, d.pod_signed_by, d.pod_timestamp, d.delivery_instructions, 
-		       d.latitude, d.longitude,
+		SELECT d.id, d.route_id, d.order_id, d.stop_sequence, d.status,
+		       d.pod_proof_url, d.pod_signed_by, d.pod_timestamp, d.delivery_instructions,
+		       d.latitude, d.longitude, d.estimated_arrival,
 		       d.created_at, d.updated_at,
 		       c.name as customer_name, CAST(o.id AS TEXT) as order_number
 		FROM deliveries d
@@ -348,7 +348,7 @@ func (r *PostgresRepository) GetDelivery(ctx context.Context, id uuid.UUID) (*De
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id).Scan(
 		&d.ID, &d.RouteID, &d.OrderID, &d.StopSequence, &d.Status,
 		&d.PODProofURL, &d.PODSignedBy, &d.PODTimestamp, &d.DeliveryInstructions,
-		&d.Latitude, &d.Longitude,
+		&d.Latitude, &d.Longitude, &d.EstimatedArrival,
 		&d.CreatedAt, &d.UpdatedAt,
 		&d.CustomerName, &d.OrderNumber,
 	)
@@ -363,9 +363,9 @@ func (r *PostgresRepository) GetDelivery(ctx context.Context, id uuid.UUID) (*De
 
 func (r *PostgresRepository) ListDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) ([]Delivery, error) {
 	query := `
-		SELECT d.id, d.route_id, d.order_id, d.stop_sequence, d.status, 
-		       d.pod_proof_url, d.pod_signed_by, d.pod_timestamp, d.delivery_instructions, 
-		       d.latitude, d.longitude,
+		SELECT d.id, d.route_id, d.order_id, d.stop_sequence, d.status,
+		       d.pod_proof_url, d.pod_signed_by, d.pod_timestamp, d.delivery_instructions,
+		       d.latitude, d.longitude, d.estimated_arrival,
 		       d.created_at, d.updated_at,
 		       c.name as customer_name, CAST(o.id AS TEXT) as order_number,
 		       -- Assuming customer address is what we want here, or job site address
@@ -388,7 +388,7 @@ func (r *PostgresRepository) ListDeliveriesByRoute(ctx context.Context, routeID 
 		if err := rows.Scan(
 			&d.ID, &d.RouteID, &d.OrderID, &d.StopSequence, &d.Status,
 			&d.PODProofURL, &d.PODSignedBy, &d.PODTimestamp, &d.DeliveryInstructions,
-			&d.Latitude, &d.Longitude,
+			&d.Latitude, &d.Longitude, &d.EstimatedArrival,
 			&d.CreatedAt, &d.UpdatedAt,
 			&d.CustomerName, &d.OrderNumber, &d.Address,
 		); err != nil {
@@ -499,4 +499,131 @@ func (r *PostgresRepository) GetOrderEstimatedWeight(ctx context.Context, orderI
 	var weight float64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, orderID).Scan(&weight)
 	return weight, err
+}
+
+// Branch origin (route start/end) + geocoding backfill
+
+// BranchOrigin holds a branch's stored coordinates (nil until backfilled) and
+// the composed street address used to geocode it.
+type BranchOrigin struct {
+	BranchID  uuid.UUID
+	Latitude  *float64
+	Longitude *float64
+	Address   string // composed "street, city, state zip" for geocoding
+}
+
+// GetRouteBranchID resolves the branch a route belongs to via its orders
+// (routes are single-branch in practice; we read the first stop). Falls back to
+// system_settings.default_branch_id when the route has no deliveries yet.
+func (r *PostgresRepository) GetRouteBranchID(ctx context.Context, routeID uuid.UUID) (uuid.UUID, error) {
+	var branchID uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT o.branch_id
+		FROM deliveries d
+		JOIN orders o ON d.order_id = o.id
+		WHERE d.route_id = $1
+		ORDER BY d.stop_sequence ASC
+		LIMIT 1
+	`, routeID).Scan(&branchID)
+	if err == pgx.ErrNoRows {
+		err = r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID)
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return branchID, nil
+}
+
+// GetBranchOrigin loads a branch's stored coordinates and composed address.
+func (r *PostgresRepository) GetBranchOrigin(ctx context.Context, branchID uuid.UUID) (*BranchOrigin, error) {
+	var (
+		lat, lng               *float64
+		addr, city, state, zip *string
+	)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT latitude, longitude, address, city, state, zip
+		FROM locations WHERE id = $1
+	`, branchID).Scan(&lat, &lng, &addr, &city, &state, &zip)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("branch not found")
+		}
+		return nil, err
+	}
+	return &BranchOrigin{
+		BranchID:  branchID,
+		Latitude:  lat,
+		Longitude: lng,
+		Address:   composeBranchAddress(addr, city, state, zip),
+	}, nil
+}
+
+// SetBranchLatLng persists a backfilled branch geocode.
+func (r *PostgresRepository) SetBranchLatLng(ctx context.Context, branchID uuid.UUID, lat, lng float64) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE locations SET latitude = $1, longitude = $2, updated_at = NOW() WHERE id = $3`,
+		lat, lng, branchID)
+	return err
+}
+
+// composeBranchAddress joins a branch's structured address parts into a single
+// free-text string for geocoding, e.g. "2450 Enterprise Way, Kelowna, BC V1X 7K2".
+func composeBranchAddress(addr, city, state, zip *string) string {
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return strings.TrimSpace(*p)
+	}
+	parts := []string{}
+	if a := deref(addr); a != "" {
+		parts = append(parts, a)
+	}
+	if c := deref(city); c != "" {
+		parts = append(parts, c)
+	}
+	if sz := strings.TrimSpace(deref(state) + " " + deref(zip)); sz != "" {
+		parts = append(parts, sz)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// GetOrderDeliveryAddress returns the delivery address for an order (the
+// customer's address). Used to geocode a new delivery stop in AssignOrderToRoute.
+func (r *PostgresRepository) GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error) {
+	var addr *string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT c.address
+		FROM orders o
+		JOIN customers c ON o.customer_id = c.id
+		WHERE o.id = $1
+	`, orderID).Scan(&addr)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", fmt.Errorf("order not found")
+		}
+		return "", err
+	}
+	if addr == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(*addr), nil
+}
+
+// SetDeliveryLatLng persists geocoded coordinates for a delivery (used by the
+// optimize path to backfill stops that were created without coordinates).
+func (r *PostgresRepository) SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE deliveries SET latitude = $1, longitude = $2, updated_at = NOW() WHERE id = $3`,
+		lat, lng, deliveryID)
+	return err
+}
+
+// SetDeliveryETA persists an optimized estimated arrival time for a delivery.
+func (r *PostgresRepository) SetDeliveryETA(ctx context.Context, deliveryID uuid.UUID, eta time.Time) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE deliveries SET estimated_arrival = $1, updated_at = NOW() WHERE id = $2`,
+		eta, deliveryID)
+	return err
 }

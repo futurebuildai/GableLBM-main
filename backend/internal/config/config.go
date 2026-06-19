@@ -29,8 +29,15 @@ type Config struct {
 	AvalaraEnvironment string // "sandbox" or "production"
 	AvalaraCompanyCode string
 
-	// Google Maps
+	// Google Maps — deprecated, superseded by OpenRouteService (kept for one
+	// back-compat release; no longer wired in main.go).
 	GoogleMapsAPIKey string
+
+	// OpenRouteService (routing optimization + geocoding). Primary source for
+	// the key is system_settings/env; base URL and profile are env-tunable.
+	ORSAPIKey  string // OPENROUTESERVICE_API_KEY
+	ORSBaseURL string // OPENROUTESERVICE_BASE_URL (default https://api.openrouteservice.org)
+	ORSProfile string // ORS_PROFILE (default driving-hgv — lumber trucks)
 
 	// Twilio SMS
 	TwilioAccountSID string
@@ -98,8 +105,13 @@ func Load() (*Config, error) {
 		AvalaraEnvironment: getEnv("AVALARA_ENV", "sandbox"),
 		AvalaraCompanyCode: getEnv("AVALARA_COMPANY_CODE", ""),
 
-		// Google Maps
+		// Google Maps — deprecated (see struct comment)
 		GoogleMapsAPIKey: getEnv("GOOGLE_MAPS_API_KEY", ""),
+
+		// OpenRouteService (routing + geocoding)
+		ORSAPIKey:  getEnv("OPENROUTESERVICE_API_KEY", ""),
+		ORSBaseURL: getEnv("OPENROUTESERVICE_BASE_URL", "https://api.openrouteservice.org"),
+		ORSProfile: getEnv("ORS_PROFILE", "driving-hgv"),
 
 		// Twilio SMS
 		TwilioAccountSID: getEnv("TWILIO_ACCOUNT_SID", ""),
