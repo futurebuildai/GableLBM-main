@@ -5,6 +5,7 @@ import type {
     CreateRouteRequest,
     AssignOrderRequest, UpdateDeliveryStatusRequest
 } from '../types/delivery';
+import type { RouteOptimizationResult } from '../types/notification';
 import { fetchWithAuth } from './fetchClient';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -113,6 +114,14 @@ export const deliveryService = {
             body: JSON.stringify({ ordered_delivery_ids: orderedDeliveryIds })
         });
         if (!res.ok) throw new Error('Failed to reorder stops');
+    },
+
+    optimizeRoute: async (routeId: string): Promise<RouteOptimizationResult> => {
+        const res = await fetchWithAuth(`${API_BASE}/api/v1/delivery/routes/${routeId}/optimize`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to optimize route');
+        return res.json();
     },
 
     dispatchRoute: async (id: string): Promise<void> => {

@@ -1,7 +1,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
-import { MapPin, Box, FileText, ArrowRight, ArrowUp, ArrowDown, RotateCcw, Play, CheckCircle2, Clock } from 'lucide';
+import { MapPin, Box, FileText, ArrowRight, ArrowUp, ArrowDown, RotateCcw, Navigation, Play, CheckCircle2, Clock } from 'lucide';
 import type { Delivery, RouteStatus } from '../../types/delivery';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service';
@@ -18,6 +18,7 @@ export class GableDeliveryList extends LitElement {
   @state() private _loading = false;
   @state() private _showAssignModal = false;
   @state() private _reordering = false;
+  @state() private _optimizing = false;
   @state() private _completing = false;
 
   updated(changed: Map<string, unknown>) {
@@ -82,6 +83,23 @@ export class GableDeliveryList extends LitElement {
       ToastService.show('Failed to reverse route', 'error');
     } finally {
       this._reordering = false;
+    }
+  }
+
+  private async _optimizeRoute() {
+    if (!this.routeId || this._deliveries.length < 2) return;
+    this._optimizing = true;
+    try {
+      const result = await deliveryService.optimizeRoute(this.routeId);
+      // The backend persists the new stop order + ETAs; reload to reflect it.
+      await this._loadDeliveries(this.routeId);
+      const miles = result.total_distance_miles?.toFixed(1) ?? '0.0';
+      const mins = Math.round(result.total_duration_mins ?? 0);
+      ToastService.show(`Route optimized -- ${miles} mi, ${mins} min`, 'success');
+    } catch {
+      ToastService.show('Failed to optimize route', 'error');
+    } finally {
+      this._optimizing = false;
     }
   }
 
@@ -153,10 +171,21 @@ export class GableDeliveryList extends LitElement {
             Delivery Manifest
           </h2>
           <div class="flex items-center gap-2">
+            ${this._deliveries.length >= 2 && this.routeStatus !== 'COMPLETED' && this.routeStatus !== 'CANCELLED' ? html`
+              <button
+                @click=${this._optimizeRoute}
+                ?disabled=${this._optimizing || this._reordering}
+                class="h-7 px-2 text-xs rounded-lg bg-gable-green/10 border border-gable-green/30 text-gable-green hover:bg-gable-green/20 disabled:opacity-30 inline-flex items-center justify-center font-medium transition-colors"
+                title="Optimize stop order (shortest route)"
+                aria-label="Optimize stop order"
+              >
+                ${icon(Navigation, 12, 'mr-1')} ${this._optimizing ? 'Optimizing...' : 'Optimize'}
+              </button>
+            ` : nothing}
             ${this._deliveries.length >= 2 ? html`
               <button
                 @click=${this._reverseRoute}
-                ?disabled=${this._reordering}
+                ?disabled=${this._reordering || this._optimizing}
                 class="p-1.5 rounded bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-colors"
                 title="Reverse stop order"
                 aria-label="Reverse stop order"
