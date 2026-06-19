@@ -475,9 +475,12 @@ func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (strin
 	}
 
 	wantModel := c.model(ctx, taskImage)
+	// Image-only output. FLUX (image-only models) rejects ["image","text"] with
+	// "no endpoints support the requested output modalities"; ["image"] works for
+	// both image-only (FLUX) and text+image (Gemini) models.
 	resp, err := c.chatCompletion(ctx, chatRequest{
 		Model:      wantModel,
-		Modalities: []string{"image", "text"},
+		Modalities: []string{"image"},
 		Messages:   []chatMessage{{Role: "user", Content: fullPrompt}},
 	})
 	if err != nil {
