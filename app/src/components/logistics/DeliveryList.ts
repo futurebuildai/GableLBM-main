@@ -13,6 +13,7 @@ export class GableDeliveryList extends LitElement {
   @property({ type: String, attribute: 'route-id' }) routeId: string | null = null;
   @property({ type: String, attribute: 'vehicle-id' }) vehicleId = '';
   @property({ type: String, attribute: 'route-status' }) routeStatus?: RouteStatus;
+  @property({ type: String, attribute: 'selected-id' }) selectedId: string | null = null;
 
   @state() private _deliveries: Delivery[] = [];
   @state() private _loading = false;
@@ -20,6 +21,24 @@ export class GableDeliveryList extends LitElement {
   @state() private _reordering = false;
   @state() private _optimizing = false;
   @state() private _completing = false;
+  private _resizeObserver?: ResizeObserver;
+
+  connectedCallback() {
+    super.connectedCallback();
+    // Recompute the scroll fade when the panel resizes (window resize, or the
+    // host going 0 -> visible when the Manifest tab is re-opened), not just on
+    // content changes.
+    if ('ResizeObserver' in window) {
+      this._resizeObserver = new ResizeObserver(() => this._recomputeScroll());
+      this._resizeObserver.observe(this);
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = undefined;
+  }
 
   updated(changed: Map<string, unknown>) {
     if (changed.has('routeId')) {
@@ -29,6 +48,14 @@ export class GableDeliveryList extends LitElement {
         this._deliveries = [];
         this._fireDeliveriesChange([]);
       }
+    }
+    // Recompute the "more stops below" fade only when content/load state changed.
+    if (changed.has('_deliveries') || changed.has('_loading') || changed.has('routeId')) {
+      requestAnimationFrame(() => { if (this.isConnected) this._recomputeScroll(); });
+    }
+    // Bring an externally-selected stop (e.g. a map pin click) into view.
+    if (changed.has('selectedId')) {
+      this.scrollToSelected();
     }
   }
 
@@ -48,6 +75,36 @@ export class GableDeliveryList extends LitElement {
 
   private _fireDeliveriesChange(deliveries: Delivery[]) {
     this.dispatchEvent(new CustomEvent('deliveries-change', { detail: deliveries, bubbles: true, composed: true }));
+  }
+
+  private _emitSelect(id: string) {
+    this.dispatchEvent(new CustomEvent('stop-select', { detail: { id }, bubbles: true, composed: true }));
+  }
+
+  /** Scroll the selected stop into view; safe when nothing is selected or the list is hidden. */
+  scrollToSelected() {
+    if (!this.selectedId) return;
+    const card = this.querySelector(`[data-stop-id="${this.selectedId}"]`) as HTMLElement | null;
+    card?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  private _onScroll(e: Event) {
+    this._updateScrollAffordance(e.target as HTMLElement);
+  }
+
+  private _recomputeScroll() {
+    this._updateScrollAffordance(this.querySelector('[data-manifest-scroll]'));
+  }
+
+  // Toggle the fade imperatively (post-layout measurement) rather than through
+  // reactive state, so measuring after render doesn't schedule another update.
+  private _updateScrollAffordance(el: HTMLElement | null) {
+    const canScrollDown = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4;
+    const fade = this.querySelector('[data-scroll-fade]');
+    if (fade) {
+      fade.classList.toggle('opacity-100', canScrollDown);
+      fade.classList.toggle('opacity-0', !canScrollDown);
+    }
   }
 
   private async _moveStop(index: number, direction: 'up' | 'down') {
@@ -211,22 +268,37 @@ export class GableDeliveryList extends LitElement {
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-6 space-y-6 relative">
+        <div class="relative flex-1 min-h-0 flex flex-col">
+          <div data-manifest-scroll @scroll=${this._onScroll} class="flex-1 overflow-y-auto p-6 space-y-6 relative">
           ${this._deliveries.length > 0 ? html`
             <div class="absolute left-[2.25rem] top-6 bottom-6 w-px bg-gradient-to-b from-gable-green/50 via-white/10 to-transparent"></div>
           ` : nothing}
 
           ${this._deliveries.map((delivery, index) => html`
-            <div class="relative pl-12 group">
-              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-[#0A0B10] border-2 border-gable-green flex items-center justify-center shadow-[0_0_10px_rgba(0,255,163,0.3)] z-10 text-[10px] font-bold text-white">
+            <div class="relative pl-12 group" data-stop-id=${delivery.id}>
+              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-deep-space border-2 border-gable-green flex items-center justify-center shadow-[0_0_10px_rgba(0,255,163,0.3)] z-10 text-[10px] font-bold text-white">
                 ${index + 1}
               </div>
 
-              <div class="bg-[#161821] border border-white/5 p-5 rounded-xl hover:border-gable-green/30 hover:bg-white/5 transition-all duration-300 group-hover:translate-x-1">
+              <div class="relative bg-slate-steel border p-5 rounded-xl transition-all duration-300 group-hover:translate-x-1 ${this.selectedId === delivery.id
+                ? 'border-gable-green/60 bg-gable-green/5 shadow-glow'
+                : 'border-white/5 hover:border-gable-green/30 hover:bg-white/5'}">
+                <!-- Full-card select target: a real button (keyboard + ARIA) layered behind the
+                     content; the reorder controls are siblings, not descendants, so there is no
+                     nested-interactive violation. -->
+                <button
+                  type="button"
+                  @click=${() => this._emitSelect(delivery.id)}
+                  aria-pressed=${this.selectedId === delivery.id}
+                  aria-label=${`Select stop ${index + 1}: ${delivery.customer_name ?? 'this stop'}`}
+                  class="absolute inset-0 z-0 rounded-xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green/60"
+                ></button>
+
+                <div class="relative z-10 pointer-events-none">
                 <div class="flex justify-between items-start mb-2">
                   <span class="font-bold text-lg text-white group-hover:text-gable-green transition-colors">${delivery.customer_name}</span>
                   <div class="flex items-center gap-2">
-                    <div class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    <div class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex gap-1 pointer-events-auto">
                       <button
                         ?disabled=${index === 0 || this._reordering}
                         @click=${(e: Event) => { e.stopPropagation(); this._moveStop(index, 'up'); }}
@@ -276,6 +348,7 @@ export class GableDeliveryList extends LitElement {
                     ${delivery.delivery_instructions}
                   </div>
                 ` : nothing}
+                </div>
               </div>
             </div>
           `)}
@@ -283,6 +356,8 @@ export class GableDeliveryList extends LitElement {
           ${this._deliveries.length === 0 ? html`
             <div class="text-zinc-500 text-center py-12">No deliveries assigned to this route.</div>
           ` : nothing}
+          </div>
+          <div data-scroll-fade class="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-deep-space to-transparent transition-opacity duration-200 opacity-0"></div>
         </div>
 
         <div class="p-4 border-t border-white/5 bg-white/5">
