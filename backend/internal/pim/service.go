@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -309,11 +310,13 @@ Respond with ONLY valid JSON (no markdown fences):
 	return content, nil
 }
 
-// GenerateImage generates a product image via the OpenRouter image model, falling
-// back to an SVG illustration (text model) ONLY if the image generation step
-// fails. A missing AI key is a hard error (PIM does not silently degrade), and a
-// persistence failure after a successful generation is a real error — we do not
-// fall back and discard the image we just produced.
+// GenerateImage kicks off ASYNCHRONOUS product-image generation. It validates the
+// AI config, inserts a placeholder media row (status "generating"), and returns it
+// immediately so the HTTP request never blocks on the 8–24s model call (which can
+// exceed the platform's request gateway timeout). A detached goroutine runs the
+// OpenRouter image model — falling back to an SVG illustration if image gen fails —
+// then flips the row to "ready" (with the data URI) or "failed". The client polls
+// the media list until the row settles. A missing AI key is still a hard error.
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
 	if s.ai == nil || !s.ai.IsConfigured(ctx) {
 		return nil, fmt.Errorf("no AI configured — set the OpenRouter key in Admin > AI Settings")
@@ -328,37 +331,62 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 		prompt = fmt.Sprintf("Professional product photo of %s, lumber building material, clean white background, studio lighting, high resolution, product catalog style", p.Description)
 	}
 
-	// Image generation is the only step covered by the SVG fallback.
-	dataURI, model, genErr := s.ai.GenerateImage(ctx, prompt, style)
-	if genErr != nil {
-		return s.generateImageSVG(ctx, productID, p, style, prompt)
-	}
-
-	// GenModel records the actual slug the model reports (replacing the old
-	// hardcoded "gemini-2.0-flash" literal, which was wrong).
-	now := time.Now()
+	// Insert the placeholder row the client will poll on.
 	media := &PIMMedia{
-		ProductID:   productID,
-		MediaType:   "hero",
-		URL:         dataURI,
-		AltText:     p.Description,
-		SortOrder:   0,
-		IsPrimary:   false,
-		GenModel:    model,
-		GenPrompt:   prompt,
-		GenStyle:    style,
-		GeneratedAt: &now,
+		ProductID: productID,
+		MediaType: "hero",
+		URL:       "",
+		AltText:   p.Description,
+		SortOrder: 0,
+		IsPrimary: false,
+		Status:    "generating",
+		GenPrompt: prompt,
+		GenStyle:  style,
 	}
-
-	// A persistence failure here is a real error, not a reason to fall back and
-	// throw away the generated image.
 	if err := s.repo.CreateMedia(ctx, media); err != nil {
 		return nil, fmt.Errorf("save media: %w", err)
 	}
+
+	// Generate off the request goroutine so the response returns immediately.
+	go s.generateImageAsync(media.ID, p, style, prompt)
+
 	return media, nil
 }
 
-func (s *Service) generateImageSVG(ctx context.Context, productID uuid.UUID, p *product.Product, style, prompt string) (*PIMMedia, error) {
+// generateImageAsync runs on a DETACHED context (the request context is canceled
+// once GenerateImage returns) and finalizes the placeholder media row.
+func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, style, prompt string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("image generation panicked", "media_id", mediaID, "recover", rec)
+			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	// GenModel records the actual slug the model reports. Image gen is the only
+	// step covered by the SVG fallback.
+	dataURI, model, genErr := s.ai.GenerateImage(ctx, prompt, style)
+	if genErr != nil {
+		svgURI, svgModel, svgErr := s.generateSVGDataURI(ctx, p, style, prompt)
+		if svgErr != nil {
+			slog.Error("image generation failed (image model + SVG fallback)", "media_id", mediaID, "image_error", genErr, "svg_error", svgErr)
+			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+			return
+		}
+		dataURI, model = svgURI, svgModel
+	}
+
+	if err := s.repo.UpdateMediaResult(context.Background(), mediaID, dataURI, model, style, "ready"); err != nil {
+		slog.Error("failed to persist generated image", "media_id", mediaID, "error", err)
+	}
+}
+
+// generateSVGDataURI produces an SVG illustration data URI via the text model. It is
+// the fallback used when the image model is unavailable; it does not persist.
+func (s *Service) generateSVGDataURI(ctx context.Context, p *product.Product, style, prompt string) (string, string, error) {
 	styleHint := "clean, modern, professional"
 	switch style {
 	case "photographic":
@@ -399,35 +427,15 @@ Your SVGs must be self-contained with no external dependencies.`
 
 	text, model, err := s.ai.Generate(ctx, svgSystemPrompt, userPrompt, 4096)
 	if err != nil {
-		return nil, fmt.Errorf("generate SVG: %w", err)
+		return "", "", fmt.Errorf("generate SVG: %w", err)
 	}
 
 	trimmed := strings.TrimSpace(text)
 	if !strings.HasPrefix(trimmed, "<svg") && !strings.HasPrefix(trimmed, "<?xml") {
-		return nil, fmt.Errorf("AI did not return valid SVG (starts with: %.50s...)", trimmed)
+		return "", "", fmt.Errorf("AI did not return valid SVG (starts with: %.50s...)", trimmed)
 	}
 
-	dataURI := "data:image/svg+xml;base64," + base64Encode([]byte(trimmed))
-
-	now := time.Now()
-	media := &PIMMedia{
-		ProductID:   productID,
-		MediaType:   "hero",
-		URL:         dataURI,
-		AltText:     p.Description,
-		SortOrder:   0,
-		IsPrimary:   false,
-		GenModel:    model,
-		GenPrompt:   userPrompt,
-		GenStyle:    style,
-		GeneratedAt: &now,
-	}
-
-	if err := s.repo.CreateMedia(ctx, media); err != nil {
-		return nil, fmt.Errorf("save media: %w", err)
-	}
-
-	return media, nil
+	return "data:image/svg+xml;base64," + base64Encode([]byte(trimmed)), model, nil
 }
 
 // GenerateCollateral uses Claude to generate marketing collateral

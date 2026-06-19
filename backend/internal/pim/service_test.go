@@ -48,6 +48,12 @@ func (r *stubProductRepo) UpdateDimensions(context.Context, uuid.UUID, *float64,
 type stubPIMRepo struct {
 	createMediaErr error
 	created        []*PIMMedia
+	updates        []mediaUpdate
+}
+
+type mediaUpdate struct {
+	id                 uuid.UUID
+	url, model, status string
 }
 
 func (r *stubPIMRepo) GetContent(context.Context, uuid.UUID) (*PIMContent, error)  { return nil, nil }
@@ -64,7 +70,15 @@ func (r *stubPIMRepo) CreateMedia(_ context.Context, m *PIMMedia) error {
 	if r.createMediaErr != nil {
 		return r.createMediaErr
 	}
+	if m.ID == (uuid.UUID{}) {
+		m.ID = uuid.New()
+	}
 	r.created = append(r.created, m)
+	return nil
+}
+
+func (r *stubPIMRepo) UpdateMediaResult(_ context.Context, id uuid.UUID, url, genModel, _, status string) error {
+	r.updates = append(r.updates, mediaUpdate{id: id, url: url, model: genModel, status: status})
 	return nil
 }
 
@@ -106,10 +120,14 @@ func TestPIMGenerateImage_UnconfiguredHardError(t *testing.T) {
 	}
 }
 
-// --- image fallback scope (the over-broad-fallback fix) ---
+// --- async generation: the background worker finalizes the placeholder row ---
+// generateImageAsync is exercised directly (synchronously) so the assertions are
+// deterministic and race-free; in production it runs on a detached goroutine.
 
-// On an image-GENERATION failure, GenerateImage falls back to an SVG illustration
-// (text model) and persists it.
+var testProduct = &product.Product{Description: "2x4x8 SPF Stud", SKU: "2X4-8", BasePrice: 4.25}
+
+// On an image-GENERATION failure, the worker falls back to an SVG illustration
+// (text model) and finalizes the row 'ready' with the SVG data URI.
 func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := decodeBody(r)
@@ -132,26 +150,27 @@ func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 
 	repo := &stubPIMRepo{}
 	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
-	media, err := s.GenerateImage(context.Background(), uuid.New(), "photographic", "")
-	if err != nil {
-		t.Fatalf("expected SVG fallback to succeed, got %v", err)
+	s.generateImageAsync(uuid.New(), testProduct, "photographic", "")
+
+	if len(repo.updates) != 1 {
+		t.Fatalf("expected exactly 1 media finalize, got %d", len(repo.updates))
 	}
-	if !strings.HasPrefix(media.URL, "data:image/svg+xml;base64,") {
-		t.Errorf("expected an SVG data URI, got %.40q", media.URL)
+	u := repo.updates[0]
+	if u.status != "ready" {
+		t.Errorf("status = %q, want ready", u.status)
 	}
-	if len(repo.created) != 1 {
-		t.Errorf("expected exactly 1 media persisted, got %d", len(repo.created))
+	if !strings.HasPrefix(u.url, "data:image/svg+xml;base64,") {
+		t.Errorf("expected an SVG data URI, got %.40q", u.url)
 	}
-	if media.GenModel != "text-svg-sentinel" {
-		t.Errorf("SVG fallback GenModel = %q, want the echoed text slug", media.GenModel)
+	if u.model != "text-svg-sentinel" {
+		t.Errorf("SVG fallback model = %q, want the echoed text slug", u.model)
 	}
 }
 
-// TestPIMGenerateImage_PersistsReturnedModelSlug pins invariant #4 at the PIM
-// layer: the persisted GenModel is the slug the model actually returned (replacing
-// the old hardcoded "gemini-2.0-flash" literal). The sentinel is distinct from any
-// default so the assertion can't pass tautologically.
-func TestPIMGenerateImage_PersistsReturnedModelSlug(t *testing.T) {
+// Pins invariant #4 at the PIM layer: the worker finalizes the row with the slug
+// the image model actually returned (a sentinel distinct from any default so the
+// assertion can't pass tautologically), status 'ready'.
+func TestPIMGenerateImage_FinalizesWithReturnedModelSlug(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model": "black-forest-labs/flux:pim-sentinel",
@@ -164,22 +183,23 @@ func TestPIMGenerateImage_PersistsReturnedModelSlug(t *testing.T) {
 
 	repo := &stubPIMRepo{}
 	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
-	media, err := s.GenerateImage(context.Background(), uuid.New(), "", "")
-	if err != nil {
-		t.Fatalf("GenerateImage: %v", err)
+	s.generateImageAsync(uuid.New(), testProduct, "", "")
+
+	if len(repo.updates) != 1 {
+		t.Fatalf("expected exactly 1 media finalize, got %d", len(repo.updates))
 	}
-	if media.GenModel != "black-forest-labs/flux:pim-sentinel" {
-		t.Errorf("GenModel = %q, want the echoed slug", media.GenModel)
+	if repo.updates[0].model != "black-forest-labs/flux:pim-sentinel" {
+		t.Errorf("finalized model = %q, want the echoed slug", repo.updates[0].model)
 	}
-	if len(repo.created) != 1 || repo.created[0].GenModel != "black-forest-labs/flux:pim-sentinel" {
-		t.Errorf("persisted GenModel = %v", repo.created)
+	if repo.updates[0].status != "ready" {
+		t.Errorf("status = %q, want ready", repo.updates[0].status)
 	}
 }
 
-// A persistence failure AFTER a successful generation must surface as a real
-// error — it must NOT fall back to the SVG path (which would discard the
-// generated image and mask the DB error, and fire a second AI request).
-func TestPIMGenerateImage_DBFailureDoesNotFallBack(t *testing.T) {
+// GenerateImage returns a 'generating' placeholder immediately (the async win) and
+// hard-errors synchronously WITHOUT starting background generation if the
+// placeholder insert fails (no wasted AI request).
+func TestPIMGenerateImage_PlaceholderInsertFailureSurfaces(t *testing.T) {
 	var reqCount int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&reqCount, 1)
@@ -193,12 +213,11 @@ func TestPIMGenerateImage_DBFailureDoesNotFallBack(t *testing.T) {
 
 	repo := &stubPIMRepo{createMediaErr: errors.New("db down")}
 	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
-	_, err := s.GenerateImage(context.Background(), uuid.New(), "", "")
-	if err == nil || !strings.Contains(err.Error(), "save media") {
-		t.Fatalf("DB write failure must surface, got %v", err)
+	if _, err := s.GenerateImage(context.Background(), uuid.New(), "", ""); err == nil || !strings.Contains(err.Error(), "save media") {
+		t.Fatalf("placeholder insert failure must surface, got %v", err)
 	}
-	if got := atomic.LoadInt32(&reqCount); got != 1 {
-		t.Errorf("expected exactly 1 AI request (no SVG fallback), got %d", got)
+	if got := atomic.LoadInt32(&reqCount); got != 0 {
+		t.Errorf("expected 0 AI requests when the placeholder insert fails, got %d", got)
 	}
 }
 

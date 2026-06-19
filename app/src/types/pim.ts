@@ -26,6 +26,7 @@ export interface PIMMedia {
     alt_text: string;
     sort_order: number;
     is_primary: boolean;
+    status: 'generating' | 'ready' | 'failed';
     gen_model: string;
     gen_prompt: string;
     gen_style: string;

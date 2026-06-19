@@ -169,7 +169,11 @@ func (h *Handler) HandleGenerateImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 202: generation runs in the background; the placeholder row (status
+	// "generating") is returned so the client can poll the media list until it
+	// flips to "ready" (with the image) or "failed".
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(media)
 }
 
