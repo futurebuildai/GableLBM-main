@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/joho/godotenv"
 )
 
@@ -36,15 +37,23 @@ type Config struct {
 	TwilioAuthToken  string
 	TwilioFromNumber string
 
-	// Anthropic (Claude AI — PIM Content Generation)
+	// OpenRouter (unified AI — one key for text, vision OCR, and image generation).
+	// Primary source for the key/base-URL is system_settings (admin UI); env is the
+	// fallback. Model slugs default to the ai package defaults when left empty.
+	OpenRouterAPIKey  string // OPENROUTER_API_KEY
+	OpenRouterBaseURL string // OPENROUTER_BASE_URL (swappable to a self-hosted vLLM/Ollama/LiteLLM endpoint)
+	AIModelText       string // AI_MODEL_TEXT
+	AIModelVision     string // AI_MODEL_VISION
+	AIModelCheap      string // AI_MODEL_CHEAP
+	AIModelImage      string // AI_MODEL_IMAGE
+
+	// Deprecated: the Anthropic/Stability/Gemini clients were replaced by the unified
+	// OpenRouter client. These fields are retained for one back-compat release and are
+	// no longer read; they are removed in a follow-up (oss-migration-plan §1.10).
 	AnthropicAPIKey string
 	AnthropicModel  string
-
-	// Stability AI (PIM Image Generation) — legacy, replaced by Gemini
 	StabilityAPIKey string
-
-	// Google Gemini (PIM Image Generation)
-	GeminiAPIKey string
+	GeminiAPIKey    string
 
 	// Auth & Security
 	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
@@ -94,15 +103,20 @@ func Load() (*Config, error) {
 		TwilioAuthToken:  getEnv("TWILIO_AUTH_TOKEN", ""),
 		TwilioFromNumber: getEnv("TWILIO_FROM_NUMBER", ""),
 
-		// Anthropic (Claude AI — PIM Content Generation)
+		// OpenRouter (unified AI). Empty model slugs fall back to the ai package
+		// defaults, keeping a single source of truth for default model choices.
+		OpenRouterAPIKey:  getEnv("OPENROUTER_API_KEY", ""),
+		OpenRouterBaseURL: getEnv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+		AIModelText:       getEnv("AI_MODEL_TEXT", ""),
+		AIModelVision:     getEnv("AI_MODEL_VISION", ""),
+		AIModelCheap:      getEnv("AI_MODEL_CHEAP", ""),
+		AIModelImage:      getEnv("AI_MODEL_IMAGE", ""),
+
+		// Deprecated (retained one release; no longer read) — see struct doc above.
 		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
-		AnthropicModel:  getEnv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
-
-		// Stability AI (PIM Image Generation) — legacy
+		AnthropicModel:  getEnv("ANTHROPIC_MODEL", ""),
 		StabilityAPIKey: getEnv("STABILITY_API_KEY", ""),
-
-		// Google Gemini (PIM Image Generation)
-		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
+		GeminiAPIKey:    getEnv("GEMINI_API_KEY", ""),
 
 		// Auth & Security
 		AuthMode: getEnv("AUTH_MODE", ""),
@@ -126,6 +140,12 @@ func Load() (*Config, error) {
 	// F-05: Startup validation — fail fast if Brain is enabled but missing required config
 	if cfg.FBBrainEnabled && cfg.FBBrainIntegrationKey == "" {
 		return nil, fmt.Errorf("FB_BRAIN_ENABLED=true but FB_BRAIN_INTEGRATION_KEY is empty; cannot authenticate with Brain")
+	}
+
+	// Fail closed on an insecure AI base URL: the Bearer key must never be sent in
+	// plaintext to an arbitrary host (https required, or http only for loopback).
+	if err := ai.ValidateBaseURL(cfg.OpenRouterBaseURL); err != nil {
+		return nil, fmt.Errorf("invalid OPENROUTER_BASE_URL: %w", err)
 	}
 
 	return cfg, nil
