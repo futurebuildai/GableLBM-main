@@ -257,6 +257,16 @@ type Repository interface {
 	// Capacity
 	GetRouteLoadWeight(ctx context.Context, routeID uuid.UUID) (float64, error)
 	GetOrderEstimatedWeight(ctx context.Context, orderID uuid.UUID) (float64, error)
+
+	// Branch origin (route start/end) + geocoding backfill
+	GetRouteBranchID(ctx context.Context, routeID uuid.UUID) (uuid.UUID, error)
+	GetBranchOrigin(ctx context.Context, branchID uuid.UUID) (*BranchOrigin, error)
+	SetBranchLatLng(ctx context.Context, branchID uuid.UUID, lat, lng float64) error
+
+	// Geocoding + ETA persistence for deliveries
+	GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error)
+	SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error
+	SetDeliveryETA(ctx context.Context, deliveryID uuid.UUID, eta time.Time) error
 }
 
 // CapacityWarning is returned when assignment would exceed vehicle capacity
