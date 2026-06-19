@@ -99,8 +99,8 @@ func TestGenerateImageReturnsDataURI(t *testing.T) {
 	if model != "black-forest-labs/flux:echo-sentinel" {
 		t.Errorf("model = %q, want the echoed slug", model)
 	}
-	if len(sawModalities) != 2 || sawModalities[0] != "image" || sawModalities[1] != "text" {
-		t.Errorf("modalities = %v, want [image text]", sawModalities)
+	if len(sawModalities) != 1 || sawModalities[0] != "image" {
+		t.Errorf("modalities = %v, want [image] (FLUX rejects the text modality)", sawModalities)
 	}
 }
 
