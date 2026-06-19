@@ -15,26 +15,27 @@ import (
 
 // Service handles material list parsing and product matching.
 type Service struct {
-	productRepo  product.Repository
-	claudeClient *ai.Client // nil = fallback to rule-based extraction
+	productRepo product.Repository
+	aiClient    *ai.Client // nil or unconfigured = silent fallback to rule-based extraction
 }
 
 // NewService creates a new parsing Service.
-func NewService(productRepo product.Repository, claudeClient *ai.Client) *Service {
-	return &Service{productRepo: productRepo, claudeClient: claudeClient}
+func NewService(productRepo product.Repository, aiClient *ai.Client) *Service {
+	return &Service{productRepo: productRepo, aiClient: aiClient}
 }
 
-// ExtractItemsWithAI uses Claude to extract text from a file, then parses structured items.
-// Falls back to rule-based extraction if Claude client is not configured or key is missing.
+// ExtractItemsWithAI uses the configured AI model to extract text from a file, then
+// parses structured items. It degrades gracefully: if the AI client is unconfigured
+// or the call fails, it silently falls back to rule-based extraction (never errors).
 func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, contentType string) ([]extractedLine, error) {
-	if s.claudeClient == nil || !s.claudeClient.IsConfigured(ctx) {
-		slog.Warn("Claude client not configured, using rule-based fallback")
+	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		slog.Warn("AI client not configured, using rule-based fallback")
 		return s.ExtractItems(generateFallbackMaterialList()), nil
 	}
 
-	rawText, err := s.claudeClient.ExtractMaterialList(ctx, fileBytes, contentType)
+	rawText, err := s.aiClient.ExtractMaterialList(ctx, fileBytes, contentType)
 	if err != nil {
-		slog.Error("Claude extraction failed, falling back to rule-based", "error", err)
+		slog.Error("AI extraction failed, falling back to rule-based", "error", err)
 		return s.ExtractItems(generateFallbackMaterialList()), nil
 	}
 

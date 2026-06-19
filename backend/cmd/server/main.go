@@ -172,49 +172,35 @@ func main() {
 	productHandler := product.NewHandler(productSvc)
 	productHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "warehouse"))
 
-	// AI Key Store — centralized key management (DB-first, env fallback)
-	// Admin users can set the Anthropic key via Tech Admin > AI Settings,
-	// which powers all AI features (material list parsing, PIM, etc.)
-	aiKeyStore := ai.NewKeyStore(db.Pool, "anthropic_api_key", cfg.AnthropicAPIKey)
-	claudeClient := ai.NewClientWithKeyStore(aiKeyStore)
-	if cfg.AnthropicAPIKey != "" {
-		logger.Info("Claude AI initialized (env key present, admin can override via settings)")
+	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
+	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
+	// product image generation. Base URL and per-task model slugs are admin-overridable.
+	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey)
+	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
+	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
+		WithBaseURLStore(aiBaseURLStore).
+		WithModels(ai.NewModelRouter(db.Pool, ai.ModelDefaults{
+			Text:   cfg.AIModelText,
+			Vision: cfg.AIModelVision,
+			Cheap:  cfg.AIModelCheap,
+			Image:  cfg.AIModelImage,
+		}))
+	if cfg.OpenRouterAPIKey != "" {
+		logger.Info("AI initialized via OpenRouter (env key present, admin can override via Tech Admin > AI Settings)")
 	} else {
-		logger.Info("Claude AI initialized (no env key — admin can configure via Tech Admin > AI Settings)")
+		logger.Info("AI initialized via OpenRouter (no env key — admin can configure via Tech Admin > AI Settings)")
 	}
 
 	// AI Parsing Module (Material List Intake)
-	parsingSvc := parsing.NewService(productRepo, claudeClient)
+	parsingSvc := parsing.NewService(productRepo, aiClient)
 	parsingHandler := parsing.NewHandler(parsingSvc)
 	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
-	// Gemini Key Store — for image generation via Google Gemini
-	geminiKeyStore := ai.NewKeyStore(db.Pool, "gemini_api_key", cfg.GeminiAPIKey)
-	if cfg.GeminiAPIKey != "" {
-		logger.Info("Gemini AI initialized (env key present, admin can override via settings)")
-	} else {
-		logger.Info("Gemini AI initialized (no env key — admin can configure via Tech Admin > AI Settings)")
-	}
-
-	// PIM Module (AI-Powered Product Information Management)
+	// PIM Module (AI-Powered Product Information Management) — text generation and
+	// image generation both run through the unified OpenRouter client.
 	pimRepo := pim.NewRepository(db)
 	pimSvc := pim.NewService(pimRepo, productSvc)
-
-	// PIM text AI (Anthropic Claude) — uses KeyStore for dynamic key resolution
-	pimSvc.WithTextAI(pim.NewTextAIClientWithKeyStore(aiKeyStore, cfg.AnthropicModel))
-
-	// PIM image AI — always attach KeyStore for dynamic resolution, then try eager init
-	pimSvc.WithGeminiKeyStore(geminiKeyStore)
-	geminiKey := geminiKeyStore.Get(context.Background())
-	if geminiKey != "" {
-		pimSvc.WithGeminiAI(pim.NewGeminiImageClient(geminiKey))
-		logger.Info("PIM image AI (Gemini) initialized")
-	} else if cfg.StabilityAPIKey != "" {
-		pimSvc.WithImageAI(pim.NewImageAIClient(cfg.StabilityAPIKey))
-		logger.Info("PIM image AI (Stability) initialized")
-	} else {
-		logger.Info("PIM image AI: will resolve dynamically from KeyStore (configure via Tech Admin > AI Settings)")
-	}
+	pimSvc.WithAI(aiClient)
 
 	pimHandler := pim.NewHandler(pimSvc)
 	pimHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
@@ -350,7 +336,7 @@ func main() {
 	ediSvc := edi.NewService("/app/edi_out", logger) // Absolute path for container deployment
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
-	poSvc.WithAIClient(claudeClient)
+	poSvc.WithAIClient(aiClient)
 	velocityRepo := purchase_order.NewVelocityRepository(db)
 	poSvc.WithVelocityRepo(velocityRepo)
 	poRecSvc := purchase_order.NewRecommendationService(poRepo, inventorySvc, productSvc, vendorSvc).
@@ -572,7 +558,7 @@ func main() {
 	techAdminSvc := techadmin.NewService(techAdminRepo)
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
 	techAdminHandler.WithAIKeyStore(aiKeyStore)
-	techAdminHandler.WithGeminiKeyStore(geminiKeyStore)
+	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Portal Module (Sovereign Dealer Portal)
