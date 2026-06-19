@@ -25,12 +25,9 @@ Always be factual about product attributes. Never fabricate species, grades, or 
 
 // Service contains PIM business logic
 type Service struct {
-	repo            Repository
-	productSvc      *product.Service
-	textAI          *TextAIClient
-	imageAI         *ImageAIClient
-	geminiAI        *GeminiImageClient
-	geminiKeyStore  *ai.KeyStore
+	repo       Repository
+	productSvc *product.Service
+	ai         *ai.Client // unified OpenRouter client (text + image)
 }
 
 // NewService creates a new PIM service
@@ -41,24 +38,10 @@ func NewService(repo Repository, productSvc *product.Service) *Service {
 	}
 }
 
-// WithTextAI attaches the Anthropic text AI client
-func (s *Service) WithTextAI(client *TextAIClient) {
-	s.textAI = client
-}
-
-// WithImageAI attaches the Stability AI image client
-func (s *Service) WithImageAI(client *ImageAIClient) {
-	s.imageAI = client
-}
-
-// WithGeminiAI attaches the Google Gemini image client
-func (s *Service) WithGeminiAI(client *GeminiImageClient) {
-	s.geminiAI = client
-}
-
-// WithGeminiKeyStore attaches the Gemini key store for dynamic client resolution
-func (s *Service) WithGeminiKeyStore(ks *ai.KeyStore) {
-	s.geminiKeyStore = ks
+// WithAI attaches the unified OpenRouter AI client used for both text generation
+// (descriptions, SEO, collateral, SVG fallback) and image generation.
+func (s *Service) WithAI(client *ai.Client) {
+	s.ai = client
 }
 
 // GetProductDetail returns the full product + PIM aggregate
@@ -161,8 +144,8 @@ func (s *Service) UpdateContent(ctx context.Context, productID uuid.UUID, req Up
 
 // GenerateDescriptions uses Claude to generate product descriptions and extract attributes
 func (s *Service) GenerateDescriptions(ctx context.Context, productID uuid.UUID, tone, audience string) (*PIMContent, error) {
-	if s.textAI == nil {
-		return nil, fmt.Errorf("text AI client not configured (set ANTHROPIC_API_KEY)")
+	if s.ai == nil {
+		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -208,7 +191,7 @@ Only include attribute keys where the value can be reasonably inferred from the 
 		p.SKU, p.Description, p.UOMPrimary, p.BasePrice,
 		stringOrNA(p.Vendor), p.WeightLbs, tone, audience)
 
-	text, model, err := s.textAI.Generate(lumberSystemPrompt, userPrompt, 2048)
+	text, model, err := s.ai.Generate(ctx, lumberSystemPrompt, userPrompt, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("ai generate: %w", err)
 	}
@@ -254,8 +237,8 @@ Only include attribute keys where the value can be reasonably inferred from the 
 
 // GenerateSEO uses Claude to generate SEO metadata
 func (s *Service) GenerateSEO(ctx context.Context, productID uuid.UUID, targetKeywords []string) (*PIMContent, error) {
-	if s.textAI == nil {
-		return nil, fmt.Errorf("text AI client not configured (set ANTHROPIC_API_KEY)")
+	if s.ai == nil {
+		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -283,7 +266,7 @@ Respond with ONLY valid JSON (no markdown fences):
   "slug": "url-friendly-slug-with-keywords"
 }`, p.SKU, p.Description, stringOrNA(p.Vendor), kwStr)
 
-	text, model, err := s.textAI.Generate(lumberSystemPrompt, userPrompt, 1024)
+	text, model, err := s.ai.Generate(ctx, lumberSystemPrompt, userPrompt, 1024)
 	if err != nil {
 		return nil, fmt.Errorf("ai generate seo: %w", err)
 	}
@@ -326,21 +309,14 @@ Respond with ONLY valid JSON (no markdown fences):
 	return content, nil
 }
 
-// GenerateImage generates a product image using Gemini (preferred) or Claude SVG fallback
+// GenerateImage generates a product image via the OpenRouter image model, falling
+// back to an SVG illustration (text model) ONLY if the image generation step
+// fails. A missing AI key is a hard error (PIM does not silently degrade), and a
+// persistence failure after a successful generation is a real error — we do not
+// fall back and discard the image we just produced.
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
-	// Resolve Gemini client from KeyStore (handles key added/changed after startup)
-	if s.geminiKeyStore != nil {
-		if key := s.geminiKeyStore.Get(ctx); key != "" {
-			if s.geminiAI == nil || s.geminiAI.apiKey != key {
-				s.geminiAI = NewGeminiImageClient(key)
-			}
-		} else {
-			s.geminiAI = nil
-		}
-	}
-
-	if s.geminiAI == nil && s.textAI == nil {
-		return nil, fmt.Errorf("no image AI configured — set GEMINI_API_KEY in Admin > AI Settings")
+	if s.ai == nil || !s.ai.IsConfigured(ctx) {
+		return nil, fmt.Errorf("no AI configured — set the OpenRouter key in Admin > AI Settings")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -352,21 +328,14 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 		prompt = fmt.Sprintf("Professional product photo of %s, lumber building material, clean white background, studio lighting, high resolution, product catalog style", p.Description)
 	}
 
-	// Prefer Gemini for real image generation
-	if s.geminiAI != nil {
-		return s.generateImageGemini(ctx, productID, p, style, prompt)
+	// Image generation is the only step covered by the SVG fallback.
+	dataURI, model, genErr := s.ai.GenerateImage(ctx, prompt, style)
+	if genErr != nil {
+		return s.generateImageSVG(ctx, productID, p, style, prompt)
 	}
 
-	// Fallback: Claude SVG illustration
-	return s.generateImageSVG(ctx, productID, p, style, prompt)
-}
-
-func (s *Service) generateImageGemini(ctx context.Context, productID uuid.UUID, p *product.Product, style, prompt string) (*PIMMedia, error) {
-	dataURI, err := s.geminiAI.Generate(prompt, style)
-	if err != nil {
-		return nil, fmt.Errorf("gemini image generation: %w", err)
-	}
-
+	// GenModel records the actual slug the model reports (replacing the old
+	// hardcoded "gemini-2.0-flash" literal, which was wrong).
 	now := time.Now()
 	media := &PIMMedia{
 		ProductID:   productID,
@@ -375,16 +344,17 @@ func (s *Service) generateImageGemini(ctx context.Context, productID uuid.UUID, 
 		AltText:     p.Description,
 		SortOrder:   0,
 		IsPrimary:   false,
-		GenModel:    "gemini-2.0-flash",
+		GenModel:    model,
 		GenPrompt:   prompt,
 		GenStyle:    style,
 		GeneratedAt: &now,
 	}
 
+	// A persistence failure here is a real error, not a reason to fall back and
+	// throw away the generated image.
 	if err := s.repo.CreateMedia(ctx, media); err != nil {
 		return nil, fmt.Errorf("save media: %w", err)
 	}
-
 	return media, nil
 }
 
@@ -427,7 +397,7 @@ You create clean, professional SVG product illustrations that visually represent
 Output ONLY raw SVG markup. No markdown, no explanation, no code fences.
 Your SVGs must be self-contained with no external dependencies.`
 
-	text, model, err := s.textAI.Generate(svgSystemPrompt, userPrompt, 4096)
+	text, model, err := s.ai.Generate(ctx, svgSystemPrompt, userPrompt, 4096)
 	if err != nil {
 		return nil, fmt.Errorf("generate SVG: %w", err)
 	}
@@ -462,8 +432,8 @@ Your SVGs must be self-contained with no external dependencies.`
 
 // GenerateCollateral uses Claude to generate marketing collateral
 func (s *Service) GenerateCollateral(ctx context.Context, productID uuid.UUID, collateralType, tone, audience string) (*PIMCollateral, error) {
-	if s.textAI == nil {
-		return nil, fmt.Errorf("text AI client not configured (set ANTHROPIC_API_KEY)")
+	if s.ai == nil {
+		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -530,7 +500,7 @@ Respond with ONLY valid JSON (no markdown fences):
   "content": "The full content (use \\n for line breaks)"
 }`, collateralType, p.SKU, p.Description, p.BasePrice, stringOrNA(p.Vendor), tone, audience, formatInstructions)
 
-	text, model, err := s.textAI.Generate(lumberSystemPrompt, userPrompt, 2048)
+	text, model, err := s.ai.Generate(ctx, lumberSystemPrompt, userPrompt, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("ai generate collateral: %w", err)
 	}
