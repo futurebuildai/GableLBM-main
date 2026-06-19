@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ai"
@@ -13,26 +14,32 @@ import (
 // when AI is unavailable — it must never return an error (CLAUDE.md "degrade
 // gracefully"). These guard the invariant per the degradation matrix.
 
+// assertFallback verifies the result came from the rule-based fallback list (not
+// the AI path and not the raw input), keyed on a marker unique to that list so the
+// assertion is falsifiable rather than a bare len>0.
+func assertFallback(t *testing.T, items []extractedLine, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("AI unavailable must not error (silent fallback), got %v", err)
+	}
+	for _, it := range items {
+		if strings.Contains(it.rawText, "SPF Stud") {
+			return
+		}
+	}
+	t.Fatalf("expected the rule-based fallback list (marker %q), got %d items: %+v", "SPF Stud", len(items), items)
+}
+
 func TestExtractItemsWithAI_NilClientFallsBack(t *testing.T) {
 	s := NewService(&mockProductRepo{}, nil)
 	items, err := s.ExtractItemsWithAI(context.Background(), []byte("anything"), "image/png")
-	if err != nil {
-		t.Fatalf("nil client must not error, got %v", err)
-	}
-	if len(items) == 0 {
-		t.Fatal("expected rule-based fallback items, got none")
-	}
+	assertFallback(t, items, err)
 }
 
 func TestExtractItemsWithAI_UnconfiguredClientFallsBack(t *testing.T) {
 	s := NewService(&mockProductRepo{}, ai.NewClient("")) // no key
 	items, err := s.ExtractItemsWithAI(context.Background(), []byte("anything"), "image/png")
-	if err != nil {
-		t.Fatalf("unconfigured client must not error, got %v", err)
-	}
-	if len(items) == 0 {
-		t.Fatal("expected rule-based fallback items, got none")
-	}
+	assertFallback(t, items, err)
 }
 
 // TestExtractItemsWithAI_MidCallFailureFallsBack is the riskiest path: AI is
@@ -47,10 +54,5 @@ func TestExtractItemsWithAI_MidCallFailureFallsBack(t *testing.T) {
 	client := ai.NewClient("test-key").WithBaseURL(srv.URL) // configured, but the call 500s
 	s := NewService(&mockProductRepo{}, client)
 	items, err := s.ExtractItemsWithAI(context.Background(), []byte("anything"), "image/png")
-	if err != nil {
-		t.Fatalf("mid-call failure must fall back silently, got %v", err)
-	}
-	if len(items) == 0 {
-		t.Fatal("expected rule-based fallback items after AI failure, got none")
-	}
+	assertFallback(t, items, err)
 }

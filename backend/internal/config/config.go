@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/joho/godotenv"
 )
 
@@ -139,6 +140,12 @@ func Load() (*Config, error) {
 	// F-05: Startup validation — fail fast if Brain is enabled but missing required config
 	if cfg.FBBrainEnabled && cfg.FBBrainIntegrationKey == "" {
 		return nil, fmt.Errorf("FB_BRAIN_ENABLED=true but FB_BRAIN_INTEGRATION_KEY is empty; cannot authenticate with Brain")
+	}
+
+	// Fail closed on an insecure AI base URL: the Bearer key must never be sent in
+	// plaintext to an arbitrary host (https required, or http only for loopback).
+	if err := ai.ValidateBaseURL(cfg.OpenRouterBaseURL); err != nil {
+		return nil, fmt.Errorf("invalid OPENROUTER_BASE_URL: %w", err)
 	}
 
 	return cfg, nil

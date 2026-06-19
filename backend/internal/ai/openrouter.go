@@ -113,15 +113,25 @@ func (c *Client) getKey(ctx context.Context) string {
 
 // getBaseURL resolves the base URL: admin store override → static override → default.
 func (c *Client) getBaseURL(ctx context.Context) string {
+	candidate := ""
 	if c.baseURLStore != nil {
-		if u := c.baseURLStore.Get(ctx); u != "" {
-			return strings.TrimRight(u, "/")
-		}
+		candidate = c.baseURLStore.Get(ctx)
 	}
-	if c.baseURL != "" {
-		return strings.TrimRight(c.baseURL, "/")
+	if candidate == "" {
+		candidate = c.baseURL
 	}
-	return defaultOpenRouterBaseURL
+	if candidate == "" {
+		return defaultOpenRouterBaseURL
+	}
+	// Defense in depth: never send the Bearer key to an unvalidated host. The admin
+	// handler and startup config validation already gate their inputs, but a value
+	// written directly to system_settings (bypassing the handler) would otherwise
+	// slip through here — so re-validate and fall back to the safe default.
+	if err := ValidateBaseURL(candidate); err != nil {
+		slog.Warn("ignoring invalid AI base URL; using default", "error", err)
+		return defaultOpenRouterBaseURL
+	}
+	return strings.TrimRight(candidate, "/")
 }
 
 // IsConfigured returns true if an API key is available (from DB or env/static).
@@ -260,6 +270,11 @@ func ValidateBaseURL(raw string) error {
 	}
 }
 
+// isLoopbackHost reports whether host is a loopback literal or a *.localhost name.
+// Per RFC 6761, names under the .localhost TLD are reserved to resolve to loopback,
+// so plaintext http to them is treated as safe (it never leaves the machine). This
+// trusts the resolver to honor RFC 6761; a maliciously-configured resolver could
+// point *.localhost elsewhere, which is out of scope for this admin-only setting.
 func isLoopbackHost(host string) bool {
 	switch strings.ToLower(host) {
 	case "localhost", "127.0.0.1", "::1":

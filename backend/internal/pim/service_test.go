@@ -117,8 +117,9 @@ func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 			})
 			return
 		}
-		// Text request (the SVG fallback) → return valid SVG markup.
+		// Text request (the SVG fallback) → return valid SVG markup with a model echo.
 		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "text-svg-sentinel",
 			"choices": []any{map[string]any{"message": map[string]any{
 				"content": `<svg viewBox="0 0 400 400" width="400" height="400"></svg>`,
 			}}},
@@ -137,6 +138,38 @@ func TestPIMGenerateImage_FallsBackToSVGOnGenFailure(t *testing.T) {
 	}
 	if len(repo.created) != 1 {
 		t.Errorf("expected exactly 1 media persisted, got %d", len(repo.created))
+	}
+	if media.GenModel != "text-svg-sentinel" {
+		t.Errorf("SVG fallback GenModel = %q, want the echoed text slug", media.GenModel)
+	}
+}
+
+// TestPIMGenerateImage_PersistsReturnedModelSlug pins invariant #4 at the PIM
+// layer: the persisted GenModel is the slug the model actually returned (replacing
+// the old hardcoded "gemini-2.0-flash" literal). The sentinel is distinct from any
+// default so the assertion can't pass tautologically.
+func TestPIMGenerateImage_PersistsReturnedModelSlug(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "black-forest-labs/flux:pim-sentinel",
+			"choices": []any{map[string]any{"message": map[string]any{
+				"images": []any{map[string]any{"image_url": map[string]any{"url": "data:image/png;base64,AAAA"}}},
+			}}},
+		})
+	}))
+	defer srv.Close()
+
+	repo := &stubPIMRepo{}
+	s := newPIMTestService(repo, ai.NewClient("k").WithBaseURL(srv.URL))
+	media, err := s.GenerateImage(context.Background(), uuid.New(), "", "")
+	if err != nil {
+		t.Fatalf("GenerateImage: %v", err)
+	}
+	if media.GenModel != "black-forest-labs/flux:pim-sentinel" {
+		t.Errorf("GenModel = %q, want the echoed slug", media.GenModel)
+	}
+	if len(repo.created) != 1 || repo.created[0].GenModel != "black-forest-labs/flux:pim-sentinel" {
+		t.Errorf("persisted GenModel = %v", repo.created)
 	}
 }
 

@@ -1,6 +1,7 @@
 package techadmin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -9,10 +10,20 @@ import (
 	"github.com/gablelbm/gable/pkg/httputil"
 )
 
+// settingStore is the subset of *ai.KeyStore the admin settings handler needs,
+// narrowed to an interface so the handler can be unit-tested with a fake (the
+// concrete KeyStore wraps a *pgxpool.Pool that a unit test can't supply).
+type settingStore interface {
+	Get(ctx context.Context) string
+	Set(ctx context.Context, value string) error
+	Delete(ctx context.Context) error
+	HasDBOverride(ctx context.Context) bool
+}
+
 type Handler struct {
 	service      *Service
-	aiKeyStore   *ai.KeyStore // openrouter_api_key
-	baseURLStore *ai.KeyStore // openrouter_base_url
+	aiKeyStore   settingStore // openrouter_api_key
+	baseURLStore settingStore // openrouter_base_url
 }
 
 func NewHandler(service *Service) *Handler {
@@ -21,14 +32,20 @@ func NewHandler(service *Service) *Handler {
 
 // WithAIKeyStore sets the OpenRouter API key store for admin settings management.
 func (h *Handler) WithAIKeyStore(ks *ai.KeyStore) {
-	h.aiKeyStore = ks
+	// Guard against wrapping a nil *ai.KeyStore in a non-nil interface, which would
+	// defeat the nil checks in the handlers.
+	if ks != nil {
+		h.aiKeyStore = ks
+	}
 }
 
 // WithAIBaseURLStore sets the OpenRouter base-URL store. The base URL is a
 // separate setting key because KeyStore is single-valued, so the admin-editable
 // base URL needs its own store alongside the API key.
 func (h *Handler) WithAIBaseURLStore(ks *ai.KeyStore) {
-	h.baseURLStore = ks
+	if ks != nil {
+		h.baseURLStore = ks
+	}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -180,17 +197,24 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the base URL BEFORE persisting anything, so a bad URL returns 400
+	// without leaving the API key saved.
+	setBaseURL := body.BaseURL != nil && h.baseURLStore != nil
+	var baseURL string
+	if setBaseURL {
+		baseURL = strings.TrimSpace(*body.BaseURL)
+		if err := ai.ValidateBaseURL(baseURL); err != nil {
+			httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+			return
+		}
+	}
+
 	if err := h.aiKeyStore.Set(r.Context(), body.APIKey); err != nil {
 		httputil.RespondError(w, r, "failed to save API key", http.StatusInternalServerError, err)
 		return
 	}
 
-	if body.BaseURL != nil && h.baseURLStore != nil {
-		baseURL := strings.TrimSpace(*body.BaseURL)
-		if err := ai.ValidateBaseURL(baseURL); err != nil {
-			httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
-			return
-		}
+	if setBaseURL {
 		if baseURL == "" {
 			// Empty clears the override entirely (reverting to env/default) rather
 			// than persisting an empty row that would read back as "overridden".

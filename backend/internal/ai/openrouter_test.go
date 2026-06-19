@@ -43,7 +43,7 @@ func TestGenerateExtractsContentAndStripsFence(t *testing.T) {
 			t.Errorf("Authorization = %q, want Bearer test-key", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"model": "deepseek/deepseek-chat",
+			"model": "deepseek/deepseek-chat-v3.1:echo-sentinel",
 			"choices": []any{map[string]any{
 				"message": map[string]any{"content": "```json\n{\"short\":\"hi\"}\n```"},
 			}},
@@ -59,8 +59,10 @@ func TestGenerateExtractsContentAndStripsFence(t *testing.T) {
 	if text != `{"short":"hi"}` {
 		t.Errorf("text = %q, want %q", text, `{"short":"hi"}`)
 	}
-	if model != "deepseek/deepseek-chat" {
-		t.Errorf("model = %q, want deepseek/deepseek-chat", model)
+	// The returned model must be the slug the API ECHOED, not the default we sent —
+	// the sentinel differs from defaultModelText so this can't pass tautologically.
+	if model != "deepseek/deepseek-chat-v3.1:echo-sentinel" {
+		t.Errorf("model = %q, want the echoed slug", model)
 	}
 }
 
@@ -73,7 +75,7 @@ func TestGenerateImageReturnsDataURI(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		sawModalities = req.Modalities
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"model": "google/gemini-3.1-flash-image",
+			"model": "black-forest-labs/flux:echo-sentinel",
 			"choices": []any{map[string]any{"message": map[string]any{
 				"content": "Here is your image.",
 				"images": []any{map[string]any{
@@ -93,8 +95,9 @@ func TestGenerateImageReturnsDataURI(t *testing.T) {
 	if uri != "data:image/png;base64,AAAA" {
 		t.Errorf("uri = %q", uri)
 	}
-	if model != "google/gemini-3.1-flash-image" {
-		t.Errorf("model = %q", model)
+	// Echoed slug must win over the default we sent (sentinel kept distinct).
+	if model != "black-forest-labs/flux:echo-sentinel" {
+		t.Errorf("model = %q, want the echoed slug", model)
 	}
 	if len(sawModalities) != 2 || sawModalities[0] != "image" || sawModalities[1] != "text" {
 		t.Errorf("modalities = %v, want [image text]", sawModalities)
@@ -404,10 +407,15 @@ func TestValidateBaseURL(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"http://evil.com",      // plaintext to a remote host
-		"ftp://openrouter.ai",  // wrong scheme
-		"openrouter.ai/api/v1", // no scheme/host
-		"https://",             // no host
+		"http://evil.com",           // plaintext to a remote host
+		"ftp://openrouter.ai",       // wrong scheme
+		"openrouter.ai/api/v1",      // no scheme/host
+		"https://",                  // no host
+		"HtTp://evil.com",           // scheme case-folding must not bypass
+		"http://127.0.0.1@evil.com", // userinfo trick: the real host is evil.com
+		"//evil.com",                // scheme-relative
+		"http://127.0.0.2:8080",     // loopback range but not 127.0.0.1
+		"http://2130706433",         // decimal-encoded 127.0.0.1 — not treated as loopback
 	}
 	for _, u := range bad {
 		if err := ValidateBaseURL(u); err == nil {
