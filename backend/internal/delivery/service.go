@@ -53,10 +53,18 @@ func NewService(repo Repository) *Service {
 }
 
 // WithRouting sets the OpenRouteService client for route optimization and
-// geocoding. When unset, the service uses keyless mock fallbacks.
+// geocoding. When unset — or when the ORS key isn't configured — the service uses
+// keyless mock fallbacks.
 func (s *Service) WithRouting(client *ORSClient, logger *slog.Logger) {
 	s.routing = client
 	s.logger = logger
+}
+
+// routingEnabled reports whether real ORS routing/geocoding should be used. The
+// client may be wired but have no key (settable at runtime via Tech Admin), in
+// which case the service falls back to mock optimization + geocoding.
+func (s *Service) routingEnabled(ctx context.Context) bool {
+	return s.routing != nil && s.routing.IsConfigured(ctx)
 }
 
 // WithNotifier sets the delivery notification service.
@@ -497,7 +505,7 @@ func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID) (*RouteO
 	}
 
 	var result *RouteOptimizationResult
-	if s.routing != nil {
+	if s.routingEnabled(ctx) {
 		origin := s.resolveBranchOrigin(ctx, routeID, stops)
 		result, err = s.routing.OptimizeRoute(ctx, origin, stops)
 		if err != nil {
@@ -594,7 +602,7 @@ func (s *Service) resolveBranchOrigin(ctx context.Context, routeID uuid.UUID, st
 		return fallback
 	}
 	// Invariant: resolveBranchOrigin is only reached from the keyed path
-	// (OptimizeRoute guards s.routing != nil before calling), so Geocode is safe.
+	// (OptimizeRoute guards routingEnabled before calling), so Geocode is safe.
 	gc, gErr := s.routing.Geocode(ctx, origin.Address)
 	if gErr != nil {
 		s.logger.Warn("route origin: branch geocode failed, routing from stop centroid",
@@ -638,7 +646,7 @@ func centroid(points []LatLng) LatLng {
 // v1 review signal; persisting a structured review flag on the delivery is a
 // deferred follow-up (would need a new column + UI surface).
 func (s *Service) geocodeOrderStop(ctx context.Context, orderID uuid.UUID) *LatLng {
-	if s.routing == nil {
+	if !s.routingEnabled(ctx) {
 		ll := mockGeocode(orderID)
 		return &ll
 	}

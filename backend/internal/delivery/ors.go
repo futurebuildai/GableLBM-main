@@ -85,16 +85,24 @@ var demoAnchor = LatLng{Lat: 49.888, Lng: -119.496}
 // header (NOT as a Bearer token); GET endpoints take it as the api_key query
 // param. Both are handled internally here.
 type ORSClient struct {
-	apiKey  string
+	keyFn   func(context.Context) string
 	baseURL string
 	profile string
 	client  *http.Client
 	logger  *slog.Logger
 }
 
-// NewORSClient creates an OpenRouteService client. baseURL and profile fall back
-// to sensible defaults when empty.
+// NewORSClient creates an OpenRouteService client with a static API key. baseURL
+// and profile fall back to sensible defaults when empty.
 func NewORSClient(apiKey, baseURL, profile string, logger *slog.Logger) *ORSClient {
+	return NewORSClientWithKeyStore(func(context.Context) string { return apiKey }, baseURL, profile, logger)
+}
+
+// NewORSClientWithKeyStore creates a client that resolves the API key dynamically
+// per request (e.g. from a runtime-settable key store), so the key can be set in
+// Tech Admin without a restart. When keyFn returns "", IsConfigured is false and
+// the delivery service falls back to mock optimization/geocoding.
+func NewORSClientWithKeyStore(keyFn func(context.Context) string, baseURL, profile string, logger *slog.Logger) *ORSClient {
 	if baseURL == "" {
 		baseURL = defaultORSBaseURL
 	}
@@ -106,12 +114,18 @@ func NewORSClient(apiKey, baseURL, profile string, logger *slog.Logger) *ORSClie
 		logger = slog.Default()
 	}
 	return &ORSClient{
-		apiKey:  apiKey,
+		keyFn:   keyFn,
 		baseURL: baseURL,
 		profile: profile,
 		client:  &http.Client{Timeout: 20 * time.Second},
 		logger:  logger,
 	}
+}
+
+// IsConfigured reports whether an ORS API key is currently available. When false,
+// the delivery service uses keyless mock optimization + geocoding.
+func (c *ORSClient) IsConfigured(ctx context.Context) bool {
+	return c.keyFn != nil && c.keyFn(ctx) != ""
 }
 
 // --- VROOM /optimization request/response types ---
@@ -200,7 +214,7 @@ func (c *ORSClient) OptimizeRoute(ctx context.Context, origin LatLng, stops []La
 		return nil, fmt.Errorf("create optimization request: %w", err)
 	}
 	// ORS POST endpoints take the raw API key in Authorization (no "Bearer").
-	httpReq.Header.Set("Authorization", c.apiKey)
+	httpReq.Header.Set("Authorization", c.keyFn(ctx))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 
@@ -317,7 +331,7 @@ func (c *ORSClient) Geocode(ctx context.Context, address string) (*GeocodeResult
 	}
 
 	q := url.Values{}
-	q.Set("api_key", c.apiKey)
+	q.Set("api_key", c.keyFn(ctx))
 	q.Set("text", addr)
 	q.Set("size", "1")
 	endpoint := c.baseURL + "/geocode/search?" + q.Encode()
