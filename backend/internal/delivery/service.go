@@ -553,9 +553,8 @@ func (s *Service) resolveBranchOrigin(ctx context.Context, routeID uuid.UUID, st
 		s.logger.Warn("route origin: branch has no address to geocode, routing from stop centroid", "branch_id", branchID)
 		return fallback
 	}
-	if s.routing == nil {
-		return fallback
-	}
+	// Invariant: resolveBranchOrigin is only reached from the keyed path
+	// (OptimizeRoute guards s.routing != nil before calling), so Geocode is safe.
 	gc, gErr := s.routing.Geocode(ctx, origin.Address)
 	if gErr != nil {
 		s.logger.Warn("route origin: branch geocode failed, routing from stop centroid",
@@ -572,11 +571,12 @@ func (s *Service) resolveBranchOrigin(ctx context.Context, routeID uuid.UUID, st
 
 // centroid returns the average of the given coordinates — a geographically
 // neutral origin fallback that stays in the right region for any deployment.
-// Falls back to the demo anchor only when there are no points (OptimizeRoute
-// already guards against that before calling resolveBranchOrigin).
+// The caller (resolveBranchOrigin, via OptimizeRoute) guarantees len(points) > 0;
+// the empty case returns the zero value rather than a fixed city so a future
+// misuse fails visibly instead of silently routing from the wrong region.
 func centroid(points []LatLng) LatLng {
 	if len(points) == 0 {
-		return demoAnchor
+		return LatLng{}
 	}
 	var sumLat, sumLng float64
 	for _, p := range points {

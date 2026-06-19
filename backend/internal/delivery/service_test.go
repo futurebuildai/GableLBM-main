@@ -25,10 +25,11 @@ type MockRepository struct {
 	orderAddrs   map[uuid.UUID]string
 
 	// Captured writes for assertions.
-	reorderedIDs []uuid.UUID
-	etas         map[uuid.UUID]time.Time
-	setLatLng    map[uuid.UUID]LatLng
-	setBranch    map[uuid.UUID]LatLng
+	reorderedIDs   []uuid.UUID
+	etas           map[uuid.UUID]time.Time
+	setLatLng      map[uuid.UUID]LatLng
+	setBranch      map[uuid.UUID]LatLng
+	setBranchCalls int
 }
 
 func (m *MockRepository) CreateVehicle(ctx context.Context, v *Vehicle) error { return nil }
@@ -111,6 +112,7 @@ func (m *MockRepository) SetBranchLatLng(ctx context.Context, branchID uuid.UUID
 		m.setBranch = map[uuid.UUID]LatLng{}
 	}
 	m.setBranch[branchID] = LatLng{Lat: lat, Lng: lng}
+	m.setBranchCalls++
 	return nil
 }
 func (m *MockRepository) GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error) {
@@ -316,6 +318,101 @@ func TestOptimizeRoute_IndexAlignmentAndETA(t *testing.T) {
 	}
 }
 
+// TestOptimizeRoute_BranchGeocodeBackfill exercises the lazy branch-origin
+// backfill path the index-alignment test skips (it pre-stores coords): a branch
+// with an address but no coordinates is geocoded once, the result is written
+// back un-swapped, and that geocoded origin is what the optimizer receives.
+func TestOptimizeRoute_BranchGeocodeBackfill(t *testing.T) {
+	branchID := uuid.New()
+	bodyCh := make(chan orsOptimizationRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/geocode") {
+			io.WriteString(w, `{"features":[{"geometry":{"coordinates":[-119.5,49.9]},"properties":{"confidence":0.95,"match_type":"exact","label":"branch"}}]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var req orsOptimizationRequest
+		_ = json.Unmarshal(body, &req)
+		bodyCh <- req
+		io.WriteString(w, vroomResponse)
+	}))
+	defer srv.Close()
+
+	// Stops already have coords (so only the branch needs geocoding).
+	dA := Delivery{ID: uuid.New(), OrderID: uuid.New(), Latitude: fptr(49.10), Longitude: fptr(-119.10)}
+	dB := Delivery{ID: uuid.New(), OrderID: uuid.New(), Latitude: fptr(49.30), Longitude: fptr(-119.30)}
+	repo := &MockRepository{
+		deliveries:   []Delivery{dA, dB},
+		branchID:     branchID,
+		branchOrigin: &BranchOrigin{BranchID: branchID, Address: "123 Branch St"}, // no coords → lazy geocode
+	}
+	svc := NewService(repo)
+	svc.WithRouting(NewORSClient("k", srv.URL, "driving-hgv", discardLogger()), discardLogger())
+
+	if _, err := svc.OptimizeRoute(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("OptimizeRoute: %v", err)
+	}
+	gotBody := <-bodyCh
+
+	// (a) backfill persisted with un-swapped lat/lng.
+	got, ok := repo.setBranch[branchID]
+	if !ok {
+		t.Fatal("branch geocode was never written back")
+	}
+	if got.Lat != 49.9 || got.Lng != -119.5 {
+		t.Errorf("backfilled branch coord = %+v; want {Lat:49.9 Lng:-119.5} (lat/lng not swapped)", got)
+	}
+	// (b) written exactly once.
+	if repo.setBranchCalls != 1 {
+		t.Errorf("SetBranchLatLng called %d times; want 1", repo.setBranchCalls)
+	}
+	// (c) origin encoded [lng,lat] in the VROOM request.
+	if len(gotBody.Vehicles) != 1 || gotBody.Vehicles[0].Start != [2]float64{-119.5, 49.9} {
+		t.Errorf("vehicle start = %+v; want geocoded branch origin [lng,lat] [-119.5,49.9]", gotBody.Vehicles)
+	}
+}
+
+// TestOptimizeRoute_CentroidOriginFallback proves the headline fallback design:
+// when the branch has neither coords nor an address, the optimizer routes from
+// the centroid of the submitted stops (region-correct), not a fixed demo anchor
+// and not a lat/lng-swapped point.
+func TestOptimizeRoute_CentroidOriginFallback(t *testing.T) {
+	bodyCh := make(chan orsOptimizationRequest, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req orsOptimizationRequest
+		_ = json.Unmarshal(body, &req)
+		bodyCh <- req
+		io.WriteString(w, vroomResponse)
+	}))
+	defer srv.Close()
+
+	dA := Delivery{ID: uuid.New(), OrderID: uuid.New(), Latitude: fptr(49.10), Longitude: fptr(-119.10)}
+	dB := Delivery{ID: uuid.New(), OrderID: uuid.New(), Latitude: fptr(49.30), Longitude: fptr(-119.50)}
+	repo := &MockRepository{
+		deliveries:   []Delivery{dA, dB},
+		branchOrigin: &BranchOrigin{}, // no coords, no address → centroid fallback
+	}
+	svc := NewService(repo)
+	svc.WithRouting(NewORSClient("k", srv.URL, "driving-hgv", discardLogger()), discardLogger())
+
+	if _, err := svc.OptimizeRoute(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("OptimizeRoute: %v", err)
+	}
+	gotBody := <-bodyCh
+
+	// Origin = mean of the stops, encoded [lng,lat].
+	wantLng := (-119.10 + -119.50) / 2 // -119.30
+	wantLat := (49.10 + 49.30) / 2     // 49.20
+	if len(gotBody.Vehicles) != 1 {
+		t.Fatalf("want 1 vehicle, got %d", len(gotBody.Vehicles))
+	}
+	start := gotBody.Vehicles[0].Start
+	if !approx(start[0], wantLng) || !approx(start[1], wantLat) {
+		t.Errorf("vehicle start = %v; want stop centroid [lng,lat] [%v,%v] (not demo anchor, not swapped)", start, wantLng, wantLat)
+	}
+}
+
 // TestOptimizeRoute_KeylessMockPath confirms the keyless fallback: no ORS client,
 // so a coordinate-less stop is mock-geocoded on demand and the mock optimizer
 // preserves input order with ETAs on every stop.
@@ -337,6 +434,10 @@ func TestOptimizeRoute_KeylessMockPath(t *testing.T) {
 	}
 	if len(repo.etas) != 2 {
 		t.Errorf("want ETAs for both stops, got %d", len(repo.etas))
+	}
+	// Mock optimizer spaces stops 15 min apart in input order: B (2nd) after A (1st).
+	if etaA, etaB := repo.etas[dA.ID], repo.etas[dB.ID]; !etaB.After(etaA) {
+		t.Errorf("keyless ETA ordering: B (2nd stop) %v should be after A (1st) %v", etaB, etaA)
 	}
 }
 
@@ -380,6 +481,13 @@ func TestOptimizeRoute_GeocodeDedupWithinRun(t *testing.T) {
 	}
 	if _, ok := repo.setLatLng[d2.ID]; !ok {
 		t.Error("d2 should reuse the cached geocode and be persisted")
+	}
+	// Both shared-order stops survive into the route with ETAs (dedup must not drop one).
+	if !equalIDs(repo.reorderedIDs, []uuid.UUID{d1.ID, d2.ID}) {
+		t.Errorf("reorderedIDs = %v; want both shared-order stops [d1,d2]", repo.reorderedIDs)
+	}
+	if len(repo.etas) != 2 {
+		t.Errorf("want ETAs for both stops, got %d", len(repo.etas))
 	}
 }
 

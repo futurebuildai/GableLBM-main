@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -181,8 +182,9 @@ func TestOptimizeRoute_ErrorPaths(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := NewORSClient("k", srv.URL, "", nil)
-		if _, err := c.OptimizeRoute(context.Background(), origin, stops); err == nil {
-			t.Error("expected error on HTTP 413")
+		_, err := c.OptimizeRoute(context.Background(), origin, stops)
+		if err == nil || !strings.Contains(err.Error(), "413") {
+			t.Errorf("want error surfacing status 413, got %v", err)
 		}
 	})
 
@@ -192,8 +194,9 @@ func TestOptimizeRoute_ErrorPaths(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := NewORSClient("k", srv.URL, "", nil)
-		if _, err := c.OptimizeRoute(context.Background(), origin, stops); err == nil {
-			t.Error("expected error on code != 0")
+		_, err := c.OptimizeRoute(context.Background(), origin, stops)
+		if err == nil || !strings.Contains(err.Error(), "code 3") {
+			t.Errorf("want error surfacing VROOM code 3, got %v", err)
 		}
 	})
 
@@ -228,8 +231,9 @@ func TestGeocode_ErrorPaths(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := NewORSClient("k", srv.URL, "", nil)
-		if _, err := c.Geocode(context.Background(), "nowhere at all"); err == nil {
-			t.Error("expected error when no feature is returned")
+		_, err := c.Geocode(context.Background(), "nowhere at all")
+		if err == nil || !strings.Contains(err.Error(), "no geocode match") {
+			t.Errorf("want a no-match error, got %v", err)
 		}
 	})
 
@@ -240,15 +244,19 @@ func TestGeocode_ErrorPaths(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := NewORSClient("k", srv.URL, "", nil)
-		if _, err := c.Geocode(context.Background(), "123 Main St"); err == nil {
-			t.Error("expected error on HTTP 403")
+		_, err := c.Geocode(context.Background(), "123 Main St")
+		if err == nil || !strings.Contains(err.Error(), "403") {
+			t.Errorf("want error surfacing status 403, got %v", err)
 		}
 	})
 
 	t.Run("empty address short-circuits", func(t *testing.T) {
+		// Invalid URL would also error; assert the pre-HTTP guard fires so a
+		// removed guard changes the outcome.
 		c := NewORSClient("k", "http://invalid.invalid", "", nil)
-		if _, err := c.Geocode(context.Background(), "   "); err == nil {
-			t.Error("expected error on empty address")
+		_, err := c.Geocode(context.Background(), "   ")
+		if err == nil || !strings.Contains(err.Error(), "empty address") {
+			t.Errorf("want the empty-address guard, got %v", err)
 		}
 	})
 
