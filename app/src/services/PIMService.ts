@@ -14,6 +14,10 @@ import { fetchWithAuth } from './fetchClient';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+// AI generation (descriptions/SEO/image/collateral) legitimately takes 5–60s —
+// well beyond the default 10s fetch timeout — so these calls opt into a longer one.
+const AI_GENERATION_TIMEOUT = 120_000;
+
 export const PIMService = {
     async getProductDetail(id: string): Promise<ProductDetail> {
         const res = await fetchWithAuth(`${API_URL}/api/v1/products/${id}/detail`);
@@ -51,6 +55,7 @@ export const PIMService = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
+            timeout: AI_GENERATION_TIMEOUT,
         });
         if (!res.ok) throw new Error('Failed to generate descriptions');
         return res.json();
@@ -61,6 +66,7 @@ export const PIMService = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
+            timeout: AI_GENERATION_TIMEOUT,
         });
         if (!res.ok) throw new Error('Failed to generate SEO metadata');
         return res.json();
@@ -71,6 +77,7 @@ export const PIMService = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
+            timeout: AI_GENERATION_TIMEOUT,
         });
         if (!res.ok) {
             const msg = await res.text();
@@ -84,6 +91,7 @@ export const PIMService = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
+            timeout: AI_GENERATION_TIMEOUT,
         });
         if (!res.ok) {
             const msg = await res.text();
