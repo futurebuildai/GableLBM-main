@@ -3,17 +3,17 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import type { APIKey, AISettings, EDITradingPartner } from '../../../services/TechAdminService';
+import type { APIKey, AISettings, RoutingSettings, EDITradingPartner } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
-    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw
+    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation
 } from 'lucide';
 
 @customElement('gable-tech-admin')
 export class TechAdminPage extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private activeTab: 'keys' | 'ai' | 'integrations' | 'health' = 'keys';
+    @state() private activeTab: 'keys' | 'ai' | 'routing' | 'integrations' | 'health' = 'keys';
 
     // API Key Manager state
     @state() private keys: APIKey[] = [];
@@ -35,6 +35,15 @@ export class TechAdminPage extends LitElement {
     @state() private aiError: string | null = null;
     @state() private aiSuccess: string | null = null;
 
+    // Routing (OpenRouteService) Settings state
+    @state() private routingSettings: RoutingSettings | null = null;
+    @state() private routingLoading = true;
+    @state() private routingNewKey = '';
+    @state() private routingSaving = false;
+    @state() private routingShowInput = false;
+    @state() private routingError: string | null = null;
+    @state() private routingSuccess: string | null = null;
+
     // EDI state
     @state() private ediPartners: EDITradingPartner[] = [];
     @state() private ediLoading = true;
@@ -44,6 +53,7 @@ export class TechAdminPage extends LitElement {
         super.connectedCallback();
         this._loadKeys();
         this._loadAISettings();
+        this._loadRoutingSettings();
         this._loadEDIPartners();
     }
 
@@ -146,6 +156,47 @@ export class TechAdminPage extends LitElement {
         }
     }
 
+    // --- Routing (OpenRouteService) Settings methods ---
+    private async _loadRoutingSettings() {
+        try {
+            const data = await techAdminService.getRoutingSettings();
+            this.routingSettings = data;
+        } catch (err) {
+            console.error(err);
+        } finally {
+            this.routingLoading = false;
+        }
+    }
+
+    private async _handleSaveORSKey() {
+        if (!this.routingNewKey.trim()) return;
+        this.routingSaving = true;
+        this.routingError = null;
+        this.routingSuccess = null;
+        try {
+            await techAdminService.saveORSKey(this.routingNewKey.trim());
+            this.routingNewKey = '';
+            this.routingShowInput = false;
+            this.routingSuccess = 'Routing key saved. Real route optimization & geocoding are now active.';
+            await this._loadRoutingSettings();
+        } catch (err) {
+            this.routingError = err instanceof Error ? err.message : 'Failed to save';
+        } finally {
+            this.routingSaving = false;
+        }
+    }
+
+    private async _handleDeleteORSKey() {
+        if (!confirm('Remove the admin-configured OpenRouteService key? If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.')) return;
+        try {
+            await techAdminService.deleteORSKey();
+            this.routingSuccess = 'Admin routing key removed.';
+            await this._loadRoutingSettings();
+        } catch (err) {
+            this.routingError = err instanceof Error ? err.message : 'Failed to delete';
+        }
+    }
+
     // --- EDI methods ---
     private async _loadEDIPartners() {
         this.ediLoading = true;
@@ -188,6 +239,7 @@ export class TechAdminPage extends LitElement {
         const tabs = [
             { id: 'keys' as const, label: 'API Keys', iconData: Key },
             { id: 'ai' as const, label: 'AI Settings', iconData: Sparkles },
+            { id: 'routing' as const, label: 'Routing', iconData: Navigation },
             { id: 'integrations' as const, label: 'Integrations', iconData: Globe },
             { id: 'health' as const, label: 'System Health', iconData: Activity },
         ];
@@ -434,6 +486,100 @@ export class TechAdminPage extends LitElement {
         `;
     }
 
+    private _renderRoutingSettingsPanel() {
+        if (this.routingLoading) return html`<div class="text-slate-400 p-8">Loading routing settings...</div>`;
+
+        const features = [
+            { name: 'Route Optimization', description: 'Reorder delivery stops into the shortest-distance run from the dispatch board', iconData: Navigation },
+            { name: 'Address Geocoding', description: 'Resolve delivery addresses to coordinates for mapping and ETAs', iconData: Globe },
+        ];
+
+        return html`
+            <div class="space-y-6">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        ${icon(Navigation, 20, 'w-5 h-5 text-gable-green')}
+                        Route Optimization Provider
+                    </h2>
+                    <p class="text-slate-400 text-sm mt-1">Configure your OpenRouteService API key to enable real route optimization &amp; geocoding. Without a key, the dispatch board falls back to mock distances. No redeploy needed — the key applies within 30 seconds.</p>
+                </div>
+
+                <div class="${cn('border rounded-lg p-6', this.routingSettings?.configured ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-start gap-4">
+                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', this.routingSettings?.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
+                                ${this.routingSettings?.configured ? icon(Check, 20) : icon(AlertCircle, 20)}
+                            </div>
+                            <div>
+                                <h3 class="text-white font-medium">
+                                    ${this.routingSettings?.configured ? 'Real Routing Active' : 'Using Mock Routing'}
+                                </h3>
+                                ${this.routingSettings?.configured ? html`
+                                    <div class="text-sm text-slate-400 mt-1 space-y-1">
+                                        <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${this.routingSettings.key_hint}</code></p>
+                                        <p>Source: <span class="${cn('text-xs font-medium px-2 py-0.5 rounded', this.routingSettings.source === 'admin' ? 'bg-violet-500/15 text-violet-400' : 'bg-zinc-500/15 text-zinc-400')}">${this.routingSettings.source === 'admin' ? 'Admin configured' : 'Environment variable'}</span></p>
+                                    </div>
+                                ` : html`<p class="text-sm text-slate-400 mt-1">Enter your OpenRouteService API key to enable real route optimization and geocoding.</p>`}
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            ${this.routingSettings?.source === 'admin' ? html`
+                                <button @click=${this._handleDeleteORSKey} class="px-4 py-2 border border-red-500/30 text-red-400 rounded hover:bg-red-500/10 transition-colors inline-flex items-center gap-2">
+                                    ${icon(Trash2, 14)} Remove
+                                </button>
+                            ` : nothing}
+                            <button @click=${() => { this.routingShowInput = true; }} ?disabled=${this.routingShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                ${this.routingSettings?.configured ? 'Update Key' : 'Add Key'}
+                            </button>
+                        </div>
+                    </div>
+
+                    ${this.routingShowInput ? html`
+                        <div class="mt-6 pt-6 border-t border-white/5 overflow-hidden space-y-3">
+                            <div class="relative">
+                                ${icon(Shield, 16, 'absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500')}
+                                <input
+                                    type="password"
+                                    .value=${this.routingNewKey}
+                                    @input=${(e: Event) => this.routingNewKey = (e.target as HTMLInputElement).value}
+                                    class="w-full bg-deep-space border border-white/10 rounded px-10 py-2.5 text-white font-mono text-sm placeholder-slate-500 focus:outline-none focus:border-gable-green transition-colors"
+                                    placeholder="5b3ce3597851..."
+                                />
+                            </div>
+                            <div class="flex gap-2 justify-end">
+                                <button @click=${() => { this.routingShowInput = false; this.routingNewKey = ''; }} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5">Cancel</button>
+                                <button @click=${this._handleSaveORSKey} ?disabled=${!this.routingNewKey.trim() || this.routingSaving} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                    Save Key
+                                </button>
+                            </div>
+                            <p class="text-xs text-slate-500 flex items-center gap-1">
+                                ${icon(Shield, 12)} Your key is stored securely in the database and never exposed in API responses. Get a free key at openrouteservice.org.
+                            </p>
+                        </div>
+                    ` : nothing}
+                </div>
+
+                ${this.routingError ? html`<div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">${this.routingError}</div>` : nothing}
+                ${this.routingSuccess ? html`<div class="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-sm text-emerald-400">${this.routingSuccess}</div>` : nothing}
+
+                <div>
+                    <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Features Powered by Routing</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${features.map((f) => html`
+                            <div class="${cn('border rounded-lg p-4 transition-colors', this.routingSettings?.configured ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
+                                <div class="flex items-center gap-2 mb-2">
+                                    ${icon(f.iconData, 16, cn('w-4 h-4', this.routingSettings?.configured ? 'text-gable-green' : 'text-slate-600'))}
+                                    <span class="text-white text-sm font-medium">${f.name}</span>
+                                </div>
+                                <p class="text-xs text-slate-500">${f.description}</p>
+                            </div>
+                        `)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     private _renderIntegrations() {
         const integrations = [
             { name: 'Run Payments', description: 'Secure payment processing for card-present and online transactions. Preferred Partner.', iconData: Activity, connected: false },
@@ -564,6 +710,7 @@ export class TechAdminPage extends LitElement {
                 <div class="max-w-5xl">
                     ${this.activeTab === 'keys' ? this._renderAPIKeyManager() : nothing}
                     ${this.activeTab === 'ai' ? this._renderAISettingsPanel() : nothing}
+                    ${this.activeTab === 'routing' ? this._renderRoutingSettingsPanel() : nothing}
                     ${this.activeTab === 'integrations' ? this._renderIntegrations() : nothing}
                     ${this.activeTab === 'health' ? html`
                         <div class="bg-slate-steel border border-white/5 rounded-lg p-12 text-center">
