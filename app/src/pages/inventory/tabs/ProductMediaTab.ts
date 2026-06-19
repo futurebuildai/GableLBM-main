@@ -24,13 +24,34 @@ export class GableProductMediaTab extends LitElement {
         this.generating = true;
         this.error = null;
         try {
+            // Returns 202 immediately with a placeholder row (status "generating").
             await PIMService.generateImage(this.productId, { style: this._imageStyle, prompt: this.prompt });
-            this.dispatchEvent(new CustomEvent('media-update', { bubbles: true, composed: true }));
+            // The image is produced in the background — poll until the row settles.
+            await this._pollUntilSettled();
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Image generation failed';
             this.error = msg;
         } finally {
             this.generating = false;
+            // Final authoritative sync with the parent (re-fetches product detail).
+            this.dispatchEvent(new CustomEvent('media-update', { bubbles: true, composed: true }));
+        }
+    }
+
+    // _pollUntilSettled refreshes the media list until no row is still "generating"
+    // (or a safety deadline), driving the gallery render off the latest server state.
+    private async _pollUntilSettled() {
+        const deadline = Date.now() + 120_000;
+        while (Date.now() < deadline) {
+            const media = await PIMService.listMedia(this.productId);
+            this.media = media;
+            if (!media.some(m => m.status === 'generating')) {
+                if (media.some(m => m.status === 'failed')) {
+                    this.error = 'Image generation failed — please try again.';
+                }
+                return;
+            }
+            await new Promise(r => setTimeout(r, 2500));
         }
     }
 
@@ -117,17 +138,29 @@ export class GableProductMediaTab extends LitElement {
                         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                             ${this.media.map(m => html`
                                 <div class="relative group bg-zinc-900 border rounded-xl overflow-hidden ${m.is_primary ? 'border-gable-green/50 ring-1 ring-gable-green/30' : 'border-white/10'}">
-                                    <div class="aspect-square">
-                                        <img src="${m.url}" alt="${m.alt_text}" class="w-full h-full object-cover" />
+                                    <div class="aspect-square flex items-center justify-center">
+                                        ${m.status === 'generating'
+                                            ? html`<div class="flex flex-col items-center gap-2 text-zinc-500">
+                                                ${icon(Loader2, 28, 'w-7 h-7 animate-spin text-amber-400')}
+                                                <span class="text-xs">Generating…</span>
+                                            </div>`
+                                            : m.status === 'failed'
+                                            ? html`<div class="flex flex-col items-center gap-2 text-rose-400">
+                                                ${icon(AlertTriangle, 28, 'w-7 h-7')}
+                                                <span class="text-xs">Generation failed</span>
+                                            </div>`
+                                            : html`<img src="${m.url}" alt="${m.alt_text}" class="w-full h-full object-cover" />`
+                                        }
                                     </div>
                                     ${m.is_primary ? html`
                                         <div class="absolute top-2 left-2 px-2 py-0.5 bg-gable-green/80 text-black text-xs font-bold rounded">Primary</div>
                                     ` : nothing}
                                     <div class="absolute top-2 right-2 px-2 py-0.5 bg-black/60 text-zinc-300 text-xs rounded">${m.media_type}</div>
-                                    <!-- Hover Actions -->
+                                    <!-- Hover Actions (settled rows only) -->
+                                    ${m.status !== 'generating' ? html`
                                     <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <div class="flex items-center justify-end gap-2">
-                                            ${!m.is_primary ? html`
+                                            ${!m.is_primary && m.status !== 'failed' ? html`
                                                 <button @click=${() => this._handleSetPrimary(m.id)} class="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-amber-400" title="Set as Primary">
                                                     ${icon(Star, 16, 'w-4 h-4')}
                                                 </button>
@@ -137,6 +170,7 @@ export class GableProductMediaTab extends LitElement {
                                             </button>
                                         </div>
                                     </div>
+                                    ` : nothing}
                                 </div>
                             `)}
                         </div>
