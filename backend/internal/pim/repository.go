@@ -162,10 +162,13 @@ func (r *PostgresRepository) CreateMedia(ctx context.Context, m *PIMMedia) error
 // UpdateMediaResult finalizes an async-generated media row: it sets the data URI,
 // model, style, and status ('ready' or 'failed'). On 'ready' it stamps generated_at.
 func (r *PostgresRepository) UpdateMediaResult(ctx context.Context, id uuid.UUID, url, genModel, genStyle, status string) error {
+	// $5 is cast to text in both uses so Postgres deduces a single consistent type
+	// for the parameter (status = $5 would infer varchar, $5 = 'ready' would infer
+	// text → SQLSTATE 42P08 "inconsistent types deduced").
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		UPDATE pim_media
-		SET url = $2, gen_model = $3, gen_style = $4, status = $5,
-		    generated_at = CASE WHEN $5 = 'ready' THEN NOW() ELSE generated_at END,
+		SET url = $2, gen_model = $3, gen_style = $4, status = $5::text,
+		    generated_at = CASE WHEN $5::text = 'ready' THEN NOW() ELSE generated_at END,
 		    updated_at = NOW()
 		WHERE id = $1`,
 		id, url, genModel, genStyle, status)
