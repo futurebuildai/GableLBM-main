@@ -425,15 +425,18 @@ func main() {
 	deliveryRepo := delivery.NewRepository(db)
 	deliverySvc := delivery.NewService(deliveryRepo)
 
-	// Wire OpenRouteService for route optimization + geocoding if a key is set.
-	// Keyless: optimization falls back to a deterministic mock and delivery
-	// addresses are mock-geocoded, so the demo map still populates.
-	if cfg.ORSAPIKey != "" {
-		orsClient := delivery.NewORSClient(cfg.ORSAPIKey, cfg.ORSBaseURL, cfg.ORSProfile, logger)
-		deliverySvc.WithRouting(orsClient, logger)
+	// Wire OpenRouteService for route optimization + geocoding. The client reads
+	// its key dynamically (DB system_settings → env fallback), so an admin can
+	// enable real routing at runtime via Tech Admin > Routing without a restart.
+	// Until a key is set, optimization falls back to a deterministic mock and
+	// delivery addresses are mock-geocoded, so the demo map still populates.
+	orsKeyStore := ai.NewKeyStore(db.Pool, "openrouteservice_api_key", cfg.ORSAPIKey)
+	orsClient := delivery.NewORSClientWithKeyStore(orsKeyStore.Get, cfg.ORSBaseURL, cfg.ORSProfile, logger)
+	deliverySvc.WithRouting(orsClient, logger)
+	if orsKeyStore.IsConfigured(context.Background()) {
 		logger.Info("OpenRouteService routing + geocoding enabled", "profile", cfg.ORSProfile)
 	} else {
-		logger.Warn("OPENROUTESERVICE_API_KEY not set — using mock route optimization + geocoding")
+		logger.Warn("OpenRouteService key not set — mock routing until configured via Tech Admin > Routing")
 	}
 
 	deliveryHandler := delivery.NewHandler(deliverySvc)
@@ -502,6 +505,7 @@ func main() {
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
 	techAdminHandler.WithAIKeyStore(aiKeyStore)
 	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
+	techAdminHandler.WithORSKeyStore(orsKeyStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Portal Module (Sovereign Dealer Portal)

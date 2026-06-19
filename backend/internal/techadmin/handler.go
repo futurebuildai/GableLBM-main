@@ -24,6 +24,7 @@ type Handler struct {
 	service      *Service
 	aiKeyStore   settingStore // openrouter_api_key
 	baseURLStore settingStore // openrouter_base_url
+	orsKeyStore  settingStore // openrouteservice_api_key
 }
 
 func NewHandler(service *Service) *Handler {
@@ -48,6 +49,14 @@ func (h *Handler) WithAIBaseURLStore(ks *ai.KeyStore) {
 	}
 }
 
+// WithORSKeyStore sets the OpenRouteService API key store (route optimization +
+// geocoding). Key-only — no base URL override.
+func (h *Handler) WithORSKeyStore(ks *ai.KeyStore) {
+	if ks != nil {
+		h.orsKeyStore = ks
+	}
+}
+
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
 		if len(roleGuard) > 0 && roleGuard[0] != nil {
@@ -65,6 +74,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/admin/settings/ai", guard(h.GetAISettings))
 	mux.HandleFunc("PUT /api/v1/admin/settings/ai", guard(h.SaveAISettings))
 	mux.HandleFunc("DELETE /api/v1/admin/settings/ai", guard(h.DeleteAISettings))
+	mux.HandleFunc("GET /api/v1/admin/settings/routing", guard(h.GetRoutingSettings))
+	mux.HandleFunc("PUT /api/v1/admin/settings/routing", guard(h.SaveRoutingSettings))
+	mux.HandleFunc("DELETE /api/v1/admin/settings/routing", guard(h.DeleteRoutingSettings))
 }
 
 type CreateKeyRequest struct {
@@ -250,6 +262,78 @@ func (h *Handler) DeleteAISettings(w http.ResponseWriter, r *http.Request) {
 			httputil.RespondError(w, r, "failed to delete base URL", http.StatusInternalServerError, err)
 			return
 		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Routing (OpenRouteService) Settings ---
+// Key-only; reuses AISettingsResponse for the {configured, source, key_hint} shape.
+
+func (h *Handler) GetRoutingSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if h.orsKeyStore == nil {
+		json.NewEncoder(w).Encode(AISettingsResponse{Source: "none"})
+		return
+	}
+
+	ctx := r.Context()
+	key := h.orsKeyStore.Get(ctx)
+	resp := AISettingsResponse{Configured: key != ""}
+	if key != "" {
+		if len(key) > 12 {
+			resp.KeyHint = key[:10] + "..." + key[len(key)-4:]
+		} else {
+			resp.KeyHint = "****"
+		}
+		if h.orsKeyStore.HasDBOverride(ctx) {
+			resp.Source = "admin"
+		} else {
+			resp.Source = "env"
+		}
+	} else {
+		resp.Source = "none"
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) SaveRoutingSettings(w http.ResponseWriter, r *http.Request) {
+	if h.orsKeyStore == nil {
+		httputil.RespondError(w, r, "routing key store not available", http.StatusInternalServerError, nil)
+		return
+	}
+
+	var body struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if body.APIKey == "" {
+		httputil.RespondError(w, r, "api_key is required", http.StatusBadRequest, nil)
+		return
+	}
+
+	if err := h.orsKeyStore.Set(r.Context(), body.APIKey); err != nil {
+		httputil.RespondError(w, r, "failed to save routing API key", http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+func (h *Handler) DeleteRoutingSettings(w http.ResponseWriter, r *http.Request) {
+	if h.orsKeyStore == nil {
+		httputil.RespondError(w, r, "routing key store not available", http.StatusInternalServerError, nil)
+		return
+	}
+
+	if err := h.orsKeyStore.Delete(r.Context()); err != nil {
+		httputil.RespondError(w, r, "failed to delete routing API key", http.StatusInternalServerError, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

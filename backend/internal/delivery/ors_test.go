@@ -275,3 +275,36 @@ func TestGeocode_ErrorPaths(t *testing.T) {
 		}
 	})
 }
+
+// TestORSClient_IsConfigured guards the runtime-key gate: a client is "configured"
+// only when its keyFn resolves a non-empty key, so the service can flip between
+// mock and real routing without a redeploy when the key is set via Tech Admin.
+func TestORSClient_IsConfigured(t *testing.T) {
+	ctx := context.Background()
+
+	// nil keyFn (defensive) → not configured
+	if (&ORSClient{}).IsConfigured(ctx) {
+		t.Error("IsConfigured should be false when keyFn is nil")
+	}
+
+	// empty key → not configured
+	if NewORSClient("", "", "", nil).IsConfigured(ctx) {
+		t.Error("IsConfigured should be false for an empty key")
+	}
+
+	// non-empty key → configured
+	if !NewORSClient("5b3ce3597851...", "", "", nil).IsConfigured(ctx) {
+		t.Error("IsConfigured should be true for a non-empty key")
+	}
+
+	// keystore-backed: resolves live, so a key that appears after construction flips it on
+	var key string
+	c := NewORSClientWithKeyStore(func(context.Context) string { return key }, "", "", nil)
+	if c.IsConfigured(ctx) {
+		t.Error("IsConfigured should be false before the keystore returns a key")
+	}
+	key = "runtime-key"
+	if !c.IsConfigured(ctx) {
+		t.Error("IsConfigured should become true once the keystore resolves a key")
+	}
+}

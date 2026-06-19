@@ -24,6 +24,12 @@ export interface AISettings {
     base_url?: string;
 }
 
+export interface RoutingSettings {
+    configured: boolean;
+    source: 'admin' | 'env' | 'none';
+    key_hint?: string;
+}
+
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys`);
@@ -84,6 +90,33 @@ export const techAdminService = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete API key');
+    },
+
+    // --- Routing (OpenRouteService) Settings ---
+
+    async getRoutingSettings(): Promise<RoutingSettings> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`);
+        if (!response.ok) throw new Error('Failed to fetch routing settings');
+        return response.json();
+    },
+
+    async saveORSKey(apiKey: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey }),
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || 'Failed to save routing API key');
+        }
+    },
+
+    async deleteORSKey(): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('Failed to delete routing API key');
     },
 };
 
