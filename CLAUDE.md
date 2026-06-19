@@ -192,6 +192,22 @@ it for decisions — derive live.
   edits (names, emails, prices) overwrite existing demo rows on redeploy. `ON CONFLICT DO
   NOTHING` will silently ignore future edits — verify the upsert names every column you change.
 
+### External services are OSS-migrated (AI = OpenRouter, routing = OpenRouteService)
+The proprietary external-service layer has been replaced with single-key open options — landed on
+`master` + `community`, live on demo. Full as-built record in
+[`docs/oss-migration-handoff.md`](docs/oss-migration-handoff.md). The load-bearing bits:
+- **AI:** one `openrouter_api_key` (+ optional `openrouter_base_url`) → one OpenAI-compatible
+  `ai.Client` (`backend/internal/ai/openrouter.go`) for text + vision OCR + image gen. No more
+  Anthropic/Gemini/Stability clients. Keys are runtime-settable in **Tech Admin → AI**.
+- **Image gen** is **asynchronous** — `pim.GenerateImage` returns `202` + a `pim_media` row with
+  `status:"generating"` and finalizes in a detached goroutine; frontend polls. Default model
+  `black-forest-labs/flux.2-pro`; FLUX requests must send `modalities:["image"]` only. Sync gen
+  500s on the demo's ~24s gateway — keep it async.
+- **Routing:** OpenRouteService (VROOM + Pelias, `driving-hgv`), key runtime-settable in
+  **Tech Admin → Routing**; flips mock ↔ real per request, no redeploy. `[lng,lat]` ordering
+  everywhere (reverse of Google). Single-vehicle-per-call (3-vehicle free-tier cap).
+- Production self-hosting decisions live in `docs/production-external-services-roadmap.md`.
+
 ## Detailed Specs
 See `docs/architecture.md`, `docs/design-system.md`, and `docs/database-erd.md` for deeper documentation.
 

@@ -1,9 +1,21 @@
 # OSS Migration Plan — Single-Key AI (OpenRouter) + Open Routing (OpenRouteService)
 
-**Status:** Proposed (planning only — no code written yet)
-**Target branch / repo:** `community` (the open, fork-ready, demo-facing repo)
+**Status:** ✅ **IMPLEMENTED & SHIPPED** (both tracks landed on `master` + `community`, live on demo) — this doc is now the *as-built reference / rationale record*. For the landed state, what changed vs. this plan, and what's still pending, read [`oss-migration-handoff.md`](./oss-migration-handoff.md).
+**Target branch / repo:** `community` (the open, fork-ready, demo-facing repo) — also mirrored to `master`
 **Audience:** maintainers
 **Last updated:** 2026-06-18
+
+> **As-built deltas from this plan** (the plan was followed closely; these are the notable
+> divergences, all detailed in the handoff):
+> - Image default is **`black-forest-labs/flux.2-pro`**, and image gen is **asynchronous**
+>   (202 + placeholder row + background goroutine + frontend polling) because synchronous FLUX
+>   exceeded the demo's ~24s gateway timeout. New `pim_media.status` column + migration.
+> - FLUX requests send `modalities:["image"]` only (image-only models reject `["image","text"]`).
+> - The ORS key is **runtime-settable in Tech Admin → Routing** (a second keystore, like the AI
+>   key) — flips mock ↔ real per request with no redeploy. A dispatch **Optimize Route** button
+>   was added (not in the original R4 scope).
+> - Geocoder uses free-text Pelias `/geocode/search` (not `/structured`) — `customers.address`
+>   is a single text column.
 
 > A separate, more production-grade decision (self-hosted routing/geocoding, AI hosting at
 > scale, data residency) is deliberately **out of scope here** and lives in
