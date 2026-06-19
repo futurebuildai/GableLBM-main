@@ -43,12 +43,11 @@ const (
 
 	// Default model slugs. Verified against GET https://openrouter.ai/api/v1/models
 	// on 2026-06-18. All are runtime-overridable via the ai.model.* system_settings
-	// keys (the catalog churns — FLUX, for instance, was no longer routed as of
-	// this date, which is why the image default is a generally-available slug).
+	// keys (the catalog churns — re-verify before pinning new ones).
 	defaultModelText   = "deepseek/deepseek-chat"
 	defaultModelVision = "qwen/qwen3-vl-235b-a22b-instruct"
 	defaultModelCheap  = "meta-llama/llama-3.1-8b-instruct"
-	defaultModelImage  = "google/gemini-3.1-flash-image"
+	defaultModelImage  = "black-forest-labs/flux.2-pro" // open-weight FLUX.2, best-in-class image gen
 
 	// defaultPDFEngine is the file-parser engine used when a PDF is uploaded.
 	// mistral-ocr handles scanned documents and images (the freight-invoice case).
