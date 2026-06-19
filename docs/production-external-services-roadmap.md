@@ -141,6 +141,13 @@ config change — *except* the OpenRouter-only extensions (`plugins` file-parser
 a self-hosted target degrades gracefully (e.g. self-host its own OCR/PDF + image-gen path).
 
 ### 2.2 Production concerns to specify
+- **Image generation must be async (validated 2026-06-19 on the demo):** synchronous FLUX.2 Pro
+  image gen (~8–24s end-to-end, incl. the multi-MB base64 payload + DB write) reliably exceeds the
+  demo's ~24s App Platform / Cloudflare gateway timeout → HTTP 504, even though the model itself
+  returns in ~8–13s. Text + vision (≤10s) are unaffected. Production fix: generate images in a
+  background job and have the client poll for the result (or stream), rather than blocking the
+  request. Stopgaps that fit under the gateway but don't remove the limit: a faster model
+  (`flux.2-klein-4b`) or a smaller `image_config` size.
 - **Data residency / PII:** freight invoices and material lists contain customer names,
   addresses, pricing. Decide per-tenant whether documents may transit a third-party model;
   offer a self-hosted inference option for dealers that require it.

@@ -81,6 +81,7 @@ export const PurchaseOrderService = {
         const response = await fetchWithAuth(`${API_URL}/api/v1/purchase-orders/${poId}/freight`, {
             method: 'POST',
             body: formData,
+            timeout: 120_000, // AI vision OCR of a freight invoice can take 10–60s
         });
         if (!response.ok) {
             const errorText = await response.text();
