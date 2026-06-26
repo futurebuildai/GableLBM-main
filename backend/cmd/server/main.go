@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/demoseed"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/gl"
@@ -382,6 +383,19 @@ func main() {
 	orderHandler := order.NewHandler(orderSvc)
 	orderHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales"))
 
+	// Demo fresh-data injection (COMM-1 pillar 1). demoSeedSvc is the single
+	// writer for demo orders — also reused by the integrations demo-seed endpoint
+	// below. The nightly scheduler is disabled by default; an operator activates
+	// it with demo_seed.enabled=true in system_settings. Stopped in graceful
+	// shutdown (step 3.55) before the DB pool closes.
+	demoSeedSvc := demoseed.NewService(db, orderSvc)
+	demoSeedScheduler := demoseed.NewScheduler(demoSeedSvc)
+	if err := demoSeedScheduler.Start(context.Background()); err != nil {
+		logger.Error("demo-seed scheduler failed to start", "error", err)
+	}
+	demoSeedHandler := demoseed.NewHandler(demoSeedSvc)
+	demoSeedHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
 
@@ -643,7 +657,7 @@ func main() {
 			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
 		}
 	}
-	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, deliverySvc, staffSvc, integrationAPIKey)
+	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, deliverySvc, staffSvc, demoSeedSvc, integrationAPIKey)
 	integrationHandler.RegisterRoutes(mux)
 
 	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch
@@ -823,6 +837,12 @@ func main() {
 	logger.Info("Shutdown step 3.5/4: stopping reorder scheduler...")
 	reorderScheduler.Stop()
 	logger.Info("Shutdown step 3.5/4: reorder scheduler stopped")
+
+	// Step 3.55: Stop the demo fresh-data injection scheduler. In-flight ticks
+	// finish (finalizing their demo_seed_runs row) before the pool closes.
+	logger.Info("Shutdown step 3.55/4: stopping demo-seed scheduler...")
+	demoSeedScheduler.Stop()
+	logger.Info("Shutdown step 3.55/4: demo-seed scheduler stopped")
 
 	// Step 3.6: Stop the reporting scheduler
 	logger.Info("Shutdown step 3.6/4: stopping reporting scheduler...")

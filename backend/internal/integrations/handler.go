@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/demoseed"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
@@ -31,10 +31,11 @@ type Handler struct {
 	productSvc  *product.Service
 	deliverySvc *delivery.Service
 	staffSvc    *staff.Service
+	demoSeed    *demoseed.Service
 	apiKey      string
 }
 
-func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, deliverySvc *delivery.Service, staffSvc *staff.Service, apiKey string) *Handler {
+func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, deliverySvc *delivery.Service, staffSvc *staff.Service, demoSeed *demoseed.Service, apiKey string) *Handler {
 	return &Handler{
 		db:          db,
 		pricingSvc:  pricingSvc,
@@ -44,6 +45,7 @@ func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Se
 		productSvc:  productSvc,
 		deliverySvc: deliverySvc,
 		staffSvc:    staffSvc,
+		demoSeed:    demoSeed,
 		apiKey:      apiKey,
 	}
 }
@@ -796,30 +798,17 @@ type SeedOrdersResponse struct {
 	Orders []SeededOrderResponse `json:"orders"`
 }
 
-// kelownaDeliveryPoints are sensible Okanagan-area delivery coordinates assigned
-// round-robin to seeded orders so stops scatter realistically on AI_LM's map.
-var kelownaDeliveryPoints = [][2]float64{
-	{49.8888, -119.4597}, // Spall Rd, Kelowna
-	{49.9201, -119.3950}, // UBCO / Summit Pkwy
-	{50.0490, -119.4060}, // Lake Country
-	{49.8350, -119.5760}, // Mission Hill, West Kelowna
-	{49.8330, -119.6190}, // Boucherie Rd, West Kelowna
-	{49.8880, -119.4960}, // Bernard Ave, Kelowna
-	{49.9050, -119.4900}, // Knox Mountain Dr, Kelowna
-	{49.7730, -119.7280}, // Beach Ave, Peachland
-	{50.2530, -119.2750}, // Polson Dr, Vernon
-	{49.6000, -119.6800}, // Prairie Valley Rd, Summerland
-}
-
 // SeedDemoOrders creates a batch of future-dated CONFIRMED lumber orders for
 // existing demo customers so AI_LM has upcoming deliveries to plan. Each order
 // gets dimensioned lumber lines (digital-twin geometry), a geolocated delivery
-// stop, and a scheduled_delivery_date. Reuses order.Service create+confirm so
-// inventory allocation stays consistent. Idempotent: a (customer, date) that
-// already has a CONFIRMED order is skipped. Response shape mirrors AI_LM's
-// gable.SeedResult. Body is optional ({date, count}); empty date = tomorrow.
+// stop, and a scheduled_delivery_date. The actual order creation is delegated to
+// demoseed.Service — the single demo-order writer shared with the nightly
+// fresh-data injection cron — so create+confirm/idempotency stay consistent.
+// Idempotent: a (customer, date) that already has a CONFIRMED order is skipped.
+// Response shape mirrors AI_LM's gable.SeedResult. Body is optional
+// ({date, count}); empty date = tomorrow.
 func (h *Handler) SeedDemoOrders(w http.ResponseWriter, r *http.Request) {
-	if h.orderSvc == nil {
+	if h.orderSvc == nil || h.demoSeed == nil {
 		writeError(w, http.StatusServiceUnavailable, "order service not configured")
 		return
 	}
@@ -843,109 +832,11 @@ func (h *Handler) SeedDemoOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	dateStr := schedDate.Format("2006-01-02")
 
-	// Pick lumber products that carry digital-twin geometry (migration 073) so
-	// the seeded lines render true-to-scale; fall back to any product so the
-	// seed still works on a catalog without dimensions.
-	lumber, err := h.seedLumberProducts(ctx)
-	if err != nil || len(lumber) == 0 {
-		slog.Error("seed-orders: no products available", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "no products available to seed orders")
+	// Delegate to the single demo-order writer (shared with the nightly cron).
+	if _, err := h.demoSeed.SeedForDate(ctx, schedDate, req.Count); err != nil {
+		slog.Error("seed-orders: failed to seed demo orders", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to seed demo orders")
 		return
-	}
-
-	// Load existing demo customers (deterministic order for stable selection).
-	custRows, err := h.db.Pool.Query(ctx, `SELECT id, COALESCE(name, ''), COALESCE(address, '') FROM customers ORDER BY name`)
-	if err != nil {
-		slog.Error("seed-orders: failed to query customers", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load customers")
-		return
-	}
-	type seedCust struct {
-		id      uuid.UUID
-		name    string
-		address string
-	}
-	var customers []seedCust
-	for custRows.Next() {
-		var c seedCust
-		if err := custRows.Scan(&c.id, &c.name, &c.address); err != nil {
-			custRows.Close()
-			slog.Error("seed-orders: failed to scan customer", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to read customers")
-			return
-		}
-		customers = append(customers, c)
-	}
-	custRows.Close()
-	if len(customers) == 0 {
-		writeError(w, http.StatusServiceUnavailable, "no demo customers to seed orders for")
-		return
-	}
-
-	limit := req.Count
-	if limit <= 0 || limit > len(customers) {
-		limit = len(customers)
-	}
-
-	for i := 0; i < limit; i++ {
-		c := customers[i]
-
-		// Idempotency: skip a customer that already has a CONFIRMED order on this
-		// scheduled date (a leftover DRAFT from a failed confirm does not block a retry).
-		var exists bool
-		if err := h.db.Pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM orders WHERE customer_id = $1 AND scheduled_delivery_date = $2::date AND status = 'CONFIRMED')`,
-			c.id, dateStr,
-		).Scan(&exists); err != nil {
-			slog.Warn("seed-orders: idempotency check failed", "customer_id", c.id, "error", err)
-			continue
-		}
-		if exists {
-			continue
-		}
-
-		// 2–4 dimensioned lumber lines per order.
-		numLines := 2 + rand.Intn(3)
-		var lines []order.OrderLineRequest
-		for j := 0; j < numLines; j++ {
-			p := lumber[rand.Intn(len(lumber))]
-			qty := float64(10 + rand.Intn(40))
-			lines = append(lines, order.OrderLineRequest{
-				ProductID: p.id,
-				Quantity:  qty,
-				PriceEach: int64(math.Round(p.price * 100)),
-			})
-		}
-
-		sched := schedDate
-		o, err := h.orderSvc.CreateOrder(ctx, order.CreateOrderRequest{
-			CustomerID:            c.id,
-			Lines:                 lines,
-			ScheduledDeliveryDate: &sched,
-		})
-		if err != nil {
-			slog.Warn("seed-orders: failed to create order", "customer_id", c.id, "error", err)
-			continue
-		}
-		// Confirm so AI_LM's CONFIRMED-only pull sees it. A confirm failure (e.g.
-		// over credit limit → ON_HOLD) is logged and skipped, not fatal.
-		if err := h.orderSvc.ConfirmOrder(ctx, o.ID); err != nil {
-			slog.Warn("seed-orders: failed to confirm order", "order_id", o.ID, "customer_id", c.id, "error", err)
-			continue
-		}
-
-		// Geolocated delivery stop (route_id NULL — unrouted, awaiting AI_LM
-		// dispatch) so the order carries coordinates on the orders pull.
-		pt := kelownaDeliveryPoints[i%len(kelownaDeliveryPoints)]
-		lat := pt[0] + (rand.Float64()-0.5)*0.02
-		lng := pt[1] + (rand.Float64()-0.5)*0.02
-		if _, err := h.db.Pool.Exec(ctx,
-			`INSERT INTO deliveries (order_id, stop_sequence, status, latitude, longitude, delivery_instructions)
-			 VALUES ($1, 0, 'PENDING', $2, $3, $4)`,
-			o.ID, lat, lng, "AI_LM demo upcoming delivery",
-		); err != nil {
-			slog.Warn("seed-orders: failed to create delivery stop", "order_id", o.ID, "error", err)
-		}
 	}
 
 	// Build the result from ALL CONFIRMED orders on this date (newly created +
@@ -978,46 +869,6 @@ func (h *Handler) SeedDemoOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// seedProduct is a catalog product used to build seeded order lines.
-type seedProduct struct {
-	id    uuid.UUID
-	price float64
-}
-
-// seedLumberProducts returns lumber SKUs that carry digital-twin geometry
-// (length/width/height from migration 073), preferring dimensioned products so
-// AI_LM's Load Builder renders true-to-scale twins. Falls back to any lumber,
-// then any product, so the seed works on a catalog without dimensions.
-func (h *Handler) seedLumberProducts(ctx context.Context) ([]seedProduct, error) {
-	queries := []string{
-		`SELECT id, COALESCE(base_price, 0) FROM products
-		 WHERE length_in IS NOT NULL AND width_in IS NOT NULL AND height_in IS NOT NULL
-		 ORDER BY sku LIMIT 20`,
-		`SELECT id, COALESCE(base_price, 0) FROM products WHERE category = 'Lumber' ORDER BY sku LIMIT 20`,
-		`SELECT id, COALESCE(base_price, 0) FROM products ORDER BY sku LIMIT 20`,
-	}
-	for _, q := range queries {
-		rows, err := h.db.Pool.Query(ctx, q)
-		if err != nil {
-			return nil, err
-		}
-		var out []seedProduct
-		for rows.Next() {
-			var p seedProduct
-			if err := rows.Scan(&p.id, &p.price); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			out = append(out, p)
-		}
-		rows.Close()
-		if len(out) > 0 {
-			return out, nil
-		}
-	}
-	return nil, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
