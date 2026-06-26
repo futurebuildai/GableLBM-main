@@ -81,9 +81,10 @@ func (s *Service) CreateOrder(ctx context.Context, req CreateOrderRequest) (*Ord
 	}
 
 	o := &Order{
-		CustomerID: req.CustomerID,
-		QuoteID:    req.QuoteID,
-		Status:     StatusDraft,
+		CustomerID:            req.CustomerID,
+		QuoteID:               req.QuoteID,
+		Status:                StatusDraft,
+		ScheduledDeliveryDate: req.ScheduledDeliveryDate,
 	}
 
 	// Auto-populate salesperson from the customer's assigned rep

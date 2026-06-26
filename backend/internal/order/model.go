@@ -27,6 +27,11 @@ type Order struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 
+	// ScheduledDeliveryDate is the FUTURE date the order is planned to be
+	// delivered. Nullable. AI_LM pulls orders by this date for route planning
+	// (GET /api/integration/orders?date=).
+	ScheduledDeliveryDate *time.Time `json:"scheduled_delivery_date,omitempty"`
+
 	// Salesperson
 	SalespersonID   *uuid.UUID `json:"salesperson_id,omitempty"`
 	SalespersonName string     `json:"salesperson_name,omitempty"`
@@ -60,6 +65,10 @@ type CreateOrderRequest struct {
 	CustomerID uuid.UUID          `json:"customer_id"`
 	QuoteID    *uuid.UUID         `json:"quote_id"`
 	Lines      []OrderLineRequest `json:"lines"`
+	// ScheduledDeliveryDate optionally stamps the order's planned delivery date
+	// (nullable). Used by the integration demo-seed path to create future-dated
+	// orders for AI_LM dispatch planning.
+	ScheduledDeliveryDate *time.Time `json:"scheduled_delivery_date,omitempty"`
 }
 
 type OrderLineRequest struct {
