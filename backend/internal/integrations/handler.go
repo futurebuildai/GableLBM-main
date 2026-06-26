@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -55,6 +56,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/integration/drivers", h.authMiddleware(h.ListDrivers))
 	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
 	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
+	mux.HandleFunc("POST /api/integration/demo/seed-orders", h.authMiddleware(h.SeedDemoOrders))
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -465,13 +467,16 @@ type IntegrationOrderLine struct {
 }
 
 // IntegrationOrderResponse is an order plus its line items and (when a delivery
-// stop has been geocoded) its destination coordinates.
+// stop has been geocoded) its destination coordinates. Field names mirror
+// AI_LM's gable.Order (customer_name, address, latitude, longitude, lines).
 type IntegrationOrderResponse struct {
-	ID        string                 `json:"id"`
-	Status    string                 `json:"status"`
-	Latitude  *float64               `json:"latitude,omitempty"`
-	Longitude *float64               `json:"longitude,omitempty"`
-	Lines     []IntegrationOrderLine `json:"lines"`
+	ID           string                 `json:"id"`
+	Status       string                 `json:"status"`
+	CustomerName string                 `json:"customer_name,omitempty"`
+	Address      string                 `json:"address,omitempty"`
+	Latitude     *float64               `json:"latitude,omitempty"`
+	Longitude    *float64               `json:"longitude,omitempty"`
+	Lines        []IntegrationOrderLine `json:"lines"`
 }
 
 // ListOrdersForDate returns orders (optionally filtered by ?status= and ?date=)
@@ -480,14 +485,25 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	date := r.URL.Query().Get("date")
 
+	// Coordinates come from a LATERAL pick of a single geocoded delivery stop
+	// per order — a plain JOIN to deliveries would multiply the line-item rows
+	// once AI_LM writes a route back (a second delivery row appears for the
+	// order). The date filter matches the SCHEDULED delivery date, falling back
+	// to created_at when an order has none (legacy/non-scheduled orders).
 	sqlQuery := `
-		SELECT o.id, o.status,
+		SELECT o.id, o.status, COALESCE(c.name, ''), COALESCE(c.address, ''),
 		       ol.product_id, p.sku, ol.quantity, COALESCE(p.weight_lbs, 0),
 		       d.latitude, d.longitude
 		FROM orders o
 		JOIN order_lines ol ON ol.order_id = o.id
 		JOIN products p ON p.id = ol.product_id
-		LEFT JOIN deliveries d ON d.order_id = o.id
+		LEFT JOIN customers c ON c.id = o.customer_id
+		LEFT JOIN LATERAL (
+		    SELECT latitude, longitude FROM deliveries
+		    WHERE order_id = o.id AND latitude IS NOT NULL AND longitude IS NOT NULL
+		    ORDER BY created_at
+		    LIMIT 1
+		) d ON TRUE
 		WHERE 1=1`
 	args := []interface{}{}
 	argIdx := 1
@@ -497,7 +513,7 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 		argIdx++
 	}
 	if date != "" {
-		sqlQuery += fmt.Sprintf(" AND o.created_at::date = $%d::date", argIdx)
+		sqlQuery += fmt.Sprintf(" AND COALESCE(o.scheduled_delivery_date, o.created_at::date) = $%d::date", argIdx)
 		args = append(args, date)
 		argIdx++
 	}
@@ -515,18 +531,18 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 	var order_order []string
 	for rows.Next() {
 		var (
-			orderID, orderStatus, productID, sku string
-			qty, weight                          float64
-			lat, lng                             *float64
+			orderID, orderStatus, custName, custAddr, productID, sku string
+			qty, weight                                             float64
+			lat, lng                                                *float64
 		)
-		if err := rows.Scan(&orderID, &orderStatus, &productID, &sku, &qty, &weight, &lat, &lng); err != nil {
+		if err := rows.Scan(&orderID, &orderStatus, &custName, &custAddr, &productID, &sku, &qty, &weight, &lat, &lng); err != nil {
 			slog.Error("failed to scan order row", "error", err, "method", r.Method, "path", r.URL.Path)
 			writeError(w, http.StatusInternalServerError, "failed to read order data")
 			return
 		}
 		o, ok := ordersByID[orderID]
 		if !ok {
-			o = &IntegrationOrderResponse{ID: orderID, Status: orderStatus, Latitude: lat, Longitude: lng}
+			o = &IntegrationOrderResponse{ID: orderID, Status: orderStatus, CustomerName: custName, Address: custAddr, Latitude: lat, Longitude: lng}
 			ordersByID[orderID] = o
 			order_order = append(order_order, orderID)
 		}
@@ -548,13 +564,17 @@ func (h *Handler) ListOrdersForDate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// DeliveryRouteRequest is the approved-plan write-back body from AI_LM.
+// DeliveryRouteRequest is the approved-plan write-back body from AI_LM. The
+// field names mirror AI_LM's gable.DeliveryRoute. LoadManifest is the optional
+// 3D packing manifest (any JSON) that GableLBM persists per stop's order to
+// power the yard "Pack Trucks" surface.
 type DeliveryRouteRequest struct {
 	VehicleID     string              `json:"vehicle_id"`
 	DriverID      string              `json:"driver_id"`
 	ScheduledDate string              `json:"scheduled_date"` // YYYY-MM-DD
 	Notes         string              `json:"notes"`
 	Stops         []DeliveryStopInput `json:"stops"`
+	LoadManifest  json.RawMessage     `json:"load_manifest,omitempty"`
 }
 
 type DeliveryStopInput struct {
@@ -598,6 +618,11 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Persist the packing manifest onto each stop's order regardless of whether
+	// the route is newly created or already existed (idempotent re-push) — the
+	// latest approved manifest always wins for the yard "Pack Trucks" surface.
+	h.persistManifests(ctx, req.Stops, req.LoadManifest)
 
 	// Idempotency: reuse an existing route for the same vehicle + date.
 	existing, err := h.deliverySvc.ListRoutes(ctx, &req.ScheduledDate, nil)
@@ -651,6 +676,274 @@ func (h *Handler) CreateDeliveryRoute(w http.ResponseWriter, r *http.Request) {
 		StopCount: created,
 		Created:   true,
 	})
+}
+
+// persistManifests writes the AI_LM-approved packing manifest (JSONB) onto every
+// stop's order. The same route-level manifest is stored on each order in the
+// route so the yard "Pack Trucks" view can replay loading for any of them. No-op
+// when no manifest was sent.
+func (h *Handler) persistManifests(ctx context.Context, stops []DeliveryStopInput, manifest json.RawMessage) {
+	if len(manifest) == 0 || string(manifest) == "null" {
+		return
+	}
+	for _, s := range stops {
+		orderID, err := uuid.Parse(s.OrderID)
+		if err != nil {
+			continue
+		}
+		if _, err := h.db.Pool.Exec(ctx,
+			`UPDATE orders SET packing_manifest = $1, updated_at = NOW() WHERE id = $2`,
+			[]byte(manifest), orderID,
+		); err != nil {
+			slog.Warn("failed to persist packing manifest", "order_id", s.OrderID, "error", err)
+		}
+	}
+}
+
+// SeedOrdersRequest is the demo-seed request body. Both fields are optional:
+// AI_LM's client sends only {date} (empty = tomorrow).
+type SeedOrdersRequest struct {
+	Date  string `json:"date"`  // YYYY-MM-DD; empty = tomorrow
+	Count int    `json:"count"` // max orders to create; 0 = one per demo customer
+}
+
+// SeededOrderResponse mirrors AI_LM's gable.SeededOrder.
+type SeededOrderResponse struct {
+	ID           string  `json:"id"`
+	CustomerName string  `json:"customer_name"`
+	Address      string  `json:"address"`
+	Lines        int     `json:"lines"`
+	WeightLbs    float64 `json:"weight_lbs"`
+}
+
+// SeedOrdersResponse mirrors AI_LM's gable.SeedResult.
+type SeedOrdersResponse struct {
+	Date   string                `json:"date"`
+	Orders []SeededOrderResponse `json:"orders"`
+}
+
+// kelownaDeliveryPoints are sensible Okanagan-area delivery coordinates assigned
+// round-robin to seeded orders so stops scatter realistically on AI_LM's map.
+var kelownaDeliveryPoints = [][2]float64{
+	{49.8888, -119.4597}, // Spall Rd, Kelowna
+	{49.9201, -119.3950}, // UBCO / Summit Pkwy
+	{50.0490, -119.4060}, // Lake Country
+	{49.8350, -119.5760}, // Mission Hill, West Kelowna
+	{49.8330, -119.6190}, // Boucherie Rd, West Kelowna
+	{49.8880, -119.4960}, // Bernard Ave, Kelowna
+	{49.9050, -119.4900}, // Knox Mountain Dr, Kelowna
+	{49.7730, -119.7280}, // Beach Ave, Peachland
+	{50.2530, -119.2750}, // Polson Dr, Vernon
+	{49.6000, -119.6800}, // Prairie Valley Rd, Summerland
+}
+
+// SeedDemoOrders creates a batch of future-dated CONFIRMED lumber orders for
+// existing demo customers so AI_LM has upcoming deliveries to plan. Each order
+// gets dimensioned lumber lines (digital-twin geometry), a geolocated delivery
+// stop, and a scheduled_delivery_date. Reuses order.Service create+confirm so
+// inventory allocation stays consistent. Idempotent: a (customer, date) that
+// already has a CONFIRMED order is skipped. Response shape mirrors AI_LM's
+// gable.SeedResult. Body is optional ({date, count}); empty date = tomorrow.
+func (h *Handler) SeedDemoOrders(w http.ResponseWriter, r *http.Request) {
+	if h.orderSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "order service not configured")
+		return
+	}
+	ctx := r.Context()
+
+	var req SeedOrdersRequest
+	// Body is optional — ignore EOF/decode errors so an empty POST still seeds.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	// Resolve the target scheduled delivery date (default: tomorrow). All seeded
+	// orders share this date so the response's single `date` field is unambiguous
+	// (matching AI_LM's SeedResult shape).
+	schedDate := time.Now().AddDate(0, 0, 1)
+	if req.Date != "" {
+		parsed, err := time.Parse("2006-01-02", req.Date)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date (want YYYY-MM-DD)")
+			return
+		}
+		schedDate = parsed
+	}
+	dateStr := schedDate.Format("2006-01-02")
+
+	// Pick lumber products that carry digital-twin geometry (migration 073) so
+	// the seeded lines render true-to-scale; fall back to any product so the
+	// seed still works on a catalog without dimensions.
+	lumber, err := h.seedLumberProducts(ctx)
+	if err != nil || len(lumber) == 0 {
+		slog.Error("seed-orders: no products available", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "no products available to seed orders")
+		return
+	}
+
+	// Load existing demo customers (deterministic order for stable selection).
+	custRows, err := h.db.Pool.Query(ctx, `SELECT id, COALESCE(name, ''), COALESCE(address, '') FROM customers ORDER BY name`)
+	if err != nil {
+		slog.Error("seed-orders: failed to query customers", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load customers")
+		return
+	}
+	type seedCust struct {
+		id      uuid.UUID
+		name    string
+		address string
+	}
+	var customers []seedCust
+	for custRows.Next() {
+		var c seedCust
+		if err := custRows.Scan(&c.id, &c.name, &c.address); err != nil {
+			custRows.Close()
+			slog.Error("seed-orders: failed to scan customer", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to read customers")
+			return
+		}
+		customers = append(customers, c)
+	}
+	custRows.Close()
+	if len(customers) == 0 {
+		writeError(w, http.StatusServiceUnavailable, "no demo customers to seed orders for")
+		return
+	}
+
+	limit := req.Count
+	if limit <= 0 || limit > len(customers) {
+		limit = len(customers)
+	}
+
+	for i := 0; i < limit; i++ {
+		c := customers[i]
+
+		// Idempotency: skip a customer that already has a CONFIRMED order on this
+		// scheduled date (a leftover DRAFT from a failed confirm does not block a retry).
+		var exists bool
+		if err := h.db.Pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM orders WHERE customer_id = $1 AND scheduled_delivery_date = $2::date AND status = 'CONFIRMED')`,
+			c.id, dateStr,
+		).Scan(&exists); err != nil {
+			slog.Warn("seed-orders: idempotency check failed", "customer_id", c.id, "error", err)
+			continue
+		}
+		if exists {
+			continue
+		}
+
+		// 2–4 dimensioned lumber lines per order.
+		numLines := 2 + rand.Intn(3)
+		var lines []order.OrderLineRequest
+		for j := 0; j < numLines; j++ {
+			p := lumber[rand.Intn(len(lumber))]
+			qty := float64(10 + rand.Intn(40))
+			lines = append(lines, order.OrderLineRequest{
+				ProductID: p.id,
+				Quantity:  qty,
+				PriceEach: int64(math.Round(p.price * 100)),
+			})
+		}
+
+		sched := schedDate
+		o, err := h.orderSvc.CreateOrder(ctx, order.CreateOrderRequest{
+			CustomerID:            c.id,
+			Lines:                 lines,
+			ScheduledDeliveryDate: &sched,
+		})
+		if err != nil {
+			slog.Warn("seed-orders: failed to create order", "customer_id", c.id, "error", err)
+			continue
+		}
+		// Confirm so AI_LM's CONFIRMED-only pull sees it. A confirm failure (e.g.
+		// over credit limit → ON_HOLD) is logged and skipped, not fatal.
+		if err := h.orderSvc.ConfirmOrder(ctx, o.ID); err != nil {
+			slog.Warn("seed-orders: failed to confirm order", "order_id", o.ID, "customer_id", c.id, "error", err)
+			continue
+		}
+
+		// Geolocated delivery stop (route_id NULL — unrouted, awaiting AI_LM
+		// dispatch) so the order carries coordinates on the orders pull.
+		pt := kelownaDeliveryPoints[i%len(kelownaDeliveryPoints)]
+		lat := pt[0] + (rand.Float64()-0.5)*0.02
+		lng := pt[1] + (rand.Float64()-0.5)*0.02
+		if _, err := h.db.Pool.Exec(ctx,
+			`INSERT INTO deliveries (order_id, stop_sequence, status, latitude, longitude, delivery_instructions)
+			 VALUES ($1, 0, 'PENDING', $2, $3, $4)`,
+			o.ID, lat, lng, "AI_LM demo upcoming delivery",
+		); err != nil {
+			slog.Warn("seed-orders: failed to create delivery stop", "order_id", o.ID, "error", err)
+		}
+	}
+
+	// Build the result from ALL CONFIRMED orders on this date (newly created +
+	// any pre-existing), so a re-seed still returns the full populated set.
+	resp := SeedOrdersResponse{Date: dateStr, Orders: []SeededOrderResponse{}}
+	resRows, err := h.db.Pool.Query(ctx, `
+		SELECT o.id, COALESCE(c.name, ''), COALESCE(c.address, ''),
+		       COUNT(ol.id), COALESCE(SUM(ol.quantity * COALESCE(p.weight_lbs, 0)), 0)
+		FROM orders o
+		LEFT JOIN customers c ON c.id = o.customer_id
+		LEFT JOIN order_lines ol ON ol.order_id = o.id
+		LEFT JOIN products p ON p.id = ol.product_id
+		WHERE o.scheduled_delivery_date = $1::date AND o.status = 'CONFIRMED'
+		GROUP BY o.id, c.name, c.address
+		ORDER BY c.name`, dateStr)
+	if err != nil {
+		slog.Error("seed-orders: failed to build result", "error", err)
+		writeError(w, http.StatusInternalServerError, "orders seeded but failed to build response")
+		return
+	}
+	defer resRows.Close()
+	for resRows.Next() {
+		var so SeededOrderResponse
+		if err := resRows.Scan(&so.ID, &so.CustomerName, &so.Address, &so.Lines, &so.WeightLbs); err != nil {
+			slog.Error("seed-orders: failed to scan result row", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to read seeded orders")
+			return
+		}
+		resp.Orders = append(resp.Orders, so)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// seedProduct is a catalog product used to build seeded order lines.
+type seedProduct struct {
+	id    uuid.UUID
+	price float64
+}
+
+// seedLumberProducts returns lumber SKUs that carry digital-twin geometry
+// (length/width/height from migration 073), preferring dimensioned products so
+// AI_LM's Load Builder renders true-to-scale twins. Falls back to any lumber,
+// then any product, so the seed works on a catalog without dimensions.
+func (h *Handler) seedLumberProducts(ctx context.Context) ([]seedProduct, error) {
+	queries := []string{
+		`SELECT id, COALESCE(base_price, 0) FROM products
+		 WHERE length_in IS NOT NULL AND width_in IS NOT NULL AND height_in IS NOT NULL
+		 ORDER BY sku LIMIT 20`,
+		`SELECT id, COALESCE(base_price, 0) FROM products WHERE category = 'Lumber' ORDER BY sku LIMIT 20`,
+		`SELECT id, COALESCE(base_price, 0) FROM products ORDER BY sku LIMIT 20`,
+	}
+	for _, q := range queries {
+		rows, err := h.db.Pool.Query(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		var out []seedProduct
+		for rows.Next() {
+			var p seedProduct
+			if err := rows.Scan(&p.id, &p.price); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, p)
+		}
+		rows.Close()
+		if len(out) > 0 {
+			return out, nil
+		}
+	}
+	return nil, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

@@ -49,9 +49,9 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 	// branch_id falls back to system_settings.default_branch_id when the
 	// caller hasn't set one (single-branch mode or admin without header).
 	queryOrder := `
-		INSERT INTO orders (id, customer_id, quote_id, status, total_amount, salesperson_id, created_at, updated_at, branch_id)
+		INSERT INTO orders (id, customer_id, quote_id, status, total_amount, salesperson_id, created_at, updated_at, branch_id, scheduled_delivery_date)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-			COALESCE($9::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+			COALESCE($9::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')), $10)
 	`
 	totalDollars := float64(o.TotalAmount) / 100.0
 	var branchArg any
@@ -62,7 +62,7 @@ func (r *PostgresRepository) CreateOrder(ctx context.Context, o *Order) error {
 		o.BranchID = *bid
 	}
 	_, err := exec.Exec(ctx, queryOrder,
-		o.ID, o.CustomerID, o.QuoteID, o.Status, totalDollars, o.SalespersonID, o.CreatedAt, o.UpdatedAt, branchArg,
+		o.ID, o.CustomerID, o.QuoteID, o.Status, totalDollars, o.SalespersonID, o.CreatedAt, o.UpdatedAt, branchArg, o.ScheduledDeliveryDate,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert order: %w", err)
@@ -95,7 +95,7 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 	branchID := middleware.BranchIDForQuery(ctx)
 	queryOrder := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id, o.scheduled_delivery_date
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
@@ -106,7 +106,7 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 	var totalAmountDB float64 // DB stores dollars as NUMERIC(19,4)
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryOrder, id, branchID).Scan(
 		&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-		&o.SalespersonID, &o.SalespersonName, &o.BranchID,
+		&o.SalespersonID, &o.SalespersonName, &o.BranchID, &o.ScheduledDeliveryDate,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -163,7 +163,7 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id, o.scheduled_delivery_date
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
@@ -182,7 +182,7 @@ func (r *PostgresRepository) ListOrders(ctx context.Context) ([]Order, error) {
 		var totalAmountDB float64
 		if err := rows.Scan(
 			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-			&o.SalespersonID, &o.SalespersonName, &o.BranchID,
+			&o.SalespersonID, &o.SalespersonName, &o.BranchID, &o.ScheduledDeliveryDate,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
 		}
@@ -203,7 +203,7 @@ func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, off
 
 	query := `
 		SELECT o.id, o.customer_id, COALESCE(c.name, ''), o.quote_id, o.status, o.total_amount, o.created_at, o.updated_at,
-			o.salesperson_id, COALESCE(st.name, ''), o.branch_id
+			o.salesperson_id, COALESCE(st.name, ''), o.branch_id, o.scheduled_delivery_date
 		FROM orders o
 		LEFT JOIN customers c ON c.id = o.customer_id
 		LEFT JOIN sales_team st ON o.salesperson_id = st.id
@@ -223,7 +223,7 @@ func (r *PostgresRepository) ListOrdersPaginated(ctx context.Context, limit, off
 		var totalAmountDB float64
 		if err := rows.Scan(
 			&o.ID, &o.CustomerID, &o.CustomerName, &o.QuoteID, &o.Status, &totalAmountDB, &o.CreatedAt, &o.UpdatedAt,
-			&o.SalespersonID, &o.SalespersonName, &o.BranchID,
+			&o.SalespersonID, &o.SalespersonName, &o.BranchID, &o.ScheduledDeliveryDate,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan order: %w", err)
 		}

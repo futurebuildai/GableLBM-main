@@ -106,6 +106,66 @@ func resetTransactionalData(db *sql.DB) {
 	log.Printf("Seed: resetTransactionalData cleared %d transactional tables (prevents cross-deploy accumulation)", len(existing))
 }
 
+// seedFutureDeliveries creates ~12 future-dated CONFIRMED orders (next 1–7 days)
+// so a fresh deploy already has upcoming deliveries for AI_LM to plan. Each order
+// carries a scheduled_delivery_date, dimensioned lumber lines (digital-twin
+// geometry), and a geolocated but UNROUTED delivery stop (route_id NULL) that
+// AI_LM will assign. Returns the number of orders created. Best-effort: per-row
+// errors are skipped, not fatal.
+func seedFutureDeliveries(
+	db *sql.DB,
+	customerIDs map[string]uuid.UUID,
+	custToBranch map[uuid.UUID]uuid.UUID,
+	custSalesperson map[uuid.UUID]string,
+	skuToID map[string]uuid.UUID,
+	productPrices map[string]float64,
+	dimSKUs []string,
+	deliveryCoord func(uuid.UUID) (float64, float64),
+	kelMainID uuid.UUID,
+) int {
+	custList := make([]uuid.UUID, 0, len(customerIDs))
+	for _, id := range customerIDs {
+		custList = append(custList, id)
+	}
+	if len(custList) == 0 || len(dimSKUs) == 0 {
+		return 0
+	}
+	seeded := 0
+	for i := 0; i < 12; i++ {
+		custID := custList[i%len(custList)]
+		branchID := custToBranch[custID]
+		if branchID == uuid.Nil {
+			branchID = kelMainID
+		}
+		// Spread across the next 1–7 days.
+		schedDate := time.Now().AddDate(0, 0, 1+rand.Intn(7))
+		orderID := uuid.New()
+		if _, err := db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, status, salesperson_id, scheduled_delivery_date, created_at)
+			VALUES ($1,$2,$3,0,'CONFIRMED',$4,$5::date,NOW())`,
+			orderID, custID, branchID, custSalesperson[custID], schedDate.Format("2006-01-02")); err != nil {
+			continue
+		}
+		var orderTotal float64
+		numLines := 2 + rand.Intn(3)
+		for j := 0; j < numLines; j++ {
+			sku := dimSKUs[rand.Intn(len(dimSKUs))]
+			price := productPrices[sku]
+			qty := 10 + rand.Intn(40)
+			orderTotal += float64(qty) * price
+			db.Exec(`INSERT INTO order_lines (order_id, product_id, quantity, price_each)
+				VALUES ($1,$2,$3,$4)`, orderID, skuToID[sku], qty, price)
+		}
+		db.Exec("UPDATE orders SET total_amount=$1 WHERE id=$2", orderTotal, orderID)
+
+		dlat, dlng := deliveryCoord(custID)
+		db.Exec(`INSERT INTO deliveries (order_id, stop_sequence, status, latitude, longitude, delivery_instructions)
+			VALUES ($1,0,'PENDING',$2,$3,$4)`,
+			orderID, dlat, dlng, "AI_LM upcoming delivery (scheduled)")
+		seeded++
+	}
+	return seeded
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -924,6 +984,27 @@ func main() {
 		}
 	}
 	fmt.Printf("Seed: %d AI_LM same-day routable CONFIRMED orders (geolocated)\n", aiRoutable)
+
+	// =========================================================================
+	// 10c. AI_LM FUTURE-DATED DELIVERIES
+	// AI_LM also plans UPCOMING days: it pulls CONFIRMED orders by
+	// scheduled_delivery_date (GET /api/integration/orders?date=<future>) to build
+	// tomorrow's (and later) routes. Seed ~12 CONFIRMED orders spread across the
+	// next 1–7 days, each with a scheduled_delivery_date, a geolocated (but
+	// unrouted) delivery stop awaiting AI_LM dispatch, and dimensioned lumber lines
+	// so the Load Builder renders true-to-scale digital twins. resetTransactionalData
+	// clears these on every redeploy so they never accumulate.
+	// =========================================================================
+	// Lumber SKUs that carry digital-twin geometry (productDims) → true-to-scale lines.
+	dimSKUs := make([]string, 0, len(productDims))
+	for sku := range productDims {
+		if _, ok := skuToID[sku]; ok {
+			dimSKUs = append(dimSKUs, sku)
+		}
+	}
+	futureSeeded := seedFutureDeliveries(db, customerIDs, custToBranch, custSalesperson,
+		skuToID, productPrices, dimSKUs, deliveryCoord, kelMainID)
+	fmt.Printf("Seed: %d AI_LM future-dated CONFIRMED orders (scheduled_delivery_date, geolocated)\n", futureSeeded)
 
 	// =========================================================================
 	// 11. PURCHASE ORDERS — branch-scoped, rotated across the three yards.
