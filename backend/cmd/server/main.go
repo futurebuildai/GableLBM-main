@@ -49,6 +49,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
+	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
@@ -624,6 +625,15 @@ func main() {
 	projectHandler := project.NewHandler(projectSvc)
 	projectHandler.RegisterRoutes(mux, portalMw)
 
+	// Staff Management Module (COMM-1 pillar 3 + GableLBM half of pillar 4)
+	// Permission-set inside a staff-management surface (Decision C): module access
+	// is one of the permissions a staff member can hold. AI_LM authenticates staff
+	// via the validate-staff integration call (Decision D).
+	staffRepo := staff.NewRepository(db)
+	staffSvc := staff.NewService(staffRepo).WithAuditLog(auditLog)
+	staffHandler := staff.NewHandler(staffSvc)
+	staffHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+
 	// Integration API (FB-Brain cross-system endpoints)
 	integrationAPIKey := os.Getenv("INTEGRATION_API_KEY")
 	if integrationAPIKey == "" {
@@ -633,7 +643,7 @@ func main() {
 			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
 		}
 	}
-	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, deliverySvc, integrationAPIKey)
+	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, deliverySvc, staffSvc, integrationAPIKey)
 	integrationHandler.RegisterRoutes(mux)
 
 	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch

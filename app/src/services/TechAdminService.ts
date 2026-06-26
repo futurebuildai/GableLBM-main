@@ -30,6 +30,24 @@ export interface RoutingSettings {
     key_hint?: string;
 }
 
+export interface StaffMember {
+    id: string;
+    email: string;
+    full_name: string;
+    staff_no?: string;
+    role: string;
+    active: boolean;
+    created_at: string;
+    updated_at: string;
+    modules: string[];
+}
+
+export interface ModuleInfo {
+    id: string;
+    name: string;
+    enabled: boolean;
+}
+
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys`);
@@ -117,6 +135,47 @@ export const techAdminService = {
             method: 'DELETE',
         });
         if (!response.ok) throw new Error('Failed to delete routing API key');
+    },
+
+    // --- Staff Management & Module Access ---
+
+    async listStaff(): Promise<StaffMember[]> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff`);
+        if (!response.ok) throw new Error('Failed to fetch staff');
+        const data = await response.json();
+        return data || [];
+    },
+
+    async listModules(): Promise<ModuleInfo[]> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules`);
+        if (!response.ok) throw new Error('Failed to fetch modules');
+        const data = await response.json();
+        return data || [];
+    },
+
+    async setModuleEnabled(moduleId: string, enabled: boolean): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules/${moduleId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        if (!response.ok) throw new Error('Failed to update module');
+    },
+
+    async grantModule(staffId: string, moduleId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module_id: moduleId }),
+        });
+        if (!response.ok) throw new Error('Failed to grant module access');
+    },
+
+    async revokeModule(staffId: string, moduleId: string): Promise<void> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules/${moduleId}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) throw new Error('Failed to revoke module access');
     },
 };
 

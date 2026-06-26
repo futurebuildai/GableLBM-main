@@ -17,6 +17,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -29,10 +30,11 @@ type Handler struct {
 	customerSvc *customer.Service
 	productSvc  *product.Service
 	deliverySvc *delivery.Service
+	staffSvc    *staff.Service
 	apiKey      string
 }
 
-func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, deliverySvc *delivery.Service, apiKey string) *Handler {
+func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Service, orderSvc *order.Service, customerSvc *customer.Service, productSvc *product.Service, deliverySvc *delivery.Service, staffSvc *staff.Service, apiKey string) *Handler {
 	return &Handler{
 		db:          db,
 		pricingSvc:  pricingSvc,
@@ -41,6 +43,7 @@ func NewHandler(db *database.DB, pricingSvc *pricing.Service, quoteSvc *quote.Se
 		customerSvc: customerSvc,
 		productSvc:  productSvc,
 		deliverySvc: deliverySvc,
+		staffSvc:    staffSvc,
 		apiKey:      apiKey,
 	}
 }
@@ -57,6 +60,77 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/integration/orders", h.authMiddleware(h.ListOrdersForDate))
 	mux.HandleFunc("POST /api/integration/delivery-routes", h.authMiddleware(h.CreateDeliveryRoute))
 	mux.HandleFunc("POST /api/integration/demo/seed-orders", h.authMiddleware(h.SeedDemoOrders))
+
+	// AI_LM staff authentication (Decision D): AI_LM authenticates a staff member
+	// and learns their module entitlement via this lightweight call.
+	mux.HandleFunc("POST /api/integration/validate-staff", h.authMiddleware(h.ValidateStaff))
+}
+
+// ValidateStaffRequest is the lookup body. Provide email (preferred) or staff_no.
+type ValidateStaffRequest struct {
+	Email   string `json:"email"`
+	StaffNo string `json:"staff_no"`
+}
+
+// ValidateStaffResponse is the exact contract AI_LM depends on. For an unknown
+// staff member only {entitled:false, roles:[], modules:[]} is returned (the
+// identity fields are omitted).
+type ValidateStaffResponse struct {
+	StaffID  string   `json:"staff_id,omitempty"`
+	Email    string   `json:"email,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Entitled bool     `json:"entitled"`
+	Roles    []string `json:"roles"`
+	Modules  []string `json:"modules"`
+}
+
+// ValidateStaff resolves a staff member by email or staff_no and reports their
+// AI_LM entitlement + granted (globally-enabled) modules. Always 200 on a
+// well-formed request — an unknown staff member is a non-entitled result, not an
+// error.
+func (h *Handler) ValidateStaff(w http.ResponseWriter, r *http.Request) {
+	if h.staffSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "staff service not configured")
+		return
+	}
+	var req ValidateStaffRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Email == "" && req.StaffNo == "" {
+		writeError(w, http.StatusBadRequest, "email or staff_no required")
+		return
+	}
+
+	v, err := h.staffSvc.ValidateStaff(r.Context(), req.Email, req.StaffNo)
+	if err != nil {
+		slog.Error("failed to validate staff", "error", err, "method", r.Method, "path", r.URL.Path)
+		writeError(w, http.StatusInternalServerError, "failed to validate staff")
+		return
+	}
+
+	if !v.Found {
+		writeJSON(w, http.StatusOK, ValidateStaffResponse{
+			Entitled: false,
+			Roles:    []string{},
+			Modules:  []string{},
+		})
+		return
+	}
+
+	modules := v.Modules
+	if modules == nil {
+		modules = []string{}
+	}
+	writeJSON(w, http.StatusOK, ValidateStaffResponse{
+		StaffID:  v.StaffID.String(),
+		Email:    v.Email,
+		Name:     v.Name,
+		Entitled: v.Entitled,
+		Roles:    []string{v.Role},
+		Modules:  modules,
+	})
 }
 
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {

@@ -3,17 +3,19 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import type { APIKey, AISettings, RoutingSettings, EDITradingPartner } from '../../../services/TechAdminService';
+import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
-    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation
+    Shield, AlertCircle, Image as ImageIcon, Network, Power, RefreshCw, Navigation, Users
 } from 'lucide';
+
+const AI_LM_MODULE_ID = 'ai_lm';
 
 @customElement('gable-tech-admin')
 export class TechAdminPage extends LitElement {
     createRenderRoot() { return this; }
 
-    @state() private activeTab: 'keys' | 'ai' | 'routing' | 'integrations' | 'health' = 'keys';
+    @state() private activeTab: 'keys' | 'ai' | 'routing' | 'staff' | 'integrations' | 'health' = 'keys';
 
     // API Key Manager state
     @state() private keys: APIKey[] = [];
@@ -49,12 +51,20 @@ export class TechAdminPage extends LitElement {
     @state() private ediLoading = true;
     @state() private ediError: string | null = null;
 
+    // Staff Management & Module Access state
+    @state() private staffList: StaffMember[] = [];
+    @state() private staffLoading = true;
+    @state() private modules: ModuleInfo[] = [];
+    @state() private staffError: string | null = null;
+    @state() private moduleSaving = false;
+
     connectedCallback() {
         super.connectedCallback();
         this._loadKeys();
         this._loadAISettings();
         this._loadRoutingSettings();
         this._loadEDIPartners();
+        this._loadStaff();
     }
 
     disconnectedCallback() {
@@ -235,11 +245,64 @@ export class TechAdminPage extends LitElement {
         }
     }
 
+    // --- Staff Management & Module Access methods ---
+    private async _loadStaff() {
+        this.staffLoading = true;
+        try {
+            this.staffError = null;
+            const [staffList, modules] = await Promise.all([
+                techAdminService.listStaff(),
+                techAdminService.listModules(),
+            ]);
+            this.staffList = staffList;
+            this.modules = modules;
+        } catch (err) {
+            console.error(err);
+            this.staffError = err instanceof Error ? err.message : 'Failed to load staff';
+        } finally {
+            this.staffLoading = false;
+        }
+    }
+
+    private get _aiLmModule(): ModuleInfo | undefined {
+        return this.modules.find((m) => m.id === AI_LM_MODULE_ID);
+    }
+
+    private async _handleToggleModule(enabled: boolean) {
+        this.moduleSaving = true;
+        try {
+            this.staffError = null;
+            await techAdminService.setModuleEnabled(AI_LM_MODULE_ID, enabled);
+            await this._loadStaff();
+        } catch (err) {
+            console.error(err);
+            this.staffError = err instanceof Error ? err.message : 'Failed to update module';
+        } finally {
+            this.moduleSaving = false;
+        }
+    }
+
+    private async _handleToggleStaffAccess(member: StaffMember, grant: boolean) {
+        try {
+            this.staffError = null;
+            if (grant) {
+                await techAdminService.grantModule(member.id, AI_LM_MODULE_ID);
+            } else {
+                await techAdminService.revokeModule(member.id, AI_LM_MODULE_ID);
+            }
+            await this._loadStaff();
+        } catch (err) {
+            console.error(err);
+            this.staffError = err instanceof Error ? err.message : 'Failed to update access';
+        }
+    }
+
     private _renderTabs() {
         const tabs = [
             { id: 'keys' as const, label: 'API Keys', iconData: Key },
             { id: 'ai' as const, label: 'AI Settings', iconData: Sparkles },
             { id: 'routing' as const, label: 'Routing', iconData: Navigation },
+            { id: 'staff' as const, label: 'Staff', iconData: Users },
             { id: 'integrations' as const, label: 'Integrations', iconData: Globe },
             { id: 'health' as const, label: 'System Health', iconData: Activity },
         ];
@@ -580,6 +643,113 @@ export class TechAdminPage extends LitElement {
         `;
     }
 
+    private _renderStaff() {
+        const aiLm = this._aiLmModule;
+        const enabled = !!aiLm?.enabled;
+
+        return html`
+            <div class="space-y-6">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        ${icon(Users, 20, 'w-5 h-5 text-gable-green')}
+                        Staff &amp; Module Access
+                    </h2>
+                    <p class="text-slate-400 text-sm mt-1">Manage your staff roster and control which modules each member can use. AI_LM authenticates staff against this list.</p>
+                </div>
+
+                <!-- Global AI_LM module toggle -->
+                <div class="${cn('border rounded-lg p-6', enabled ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
+                    <div class="flex items-start justify-between">
+                        <div class="flex items-start gap-4">
+                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
+                                ${icon(Sparkles, 20)}
+                            </div>
+                            <div>
+                                <h3 class="text-white font-medium">AI_LM Module</h3>
+                                <p class="text-sm text-slate-400 mt-1">
+                                    ${enabled
+                                        ? 'Enabled globally. Granted staff can authenticate and use AI_LM load optimization & dispatch.'
+                                        : 'Disabled globally. No staff can use AI_LM until this is enabled, regardless of individual grants.'}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            role="switch"
+                            aria-checked=${enabled ? 'true' : 'false'}
+                            ?disabled=${this.moduleSaving || !aiLm}
+                            @click=${() => this._handleToggleModule(!enabled)}
+                            class="${cn(
+                                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50',
+                                enabled ? 'bg-gable-green' : 'bg-white/10'
+                            )}"
+                            title=${enabled ? 'Disable AI_LM module' : 'Enable AI_LM module'}
+                        >
+                            <span class="${cn('inline-block h-4 w-4 transform rounded-full bg-white transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')}"></span>
+                        </button>
+                    </div>
+                </div>
+
+                ${this.staffError ? html`<div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-400">${this.staffError}</div>` : nothing}
+
+                <!-- Staff table -->
+                <div class="bg-slate-steel border border-white/5 rounded-lg overflow-hidden">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-white/5 text-slate-400 font-medium">
+                            <tr>
+                                <th class="px-4 py-3">Name</th>
+                                <th class="px-4 py-3">Email</th>
+                                <th class="px-4 py-3">Role</th>
+                                <th class="px-4 py-3">Active</th>
+                                <th class="px-4 py-3 text-center">AI_LM Access</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-white/5">
+                            ${this.staffList.map((member) => {
+                                const hasAccess = member.modules.includes(AI_LM_MODULE_ID);
+                                return html`
+                                    <tr class="hover:bg-white/5 transition-colors">
+                                        <td class="px-4 py-3">
+                                            <span class="font-medium text-white">${member.full_name}</span>
+                                            ${member.staff_no ? html`<div class="text-[10px] text-slate-500 font-mono mt-0.5">${member.staff_no}</div>` : nothing}
+                                        </td>
+                                        <td class="px-4 py-3 font-mono text-slate-400">${member.email}</td>
+                                        <td class="px-4 py-3">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-white/5 text-slate-300">${member.role}</span>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            ${member.active
+                                                ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gable-green/10 text-gable-green">Active</span>`
+                                                : html`<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-500/10 text-slate-500">Inactive</span>`}
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <input
+                                                type="checkbox"
+                                                class="h-4 w-4 rounded border-white/20 bg-deep-space text-gable-green focus:ring-gable-green/50 cursor-pointer accent-gable-green"
+                                                .checked=${hasAccess}
+                                                @change=${(e: Event) => this._handleToggleStaffAccess(member, (e.target as HTMLInputElement).checked)}
+                                                title=${hasAccess ? 'Revoke AI_LM access' : 'Grant AI_LM access'}
+                                            />
+                                        </td>
+                                    </tr>
+                                `;
+                            })}
+                            ${this.staffList.length === 0 && !this.staffLoading ? html`
+                                <tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No staff members yet.</td></tr>
+                            ` : nothing}
+                            ${this.staffLoading && this.staffList.length === 0 ? html`
+                                <tr><td colspan="5" class="px-4 py-8 text-center text-slate-500 italic">Loading staff...</td></tr>
+                            ` : nothing}
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="text-xs text-slate-500 flex items-center gap-1">
+                    ${icon(Shield, 12)} Granting access writes an audit-logged module grant. A staff member is entitled to AI_LM only when they are Active, the AI_LM module is enabled globally, and they hold an AI_LM grant.
+                </p>
+            </div>
+        `;
+    }
+
     private _renderIntegrations() {
         const integrations = [
             { name: 'Run Payments', description: 'Secure payment processing for card-present and online transactions. Preferred Partner.', iconData: Activity, connected: false },
@@ -711,6 +881,7 @@ export class TechAdminPage extends LitElement {
                     ${this.activeTab === 'keys' ? this._renderAPIKeyManager() : nothing}
                     ${this.activeTab === 'ai' ? this._renderAISettingsPanel() : nothing}
                     ${this.activeTab === 'routing' ? this._renderRoutingSettingsPanel() : nothing}
+                    ${this.activeTab === 'staff' ? this._renderStaff() : nothing}
                     ${this.activeTab === 'integrations' ? this._renderIntegrations() : nothing}
                     ${this.activeTab === 'health' ? html`
                         <div class="bg-slate-steel border border-white/5 rounded-lg p-12 text-center">
