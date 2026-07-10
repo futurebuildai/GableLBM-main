@@ -53,7 +53,7 @@ flowchart LR
   O --> OV[Ordering V1]
   C --> AI[AI cross-sell/health]
 ```
-**Longest chain to first customer order online:** `D1 → F1 → F6 → O2 (checkout)` in parallel with `F5` and `D2 → F7`. Start `D1`/`D2` immediately — they're free to decide and they gate the most.
+**Longest chain to first customer order online (post-decision):** `F7 (cents migration, L)` is now the long pole — it gates O1/O2/O4 alongside `F1 → F6`. Mitigation: F7's build-ready plan (`06`) sequences the **portal subset first** so Ordering can start against already-migrated portal endpoints without waiting for the full ERP-wide migration.
 
 ---
 
@@ -94,10 +94,12 @@ Ridge boards (phases, labor, markup, takeoff provenance) live only in browser `l
 - F6.2 Retire LumberNow-backend calls (`/v1/auth`, `/v1/projects`, `/v1/ai/chat`); repoint services at portal endpoints. `M`
 - F6.3 Delete/park the LumberNow Go backend from the deploy path. `S`
 
-### F7 · Money boundary helpers `[LN/GBL]` `S` ⛔ D2
-Portal = float dollars; ERP orders/invoices/account = int64 cents.
-- F7.1 One conversion boundary in the Ridge data layer; never reuse ERP `formatCents()` on portal data. `S`
-- F7.2 (If D2 = migrate now) scope the float→cents migration as a separate `L` refactor sprint. `L`
+### F7 · Money → int64 cents migration `[GBL/LN]` `L` — **DECIDED: migrate first (D2)**
+Per D2, we unify on int64 cents *before* Phase 1 rather than carrying two conventions into a payments product. Portal (`portal/model.go`), quotes, reporting, POS, daily-till migrate from float64 dollars to int64 cents to match `order`/`invoice`/`account`. This is now a **gating Wave-1 epic** for Ordering's money surfaces (O1, O2, O4). Full build-ready plan: `06_MONEY_CENTS_MIGRATION.md`.
+- F7.1 Call-site inventory + DB column audit (money `DECIMAL(10,2)` vs physical-qty `DECIMAL(19,4)` which is NOT money). `S`
+- F7.2 Migrate portal DTOs + `cart.go`/`checkout` conversions to cents; align `quote`, `reporting`, `pos`, `dashboard`. `L`
+- F7.3 Frontend: portal/quote pages adopt `formatCents()`; remove direct `.toFixed(2)` on money. `M`
+- F7.4 Regression tests around tax/rounding and the `customers.balance_due` cents/dollars collision. `M`
 
 ---
 
@@ -146,9 +148,9 @@ CMS content model + `/api/v1/cms/*` (supersedes `about_blocks` JSONB) `L` · Ast
 
 | Wave | Focus | Contents |
 |---|---|---|
-| **0 — decisions** | unblock | Resolve **D1** (tenant mapping) + **D2** (money) — day 1, no code needed |
-| **1 — foundations** | parallel | F2, F3, F4, F5, F7 in parallel; F1→F6 on the critical path |
-| **2 — first dollar online** | Ordering MVP | O1→O4 (+O5 once F4 lands); demoable customer order into Gable |
+| **0 — decisions** | ✅ done | D1 = per-dealer subdomain · D2 = migrate cents first |
+| **1 — foundations** | parallel | **F7 (cents migration) is the long pole** — do its portal subset first; F2, F3, F4, F5 in parallel; F1(subdomain)→F6 on the critical path |
+| **2 — first dollar online** | Ordering MVP | O1→O4 (money surfaces need F7's portal subset; +O5 once F4 lands); demoable customer order into Gable |
 | **3 — first pipeline** | CRM MVP | C1→C4; reps working leads/pipeline on real Gable data |
 | **4 — discovery** | Growth MVP | GM (CMS + Astro) so agents have a surface to publish to |
 | **5 — depth** | V1s | OV + CV in parallel (CV needs F2 from Wave 1) |
@@ -160,8 +162,8 @@ Waves 2 and 3 can run concurrently (different repos/teams: `[LN]` vs `[GBL]`).
 
 ## 8. Decision gates (resolve before/at Wave 0)
 
-- **D1 — Multi-dealer → single-tenant ERP mapping.** Edge router vs per-dealer subdomains vs thin gateway. Gates F1, therefore F6 and all of Ordering. *Recommendation to discuss: per-dealer subdomain → portal base URL, resolved at the edge; revisit a gateway only if cross-dealer features appear.*
-- **D2 — Money convention.** Convert-at-boundary now (cheap, F7 = `S`) vs. pull the float→cents migration forward (correct, `L`, touches many call-sites). *Recommendation: convert-at-boundary for Phase 1; schedule the cents migration before card payments (Phase 3).*
+- **D1 — Multi-dealer → single-tenant ERP mapping. ✅ RESOLVED: per-dealer subdomain → dedicated Gable deployment.** Host resolved at the edge/SPA runtime config → portal base URL; branding from `GET /api/portal/v1/config`; cookie scoped per-origin. Zero ERP re-architecture. Revisit a gateway (option ②) only if one-contractor-many-dealers becomes a real requirement. F1 is now mostly `[INFRA]`/config.
+- **D2 — Money convention. ✅ RESOLVED: migrate to int64 cents first.** The float→cents migration moves *before* Phase 1 and becomes gating epic **F7** (`L`). Rationale: don't carry two money conventions into a payments product. See `06_MONEY_CENTS_MIGRATION.md` for the build-ready plan. Trade-off accepted: Phase-1 "first dollar online" starts after F7 lands (or after the portal subset of F7 lands — see the spec's incremental sequencing).
 - **D3 — CMS build vs buy.** DB-backed content service vs Sanity/Strapi/Payload (detailed in `03_CMS_GROWTH_AGENTS_PRD.md`). Gates GM; not needed until Wave 4.
 - **D4 — Marketing email vs native only.** Native sequences on F2 vs a marketing tool for nurture. Affects CV scope; not gating.
 
