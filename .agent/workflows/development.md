@@ -25,7 +25,7 @@ For each step:
    - Add/modify SQL migrations in `backend/migrations/`
    - Implement repository layer (pgx queries)
    - Implement service layer (business logic)
-   - Add HTTP handlers and register routes on the Chi router
+   - Add HTTP handlers and register routes via the module's `RegisterRoutes` on the stdlib `http.ServeMux` (wired in `backend/cmd/server/main.go`; converted apps register through `pkg/apps`)
    - Follow existing patterns in the same module
 
 2. **Frontend changes** (if applicable):
@@ -33,7 +33,7 @@ For each step:
    - Use existing UI components from `app/src/components/ui/`
    - Follow the design system (Industrial Dark theme, correct color tokens)
    - Use JetBrains Mono for all numerical data
-   - Add routes in `app/src/App.tsx`
+   - Add routes in `app/src/routes.ts` (or the app's manifest in `app/src/apps/` for converted apps)
 
 3. **Commit** each logical unit of work with a descriptive message
 

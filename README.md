@@ -17,7 +17,7 @@ Agility.
 ## Quickstart (local)
 
 ```bash
-# Boot Postgres + NATS via docker compose
+# Boot Postgres via docker compose
 make up
 
 # Apply migrations
@@ -62,6 +62,14 @@ Community contributors should target **`community`**. See
 | [`docs/design-system.md`](./docs/design-system.md) | Colors, typography, component patterns |
 | [`docs/database-erd.md`](./docs/database-erd.md) | Full schema + ERD |
 | [`.do/README.md`](./.do/README.md) | Digital Ocean App Platform operations |
+
+## Repo extras
+
+- `industry_erps/` — captured API specs for the legacy systems GableLBM
+  replaces (BisTrack, Spruce, Agility). Reference material for future
+  import/sync adapters; nothing in the codebase consumes them yet.
+- `brand/` — logo source assets. The app bundles its own copies under
+  `app/src/components/ui/` and `app/public/`.
 
 ## License
 

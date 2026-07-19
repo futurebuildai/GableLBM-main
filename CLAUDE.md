@@ -42,8 +42,9 @@ docs/         → Architecture, design system, and database specs
 - **State:** `@state()` internal, `@property()` external; framework-agnostic singleton services under `app/src/services/`
 
 ## Architecture
-- **Pattern:** Modular monolith — single Go binary, ~50 modules under `backend/internal/<module>/`
-- **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), `handler.go` + `routes.go` (HTTP). Wired together in `backend/cmd/server/main.go`
+- **Pattern:** Modular monolith — single Go binary, ~40 modules under `backend/internal/<module>/`
+- **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `backend/cmd/server/main.go`
+- **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
 - **Cross-module:** Synchronous Go interfaces (writes via NATS events are not implemented yet)
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
 - **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `backend/cmd/server/main.go`
@@ -117,7 +118,7 @@ npx tsc --noEmit     # type-check only
 
 ### Infrastructure (root Makefile)
 ```bash
-make up              # docker compose up -d (Postgres on :5434, NATS on :4222)
+make up              # docker compose up -d (Postgres on :5434)
 make down
 make logs
 make ps
@@ -132,9 +133,8 @@ make pg-shell        # psql into the gable_postgres container
 - New endpoints under the correct prefix (`/api/v1`, `/api/portal/v1`, `/api/integration`, `/api/v1/a2a`) and wired into a `RegisterRoutes` call in `backend/cmd/server/main.go`
 
 ## Notes & Gotchas
-- The root contains a ~60 MB binary named `docker-compose` — likely a packaged tool, not source. Don't commit modifications to it (it's gitignored at `/docker-compose`)
-- README.md says the frontend is "React + TypeScript + Tailwind"; it is actually **Lit 3**. Trust this file over the README for stack details
-- `.agent/workflows/development.md` references `app/src/App.tsx`; the actual route table is `app/src/routes.ts`
+- Never commit build binaries. The repo used to ship a ~60 MB `docker-compose` binary and a 15 MB `backend/main` — both removed July 2026 and gitignored (`/docker-compose`, `backend/main`). If `git status` shows a binary, it belongs in `.gitignore`, not the tree
+- The route table is `app/src/routes.ts`; converted apps declare routes in `app/src/apps/<key>.ts` instead
 - Default Postgres port in the app/config is **5434** (matches docker-compose), not 5432
 - AI features degrade gracefully when no key is configured — don't add hard failures for missing AI keys; resolve via `KeyStore` instead
 
@@ -235,5 +235,6 @@ read the referenced files before sizing.
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
 - Frontend admin UI for `system_settings` (currently operators edit via psql). Unblocks self-service for the `reorder.*` keys added in #9.
 - Add an SMTP/SendGrid `EmailSender` implementation (currently only `LogEmailService` exists). Required before scheduled reports and customer-facing email features are useful in prod.
-- Wire NATS or remove the orphan container from `docker-compose.yml` (`docs/architecture.md` describes an event bus that isn't implemented).
-- Pre-existing `inventory.MockRepository` is missing `DeallocateStock`, so `go vet ./internal/inventory/...` fails on master (pre-existing, unrelated to #9). Trivial fix.
+- ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`; the event bus remains future design (blueprint Phase 2+).
+- ~~`inventory.MockRepository` missing `DeallocateStock` breaks `go vet`~~ **Already fixed** — the mock implements it (`internal/inventory/service_test.go`); `go vet ./...` is clean.
+- Convert remaining leaf modules to installable apps per `docs/modularization-blueprint.md` §5 — the five dark pages (bankrecon, matching, rebates, purchasing recommendations) are the best next candidates.

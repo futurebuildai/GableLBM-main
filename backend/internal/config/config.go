@@ -54,14 +54,6 @@ type Config struct {
 	AIModelCheap      string // AI_MODEL_CHEAP
 	AIModelImage      string // AI_MODEL_IMAGE
 
-	// Deprecated: the Anthropic/Stability/Gemini clients were replaced by the unified
-	// OpenRouter client. These fields are retained for one back-compat release and are
-	// no longer read; they are removed in a follow-up (oss-migration-plan §1.10).
-	AnthropicAPIKey string
-	AnthropicModel  string
-	StabilityAPIKey string
-	GeminiAPIKey    string
-
 	// Auth & Security
 	AuthMode string // "dev" to disable auth; otherwise JWKS_URL is required
 
@@ -123,12 +115,6 @@ func Load() (*Config, error) {
 		AIModelVision:     getEnv("AI_MODEL_VISION", ""),
 		AIModelCheap:      getEnv("AI_MODEL_CHEAP", ""),
 		AIModelImage:      getEnv("AI_MODEL_IMAGE", ""),
-
-		// Deprecated (retained one release; no longer read) — see struct doc above.
-		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
-		AnthropicModel:  getEnv("ANTHROPIC_MODEL", ""),
-		StabilityAPIKey: getEnv("STABILITY_API_KEY", ""),
-		GeminiAPIKey:    getEnv("GEMINI_API_KEY", ""),
 
 		// Auth & Security
 		AuthMode: getEnv("AUTH_MODE", ""),
