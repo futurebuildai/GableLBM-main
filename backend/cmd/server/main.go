@@ -53,6 +53,7 @@ import (
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
+	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
@@ -156,6 +157,12 @@ func main() {
 
 	// 5. Setup Router & Modules
 	mux := http.NewServeMux()
+
+	// 5a. Apps registry — the installable-apps platform layer
+	// (docs/modularization-blueprint.md). Converted modules register through
+	// it (gated on per-instance enablement); everything else is declared in
+	// catalog.go as core until converted.
+	appRegistry := apps.NewRegistry(db, logger).WithAudit(auditLog)
 
 	// Initialize Modules
 
@@ -463,29 +470,33 @@ func main() {
 	// Wire invoice service for auto-invoicing on delivery POD
 	deliverySvc.WithInvoiceService(&invoiceServiceAdapter{invoiceSvc: invoiceSvc, orderSvc: orderSvc})
 
-	// Millwork Module
+	// Millwork App (converted — reference conversion #1)
+	// One app, two backend modules: millwork (option catalogs) + configurator
+	// (rules/validation/build-sku) both gate on the "millwork" app key.
 	millworkRepo := millwork.NewRepository(db)
 	millworkSvc := millwork.NewService(millworkRepo)
 	millworkHandler := millwork.NewHandler(millworkSvc)
-	millworkHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
-
-	// Configurator Module (Sprint 19: Product Configurator)
 	configuratorRepo := configurator.NewRepository(db)
 	configuratorSvc := configurator.NewService(configuratorRepo)
 	configuratorHandler := configurator.NewHandler(configuratorSvc)
-	configuratorHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	appRegistry.Add(apps.App{Manifest: millwork.App, Register: func(r apps.Router) {
+		millworkHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner", "sales"))
+		configuratorHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner", "sales"))
+	}})
 
 	// AI Vision Module (Sprint 19: Blueprint Verification Prototype)
 	visionSvc := vision.NewService()
 	visionHandler := vision.NewHandler(visionSvc)
 	visionHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
-	// Governance Module
+	// Governance App (converted — reference conversion #2)
 	governanceRepo := governance.NewRepository(db)
 	aiProvider := governance.NewTemplateAIProvider()
 	governanceSvc := governance.NewService(governanceRepo, aiProvider)
 	governanceHandler := governance.NewHandler(governanceSvc)
-	governanceHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	appRegistry.Add(apps.App{Manifest: governance.App, Register: func(r apps.Router) {
+		governanceHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner"))
+	}})
 
 	// Partner Module
 	partnerSvc := partner.NewService(customerRepo, quoteRepo, logger)
@@ -574,8 +585,26 @@ func main() {
 			logger.Warn("INTEGRATION_API_KEY not set — integration endpoints disabled")
 		}
 	}
-	integrationHandler := integrations.NewHandler(db, pricingSvc, quote.NewService(quoteRepo), orderSvc, customerSvc, productSvc, integrationAPIKey)
+	// Reuse the module-level quoteSvc (a second quote.NewService instance was
+	// constructed inline here historically — two live services over one repo).
+	integrationHandler := integrations.NewHandler(db, pricingSvc, quoteSvc, orderSvc, customerSvc, productSvc, integrationAPIKey)
 	integrationHandler.RegisterRoutes(mux)
+
+	// 5z. Apps platform: catalog the unconverted modules, mount converted
+	// apps through the enablement gate, expose the Apps API, and sync
+	// manifests to the `apps` table (operator-owned `enabled` is preserved).
+	appRegistry.AddStatic(unconvertedAppCatalog...)
+	appRegistry.Mount(mux)
+	apps.NewHandler(appRegistry).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	{
+		syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := appRegistry.Sync(syncCtx); err != nil {
+			// Non-fatal: gating fails open and the catalog syncs on next boot
+			// (e.g. first boot before migration 074 has been applied).
+			logger.Warn("apps registry sync failed (continuing; run migrations)", "error", err)
+		}
+		cancel()
+	}
 
 	// F-04: FB Brain Integration — all Brain components gated behind FBBrainEnabled kill switch
 	if cfg.FBBrainEnabled {

@@ -9,9 +9,12 @@ import './branch-switcher.ts';
 import { icon } from '../../lib/icons.ts';
 import {
   LayoutDashboard, LayoutGrid, Package, Truck, FileText,
-  Settings, Menu, Hammer, ChevronLeft, ChevronRight, Search,
-  ShoppingBag, Store, BookOpen, Building2
+  Settings, Menu, ChevronLeft, ChevronRight, Search,
+  ShoppingBag, Store, BookOpen, Building2, Puzzle
 } from 'lucide';
+import { navItemsFor } from '../../apps/registry.ts';
+import { appsService } from '../../services/AppsService.ts';
+import type { NavSection } from '../../apps/types.ts';
 
 @customElement('gable-app-shell')
 export class GableAppShell extends LitElement {
@@ -27,6 +30,7 @@ export class GableAppShell extends LitElement {
   private _boundOnline = () => { this._isOffline = false; };
   private _boundOffline = () => { this._isOffline = true; };
   private _boundRouteChanged = () => { this.requestUpdate(); };
+  private _boundAppsChanged = () => { this.requestUpdate(); };
 
   connectedCallback() {
     super.connectedCallback();
@@ -34,6 +38,9 @@ export class GableAppShell extends LitElement {
     window.addEventListener('online', this._boundOnline);
     window.addEventListener('offline', this._boundOffline);
     router.addEventListener('route-changed', this._boundRouteChanged);
+    // Generated nav reacts to app enable/disable; fails open until loaded.
+    appsService.addEventListener('apps-changed', this._boundAppsChanged);
+    void appsService.load().catch(() => { /* backend gate still enforces */ });
   }
 
   disconnectedCallback() {
@@ -42,6 +49,7 @@ export class GableAppShell extends LitElement {
     window.removeEventListener('online', this._boundOnline);
     window.removeEventListener('offline', this._boundOffline);
     router.removeEventListener('route-changed', this._boundRouteChanged);
+    appsService.removeEventListener('apps-changed', this._boundAppsChanged);
   }
 
   private _handleKeyDown(e: KeyboardEvent) {
@@ -49,6 +57,11 @@ export class GableAppShell extends LitElement {
       e.preventDefault();
       this._shortcutsOpen = true;
     }
+  }
+
+  /** Nav items contributed by enabled apps' manifests (app/src/apps/). */
+  private _appNavItems(section: NavSection) {
+    return navItemsFor(section).map((item) => this._navItem(item.path, item.icon, item.label));
   }
 
   private _navItem(to: string, iconData: Parameters<typeof icon>[0], label: string) {
@@ -112,10 +125,10 @@ export class GableAppShell extends LitElement {
             ${this._navItem('/purchasing', ShoppingBag, 'Purchasing')}
             ${this._navItem('/purchasing/vendors', Store, 'Vendors')}
             ${this._navItem('/invoices', FileText, 'Invoices')}
-            ${this._navItem('/millwork/configurator', Hammer, 'Millwork')}
             ${this._navItem('/dispatch', Truck, 'Logistics')}
             ${this._navItem('/fleet', Settings, 'Fleet')}
             ${this._navItem('/reports/daily-till', LayoutDashboard, 'Daily Till')}
+            ${this._appNavItems('operations')}
 
             <div class="mb-2 mt-4 px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
               ${this._sidebarOpen ? 'Accounting' : nothing}
@@ -129,6 +142,8 @@ export class GableAppShell extends LitElement {
           <!-- Footer -->
           <div class="p-3 border-t border-white/5 bg-slate-steel/50 space-y-1">
             ${this._navItem('/pricing', LayoutGrid, 'Pricing')}
+            ${this._appNavItems('footer')}
+            ${this._navItem('/admin/apps', Puzzle, 'Apps')}
             ${this._navItem('/admin/branches', Building2, 'Branches')}
             ${this._navItem('/admin', Settings, 'Admin')}
           </div>

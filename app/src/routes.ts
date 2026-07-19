@@ -1,7 +1,11 @@
 import type { RouteConfig } from './lib/router.ts';
+import { appRoutes } from './apps/registry.ts';
 
 /**
  * Route table — order matters: more-specific paths must come before less-specific ones.
+ *
+ * Converted apps (docs/modularization-blueprint.md) declare their routes in
+ * app/src/apps/<key>.ts instead of here — they're spread in via appRoutes().
  */
 export const routes: RouteConfig[] = [
   // ── POS (no layout) ─────────────────────────────────────────────
@@ -56,18 +60,15 @@ export const routes: RouteConfig[] = [
   { path: '/reports/builder', load: () => import('./pages/reports/ReportBuilder.ts'), layout: 'erp' },
   { path: '/dispatch', load: () => import('./pages/DispatchBoard.ts'), layout: 'erp' },
   { path: '/fleet', load: () => import('./pages/logistics/FleetManagement.ts'), layout: 'erp' },
-  { path: '/millwork/configure', load: () => import('./pages/millwork/DoorConfigurator.ts'), layout: 'erp' },
-  { path: '/millwork/configurator', load: () => import('./pages/millwork/ProductConfigurator.ts'), layout: 'erp' },
-  { path: '/millwork/blueprint', load: () => import('./pages/millwork/BlueprintVerifier.ts'), layout: 'erp' },
+  // Converted apps (millwork, governance, …) — routes come from their manifests.
+  ...appRoutes(),
   { path: '/purchasing/vendors/:id', load: () => import('./pages/purchasing/VendorDetail.ts'), layout: 'erp' },
   { path: '/purchasing/vendors', load: () => import('./pages/purchasing/VendorList.ts'), layout: 'erp' },
   { path: '/purchasing/new', load: () => import('./pages/purchasing/NewPurchaseOrder.ts'), layout: 'erp' },
   { path: '/purchasing/:id', load: () => import('./pages/purchasing/PurchaseOrderDetail.ts'), layout: 'erp' },
   { path: '/purchasing', load: () => import('./pages/purchasing/PurchaseOrderList.ts'), layout: 'erp' },
   { path: '/sales', load: async () => {}, layout: 'erp', redirect: '/quotes' },
-  { path: '/governance/new', load: () => import('./pages/governance/NewRFC.ts'), layout: 'erp' },
-  { path: '/governance/:id', load: () => import('./pages/governance/RFCDetail.ts'), layout: 'erp' },
-  { path: '/governance', load: () => import('./pages/governance/RFCDashboard.ts'), layout: 'erp' },
+  { path: '/admin/apps', load: () => import('./pages/admin/AppsPage.ts'), layout: 'erp' },
   { path: '/admin/branches/:id/users', load: () => import('./pages/admin/branches/BranchUsers.ts'), layout: 'erp' },
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp' },

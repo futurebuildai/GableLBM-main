@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/httputil"
 )
 
@@ -15,7 +16,10 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
+// RegisterRoutes mounts configurator routes. mux is the apps.Router surface —
+// the configurator registers under the "millwork" app, so these routes gate
+// on that app's enablement; *http.ServeMux also satisfies the interface.
+func (h *Handler) RegisterRoutes(mux apps.Router, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
 		if len(roleGuard) > 0 && roleGuard[0] != nil {
 			return func(w http.ResponseWriter, r *http.Request) {

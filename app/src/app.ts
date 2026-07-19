@@ -1,6 +1,8 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { router, type RouteMatch } from './lib/router.ts';
+import { appKeyForPath, appManifests, tagForPath as appTagForPath } from './apps/registry.ts';
+import { appsService } from './services/AppsService.ts';
 
 // Import layout shells (eagerly — they're small and always needed)
 import './components/layout/app-shell.ts';
@@ -14,6 +16,9 @@ import './components/ui/toast-container.ts';
 // Import not-found page (fallback for unknown routes)
 import './components/ui/not-found.ts';
 
+// Disabled-app panel (rendered when a route's owning app is toggled off)
+import './components/ui/app-disabled.ts';
+
 @customElement('gable-app')
 export class GableApp extends LitElement {
   // Light DOM so Tailwind works
@@ -22,9 +27,16 @@ export class GableApp extends LitElement {
   @state() private _match: RouteMatch | null = null;
   @state() private _loading = true;
 
+  private _onAppsChanged = () => this.requestUpdate();
+
   connectedCallback() {
     super.connectedCallback();
     router.addEventListener('route-changed', this._onRouteChanged);
+    // App enablement — fire-and-forget; gating fails open until it loads.
+    appsService.addEventListener('apps-changed', this._onAppsChanged);
+    void appsService.load().catch(() => {
+      /* offline/pre-auth: backend gate still enforces */
+    });
     // Initial route
     if (router.currentMatch) {
       this._onRouteChanged(
@@ -36,6 +48,7 @@ export class GableApp extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     router.removeEventListener('route-changed', this._onRouteChanged);
+    appsService.removeEventListener('apps-changed', this._onAppsChanged);
   }
 
   private _onRouteChanged = async (e: Event) => {
@@ -72,6 +85,11 @@ export class GableApp extends LitElement {
   }
 
   private _pathToTag(path: string): string {
+    // Converted apps declare path→tag in their manifests (app/src/apps/) —
+    // one source of truth. The map below shrinks as modules convert.
+    const appTag = appTagForPath(path);
+    if (appTag) return appTag;
+
     const tagMap: Record<string, string> = {
       '/': (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') ? 'gable-local-test-hub' : 'gable-dashboard',
       '/local-test': 'gable-local-test-hub',
@@ -95,18 +113,13 @@ export class GableApp extends LitElement {
       '/reports/builder': 'gable-report-builder',
       '/dispatch': 'gable-dispatch-board',
       '/fleet': 'gable-fleet-management',
-      '/millwork/configure': 'gable-door-configurator',
-      '/millwork/configurator': 'gable-product-configurator',
-      '/millwork/blueprint': 'gable-blueprint-verifier',
       '/purchasing/vendors/:id': 'gable-vendor-detail',
       '/purchasing/vendors': 'gable-vendor-list',
       '/purchasing/new': 'gable-new-purchase-order',
       '/purchasing/:id': 'gable-purchase-order-detail',
       '/purchasing': 'gable-purchase-order-list',
-      '/governance': 'gable-rfc-dashboard',
-      '/governance/new': 'gable-new-rfc',
-      '/governance/:id': 'gable-rfc-detail',
       '/admin': 'gable-tech-admin',
+      '/admin/apps': 'gable-apps-page',
       '/admin/branches': 'gable-admin-branches',
       '/admin/branches/:id/users': 'gable-admin-branch-users',
       '/pricing': 'gable-pricing-matrix',
@@ -169,8 +182,19 @@ export class GableApp extends LitElement {
     const tag = this._getPageTag();
     const layout = this._match.route.layout;
 
+    // App gate (UX only — the backend 404s a disabled app's API regardless):
+    // routes owned by a disabled app render the disabled panel inside the
+    // normal layout so the user can navigate to /admin/apps.
+    const appKey = appKeyForPath(this._match.route.path);
+    const disabledApp =
+      appKey && !appsService.isEnabled(appKey)
+        ? appManifests.find((a) => a.key === appKey)
+        : undefined;
+
     // Create the page element dynamically with params as attributes
-    const pageHtml = this._renderPageTag(tag);
+    const pageHtml = disabledApp
+      ? html`<gable-app-disabled app-name=${disabledApp.name}></gable-app-disabled>`
+      : this._renderPageTag(tag);
 
     switch (layout) {
       case 'erp':
@@ -187,14 +211,25 @@ export class GableApp extends LitElement {
     }
   }
 
+  // Memoized page element: re-renders of gable-app (e.g. from 'apps-changed')
+  // must not tear down and remount the current page — remounting re-runs
+  // connectedCallback, which for data pages refires fetches.
+  private _pageEl: HTMLElement | null = null;
+  private _pageElKey = '';
+
   /** Render a custom element tag with route params as attributes */
   private _renderPageTag(tag: string) {
     const params = this._match?.params || {};
-    const el = document.createElement(tag);
-    // Pass route params as attributes
-    for (const [key, value] of Object.entries(params)) {
-      el.setAttribute(`route-${key}`, value);
+    const key = tag + JSON.stringify(params);
+    if (key !== this._pageElKey || !this._pageEl) {
+      const el = document.createElement(tag);
+      // Pass route params as attributes
+      for (const [k, value] of Object.entries(params)) {
+        el.setAttribute(`route-${k}`, value);
+      }
+      this._pageEl = el;
+      this._pageElKey = key;
     }
-    return html`${el}`;
+    return html`${this._pageEl}`;
   }
 }
