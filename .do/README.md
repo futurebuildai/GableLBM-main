@@ -9,6 +9,7 @@ only.
 |---|---|---|---|
 | `app-demo.yaml` | `community` | https://demo.gablelbm.com | `gable_demo` |
 | `app-staging.yaml` | `staging` | https://staging.gablelbm.com | `gable_staging` |
+| `app-apps-staging.yaml` | `apps-staging` | DO default hostname (temporary) | `gable_apps` |
 
 Both apps share a single DO Managed Postgres cluster (`gable-pg`,
 PG 16, dev tier) with isolated logical databases. Both run with
@@ -75,6 +76,40 @@ back on the backend over the public hostname.
 
 4. Once DNS verifies, DO issues Let's Encrypt certs automatically and
    both `demo.gablelbm.com` and `staging.gablelbm.com` go live.
+
+## Apps-platform test env (temporary)
+
+`app-apps-staging.yaml` deploys the `apps-staging` branch (the
+installable-apps platform work) to a third app on the **default DO
+hostname** — no domain/DNS steps. Bring-up:
+
+```bash
+git push origin apps-staging
+doctl databases list                                  # note gable-pg cluster id
+doctl databases db create <cluster-id> gable_apps
+doctl apps create --spec .do/app-apps-staging.yaml
+doctl apps list                                       # note app id + default hostname
+```
+
+The SPA uses relative `/api/*` URLs (empty `VITE_API_URL`), so it works
+on whatever hostname DO assigns — same-origin, no CORS. Each push to
+`apps-staging` redeploys; the post-deploy job runs `./migrate && ./seed`
+(applies migration 074 and reseeds) and the backend syncs the apps
+registry at boot. Verify with:
+
+```bash
+curl https://<default-hostname>/api/v1/apps           # 39 apps, all enabled
+# then in the UI: /admin/apps → toggle Millwork off/on
+```
+
+**Teardown when the PR merges** (leaves demo/staging untouched):
+
+```bash
+doctl apps delete <app-id>
+# then, connected to the cluster's defaultdb:
+psql> DROP DATABASE gable_apps;
+# finally remove .do/app-apps-staging.yaml + the apps-staging branch
+```
 
 ## Subsequent deploys
 
