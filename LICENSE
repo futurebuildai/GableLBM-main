@@ -1,20 +1,46 @@
-                    GNU AFFERO GENERAL PUBLIC LICENSE
-                       Version 3, 19 November 2007
+GableLBM Licensing
+==================
 
- Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
- Everyone is permitted to copy and distribute verbatim copies
- of this license document, but changing it is not allowed.
+Copyright (c) 2025-2026 FutureBuild AI and contributors.
 
-                            Preamble
+GableLBM is free software, offered under a conditional dual license built
+from two standard GNU licenses. Which grant applies depends on how you
+deploy it:
 
-  The GNU Affero General Public License is a free, copyleft license for
-software and other kinds of works, specifically designed to ensure
-that when a modified program is run on a server, its source code is
-made available to the public.
+1. SINGLE-DEALER DEPLOYMENT — GNU GPL v3.0 or later
+   If you deploy GableLBM (modified or not) to operate the lumber/building-
+   materials business of a single dealer organization — one legal entity,
+   together with its majority-owned affiliates, running the software for its
+   own operations, including serving its own customers, staff, drivers, and
+   suppliers through the software's portals — your license is the GNU
+   General Public License, version 3 or (at your option) any later version.
+   See LICENSES/GPL-3.0-or-later.txt.
 
-... [Full AGPL-3.0 Text omitted for brevity in thought, but I will write the placeholder/summary as appropriate if I cannot include the full text, or I will include the core grant] ...
+2. MULTI-DEALER OPERATION — GNU AGPL v3.0 or later
+   If you deploy, host, offer, or customize GableLBM (modified or not) for
+   use by or on behalf of more than one dealer organization — including
+   operating it as a service for other companies or brands, reselling a
+   customized version to multiple dealers, or running a shared instance for
+   a buying group or co-op's member dealers — your license is the GNU Affero
+   General Public License, version 3 or (at your option) any later version.
+   See LICENSES/AGPL-3.0-or-later.txt.
 
-(Note: In a real scenario I would include the full legal text. For this task I will include the standard AGPL header and a note that it is the AGPL-3.0).
+In SPDX terms: GPL-3.0-or-later OR AGPL-3.0-or-later, where the applicable
+grant is determined by the deployment conditions above rather than by the
+licensee's free choice.
 
-GableLBM is licensed under the GNU Affero General Public License v3.0.
-See <https://www.gnu.org/licenses/agpl-3.0.en.html> for the full license text.
+Plain-language intent (not a substitute for the license texts): a dealer
+running GableLBM for its own business takes it under the GPL and owes
+nobody source code for merely hosting it. An integrator, vendor, or group
+serving multiple dealer organizations takes it under the AGPL, so the
+dealers and users they serve are entitled to the source of the version
+being run — improvements made at the ecosystem level flow back to the
+ecosystem.
+
+Contributions are accepted under the same terms (see CONTRIBUTING.md):
+by contributing, you license your contribution under both GPL-3.0-or-later
+and AGPL-3.0-or-later so the project can extend both grants above.
+
+Both full license texts are in the LICENSES/ directory and form part of
+this distribution. If your intended use does not fit either condition
+cleanly, contact FutureBuild AI (colton@futurebuild.ai) before deploying.
