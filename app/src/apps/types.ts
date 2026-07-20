@@ -13,9 +13,6 @@ import type { createElement } from 'lucide';
 
 export type IconData = Parameters<typeof createElement>[0];
 
-/** Sidebar placement for generated ERP nav items. */
-export type NavSection = 'main' | 'operations' | 'accounting' | 'footer';
-
 export interface AppRoute {
   path: string;
   /** Custom element tag the page registers (replaces the app.ts tag map). */
@@ -24,12 +21,15 @@ export interface AppRoute {
   layout: RouteConfig['layout'];
 }
 
+/**
+ * One entry in the app's menu. The first item doubles as the app's entry
+ * point: the Home launcher tile and the workspace tab open it.
+ */
 export interface AppNavItem {
   label: string;
   path: string;
   icon: IconData;
-  section: NavSection;
-  /** Sort order within the section (generated items only). */
+  /** Sort order within the app's menu. */
   order: number;
 }
 

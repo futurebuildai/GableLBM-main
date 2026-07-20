@@ -15,6 +15,8 @@ export const millworkApp: FrontendAppManifest = {
     { path: '/millwork/blueprint', tag: 'gable-blueprint-verifier', load: () => import('../pages/millwork/BlueprintVerifier.ts'), layout: 'erp' },
   ],
   nav: [
-    { label: 'Millwork', path: '/millwork/configurator', icon: Hammer, section: 'operations', order: 10 },
+    { label: 'Product Configurator', path: '/millwork/configurator', icon: Hammer, order: 10 },
+    { label: 'Door Configurator', path: '/millwork/configure', icon: Hammer, order: 20 },
+    { label: 'Blueprint Verifier', path: '/millwork/blueprint', icon: Hammer, order: 30 },
   ],
 };

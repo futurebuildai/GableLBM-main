@@ -10,7 +10,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
-import { workspace, type WorkspaceTab } from '../../lib/workspace.ts';
+import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '../ui/brand-logo.ts';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
@@ -98,6 +98,39 @@ export class GableAppShell extends LitElement {
     `;
   }
 
+  /** Menu band for the active tab: app identity + its own menu items. */
+  private _appMenu() {
+    const key = workspace.activeKey;
+    if (key === 'home') return nothing;
+    const menu = menuForKey(key);
+    if (menu.length === 0) return nothing;
+    const tab = workspace.tabs.find((t) => t.key === key);
+    const active = activeMenuPath(menu, router.currentPath);
+    return html`
+      <div class="flex items-center gap-1 px-4 md:px-6 h-11 bg-deep-space/60 border-b border-white/5 overflow-x-auto no-scrollbar">
+        ${tab
+          ? html`<span class="flex items-center gap-2 pr-3 mr-2 border-r border-white/10 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 shrink-0">
+              ${icon(tab.icon, 13)} ${tab.label}
+            </span>`
+          : nothing}
+        ${menu.map(
+          (item) => html`
+            <a
+              href="${item.path}"
+              class="${cn(
+                'shrink-0 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                active === item.path
+                  ? 'text-gable-green bg-gable-green/10'
+                  : 'text-zinc-400 hover:text-white hover:bg-white/5',
+              )}"
+              >${item.label}</a
+            >
+          `,
+        )}
+      </div>
+    `;
+  }
+
   render() {
     return html`
       <div class="min-h-screen bg-deep-space text-foreground flex flex-col font-sans selection:bg-gable-green/30">
@@ -151,6 +184,9 @@ export class GableAppShell extends LitElement {
             ${icon(Plus, 16)}
           </button>
         </nav>
+
+        <!-- Per-app menu band (the active tab's own navigation) -->
+        ${this._appMenu()}
 
         <!-- Offline Banner -->
         ${this._isOffline ? html`

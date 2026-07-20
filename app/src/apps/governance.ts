@@ -19,6 +19,7 @@ export const governanceApp: FrontendAppManifest = {
     { path: '/governance', tag: 'gable-rfc-dashboard', load: () => import('../pages/governance/RFCDashboard.ts'), layout: 'erp' },
   ],
   nav: [
-    { label: 'Governance', path: '/governance', icon: ScrollText, section: 'footer', order: 10 },
+    { label: 'RFC Dashboard', path: '/governance', icon: ScrollText, order: 10 },
+    { label: 'New RFC', path: '/governance/new', icon: ScrollText, order: 20 },
   ],
 };
