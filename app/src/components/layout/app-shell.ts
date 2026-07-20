@@ -10,7 +10,7 @@ import { icon } from '../../lib/icons.ts';
 import {
   LayoutDashboard, LayoutGrid, Package, Truck, FileText,
   Settings, Menu, ChevronLeft, ChevronRight, Search,
-  ShoppingBag, Store, BookOpen, Building2, Puzzle
+  ShoppingBag, Store, BookOpen, Building2, Puzzle, House
 } from 'lucide';
 import { navItemsFor } from '../../apps/registry.ts';
 import { appsService } from '../../services/AppsService.ts';
@@ -111,6 +111,7 @@ export class GableAppShell extends LitElement {
           <!-- Navigation -->
           <nav aria-label="Main navigation" class="flex-1 p-3 space-y-1 overflow-y-auto no-scrollbar">
             <div class="mb-6">
+              ${this._navItem('/home', House, 'Home')}
               ${this._navItem('/dashboard', LayoutDashboard, 'Dashboard')}
               ${this._navItem('/inventory', Package, 'Inventory')}
               ${this._navItem('/accounts', LayoutDashboard, 'Accounts')}

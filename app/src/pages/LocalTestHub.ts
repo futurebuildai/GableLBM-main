@@ -20,7 +20,7 @@ export class GableLocalTestHub extends LitElement {
     {
       title: 'ERP Desktop',
       desc: 'Full back-office: dashboard, orders, inventory, AR, accounting.',
-      href: '/dashboard',
+      href: '/home',
       icon: LayoutDashboard,
       accent: 'from-gable-green/30 to-emerald-500/10',
     },

@@ -91,8 +91,9 @@ export class GableApp extends LitElement {
     if (appTag) return appTag;
 
     const tagMap: Record<string, string> = {
-      '/': (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') ? 'gable-local-test-hub' : 'gable-dashboard',
+      '/': (import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true') ? 'gable-local-test-hub' : 'gable-home',
       '/local-test': 'gable-local-test-hub',
+      '/home': 'gable-home',
       '/dashboard': 'gable-dashboard',
       '/pos': 'gable-pos-terminal',
       '/inventory': 'gable-inventory',

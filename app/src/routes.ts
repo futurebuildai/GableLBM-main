@@ -78,7 +78,9 @@ export const routes: RouteConfig[] = [
   { path: '/accounting/chart-of-accounts', load: () => import('./pages/accounting/ChartOfAccounts.ts'), layout: 'erp' },
   { path: '/accounting/journal-entries', load: () => import('./pages/accounting/JournalEntries.ts'), layout: 'erp' },
   { path: '/accounting/trial-balance', load: () => import('./pages/accounting/TrialBalance.ts'), layout: 'erp' },
-  // Always-available ERP dashboard (linked from the local-dev surface picker).
+  // ERP home: Apps launcher + Dashboard as internal tabs.
+  { path: '/home', load: () => import('./pages/Home.ts'), layout: 'erp' },
+  // Direct dashboard deep-link (also lives in Home's Dashboard tab).
   { path: '/dashboard', load: () => import('./pages/Dashboard.ts'), layout: 'erp' },
   // Surface picker — mounted at `/` for:
   //   - local dev (`vite dev`)                          → import.meta.env.DEV
@@ -90,6 +92,6 @@ export const routes: RouteConfig[] = [
         { path: '/', load: () => import('./pages/LocalTestHub.ts'), layout: 'none' as const },
       ]
     : [
-        { path: '/', load: () => import('./pages/Dashboard.ts'), layout: 'erp' as const },
+        { path: '/', load: () => import('./pages/Home.ts'), layout: 'erp' as const },
       ]),
 ];
