@@ -227,6 +227,39 @@ func (r *Registry) refreshCache() {
 	r.disabled = disabled
 	r.cachedAt = time.Now()
 	r.mu.Unlock()
+	if len(disabled) == 0 {
+		r.maybeSelfHealEmpty(ctx)
+	}
+}
+
+// maybeSelfHealEmpty re-runs Sync when the apps table exists but holds zero
+// rows. This is the fresh-database first-boot case: on platforms where
+// migrations run as a post-deploy job (DO App Platform), the server's
+// boot-time Sync fires before migration 074 has created the table, the app
+// stays up via fail-open gating, and rows would otherwise be missing until
+// the next restart. Returns true if a self-heal sync ran successfully.
+func (r *Registry) maybeSelfHealEmpty(ctx context.Context) bool {
+	if r.db == nil {
+		return false
+	}
+	r.mu.RLock()
+	known := len(r.byKey)
+	r.mu.RUnlock()
+	if known == 0 {
+		return false
+	}
+	var hasRows bool
+	if err := r.db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM apps)`).Scan(&hasRows); err != nil || hasRows {
+		return false
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := r.Sync(sctx); err != nil {
+		r.logger.Warn("apps: self-heal sync failed", "error", err)
+		return false
+	}
+	r.logger.Info("apps: registry self-healed an empty table (first boot on a fresh database)")
+	return true
 }
 
 // bustCache forces the next IsEnabled/List to re-read the DB.
@@ -237,8 +270,17 @@ func (r *Registry) bustCache() {
 }
 
 // List returns the full catalog (known manifests + orphaned rows), sorted by
-// category then name, with live enablement state.
+// category then name, with live enablement state. An empty result triggers
+// one self-heal sync + re-query (fresh-DB first boot; see maybeSelfHealEmpty).
 func (r *Registry) List(ctx context.Context) ([]Status, error) {
+	out, err := r.listOnce(ctx)
+	if err == nil && len(out) == 0 && r.maybeSelfHealEmpty(ctx) {
+		return r.listOnce(ctx)
+	}
+	return out, err
+}
+
+func (r *Registry) listOnce(ctx context.Context) ([]Status, error) {
 	if r.db == nil {
 		return nil, errors.New("apps: registry has no database")
 	}
@@ -252,7 +294,7 @@ func (r *Registry) List(ctx context.Context) ([]Status, error) {
 	known := r.byKey
 	r.mu.RUnlock()
 
-	var out []Status
+	out := []Status{} // non-nil: the API serializes an empty catalog as [], not null
 	for rows.Next() {
 		var s Status
 		if err := rows.Scan(&s.Key, &s.Name, &s.Summary, &s.Category, &s.Core, &s.Enabled, &s.DependsOn); err != nil {
