@@ -27,6 +27,8 @@ type POSTransaction struct {
 	Subtotal    int64             `json:"subtotal" db:"subtotal"`     // Cents
 	TaxAmount   int64             `json:"tax_amount" db:"tax_amount"` // Cents
 	Total       int64             `json:"total" db:"total"`           // Cents
+	ChangeDue   int64             `json:"change_due" db:"change_due"` // Cents, set at completion
+	TillSessionID *uuid.UUID      `json:"till_session_id,omitempty" db:"till_session_id"`
 	Status      TransactionStatus `json:"status" db:"status"`
 	CompletedAt *time.Time        `json:"completed_at,omitempty" db:"completed_at"`
 	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
@@ -62,6 +64,8 @@ type POSTender struct {
 	Reference     string    `json:"reference,omitempty" db:"reference"`
 	CardLast4     string    `json:"card_last4,omitempty" db:"card_last4"`
 	CardBrand     string    `json:"card_brand,omitempty" db:"card_brand"`
+	GatewayTxID   string    `json:"gateway_tx_id,omitempty" db:"gateway_tx_id"`
+	AuthCode      string    `json:"auth_code,omitempty" db:"auth_code"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 }
 

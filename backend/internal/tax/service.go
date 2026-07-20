@@ -183,8 +183,15 @@ func (s *Service) flatRateCalc(req *TaxPreviewRequest) *TaxResult {
 	var totalAmount, totalTax int64
 	var lines []TaxLine
 
+	// The caller's jurisdiction-resolved rate (e.g. branch default_tax_rate)
+	// beats the service-wide flat rate; both are estimates vs. Avalara.
+	rate := s.flatRate
+	if req.RateHint > 0 {
+		rate = req.RateHint
+	}
+
 	for _, line := range req.Lines {
-		lineTax := int64(math.Round(float64(line.Amount) * s.flatRate))
+		lineTax := int64(math.Round(float64(line.Amount) * rate))
 		totalAmount += line.Amount
 		totalTax += lineTax
 
@@ -195,7 +202,7 @@ func (s *Service) flatRateCalc(req *TaxPreviewRequest) *TaxResult {
 			Quantity:    line.Quantity,
 			Amount:      line.Amount,
 			TaxAmount:   lineTax,
-			TaxRate:     s.flatRate,
+			TaxRate:     rate,
 			Exempt:      false,
 		})
 	}

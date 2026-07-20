@@ -49,23 +49,28 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *Invoice) error {
 		}
 		inv.Subtotal = subtotal
 	}
-	if inv.TaxRate == 0 {
-		// Source the rate from the invoice's branch (locations.default_tax_rate),
-		// so app-created invoices match the jurisdiction (e.g. 0.12 in BC) instead
-		// of the hardcoded DefaultTaxRate fallback. branchID may be nil → the repo
-		// falls back to the active/default branch.
-		var branchID *uuid.UUID
-		if inv.BranchID != uuid.Nil {
-			branchID = &inv.BranchID
+	// Callers that pre-computed tax (e.g. POS account-charge sales, where the
+	// register already ran the exemption-aware calculation) pass TotalAmount
+	// set and are honored as-is. Everything else gets branch-rate tax here.
+	if inv.TotalAmount == 0 {
+		if inv.TaxRate == 0 {
+			// Source the rate from the invoice's branch (locations.default_tax_rate),
+			// so app-created invoices match the jurisdiction (e.g. 0.12 in BC) instead
+			// of the hardcoded DefaultTaxRate fallback. branchID may be nil → the repo
+			// falls back to the active/default branch.
+			var branchID *uuid.UUID
+			if inv.BranchID != uuid.Nil {
+				branchID = &inv.BranchID
+			}
+			if rate, ok := s.repo.GetBranchTaxRate(ctx, branchID); ok {
+				inv.TaxRate = rate
+			} else {
+				inv.TaxRate = DefaultTaxRate
+			}
 		}
-		if rate, ok := s.repo.GetBranchTaxRate(ctx, branchID); ok {
-			inv.TaxRate = rate
-		} else {
-			inv.TaxRate = DefaultTaxRate
-		}
+		inv.TaxAmount = int64(float64(inv.Subtotal) * inv.TaxRate)
+		inv.TotalAmount = inv.Subtotal + inv.TaxAmount
 	}
-	inv.TaxAmount = int64(float64(inv.Subtotal) * inv.TaxRate)
-	inv.TotalAmount = inv.Subtotal + inv.TaxAmount
 
 	// C5: Calculate due date from payment terms
 	if inv.PaymentTerms == "" {

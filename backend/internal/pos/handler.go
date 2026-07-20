@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -46,6 +47,92 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Offline sync
 	mux.HandleFunc("POST /api/v1/pos/sync", guard(h.SyncOffline))
 	mux.HandleFunc("GET /api/v1/pos/catalog", guard(h.GetCatalog))
+
+	// Till sessions (drawer lifecycle)
+	mux.HandleFunc("POST /api/v1/pos/till/open", guard(h.OpenTill))
+	mux.HandleFunc("GET /api/v1/pos/till/current", guard(h.CurrentTill))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/report", guard(h.TillReportHandler))
+	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
+}
+
+// --- Till handlers ---
+
+func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
+	var req OpenTillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if req.RegisterID == "" {
+		req.RegisterID = "REG-01"
+	}
+	cashierID := uuid.New() // Dev-mode fallback; real deployments carry JWT identity
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			cashierID = parsed
+		}
+	}
+	session, err := h.service.OpenTill(r.Context(), req.RegisterID, cashierID, int64(req.OpeningFloat*100.0+0.5))
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(session)
+}
+
+func (h *Handler) CurrentTill(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	if registerID == "" {
+		registerID = "REG-01"
+	}
+	session, err := h.service.CurrentTill(r.Context(), registerID)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to look up till session", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"session": session})
+}
+
+func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	report, err := h.service.TillReport(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to build till report", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	var req CloseTillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	counted := make(map[string]int64, len(req.CountedByMethod))
+	for method, dollars := range req.CountedByMethod {
+		counted[method] = int64(dollars*100.0 + 0.5)
+	}
+	report, err := h.service.CloseTill(r.Context(), id, counted, req.Notes)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
 }
 
 // --- Request types ---

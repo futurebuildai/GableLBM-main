@@ -79,8 +79,10 @@ func (r *PostgresRepository) CreateRefund(ctx context.Context, ref *Refund) erro
 	}
 	ref.CreatedAt = time.Now()
 
+	// payment_refunds is the real table (migration 026); a historical INSERT
+	// into a nonexistent `refunds` table made every refund fail at runtime.
 	query := `
-		INSERT INTO refunds (id, payment_id, amount, reason, gateway_refund_id, status, created_at)
+		INSERT INTO payment_refunds (id, payment_id, amount, reason, gateway_refund_id, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 	amountFloat := float64(ref.Amount) / 100.0

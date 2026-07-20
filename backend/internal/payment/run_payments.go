@@ -12,39 +12,61 @@ import (
 )
 
 // RunPaymentsGateway implements PaymentGateway for the Run Payments API.
-// API docs: https://developer.runpayments.io
+// API docs: https://docs.runpayments.io (developer hub) — verified July 2026:
+//   - Base URL:  https://javelin.runpayments.io
+//   - Auth:      Authorization: Bearer <Payments API Key>
+//   - Charge:    POST /api/v1/payments/charge
+//   - Refund/Void: POST /api/v1/transactions/void-or-refund
+// Sandbox vs production is selected by the API key (test keys from Run
+// Merchant); RUN_PAYMENTS_BASE_URL / the run_payments_base_url setting
+// overrides the host if Run provisions a dedicated sandbox endpoint.
+// The request/response field mapping below is isolated here and marked
+// where the public docs don't publish the schema — verify against the
+// sandbox on first live test and adjust ONLY this file.
 //
 // Flow:
-//  1. Frontend embeds Runner.js to tokenize card data (PCI-compliant)
+//  1. Frontend tokenizes card data via Run's JS (PCI-compliant)
 //  2. Frontend sends token to our backend
-//  3. Backend calls Run Payments API with the token to charge/capture/etc.
+//  3. Backend calls Run Payments API with the token to charge/refund
 //  4. Card data never touches our servers
 type RunPaymentsGateway struct {
-	apiKey  string
-	baseURL string
-	client  *http.Client
-	logger  *slog.Logger
+	// configProvider resolves credentials at call time so keys set in Tech
+	// Admin (system_settings) take effect without a restart.
+	configProvider func() GatewayConfig
+	client         *http.Client
+	logger         *slog.Logger
 }
 
-// NewRunPaymentsGateway creates a new Run Payments gateway client.
-func NewRunPaymentsGateway(cfg GatewayConfig, logger *slog.Logger) *RunPaymentsGateway {
-	baseURL := cfg.BaseURL
-	if baseURL == "" {
-		if cfg.Environment == "production" {
-			baseURL = "https://api.runpayments.io/v1"
-		} else {
-			baseURL = "https://sandbox.runpayments.io/v1"
-		}
-	}
+const runPaymentsDefaultBaseURL = "https://javelin.runpayments.io"
 
+// NewRunPaymentsGateway creates a gateway with a static configuration.
+func NewRunPaymentsGateway(cfg GatewayConfig, logger *slog.Logger) *RunPaymentsGateway {
+	return NewRunPaymentsGatewayDynamic(func() GatewayConfig { return cfg }, logger)
+}
+
+// NewRunPaymentsGatewayDynamic creates a gateway that resolves its
+// configuration on every call (e.g. from a DB-backed key store).
+func NewRunPaymentsGatewayDynamic(provider func() GatewayConfig, logger *slog.Logger) *RunPaymentsGateway {
 	return &RunPaymentsGateway{
-		apiKey:  cfg.APIKey,
-		baseURL: baseURL,
+		configProvider: provider,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		logger: logger,
 	}
+}
+
+// resolve returns the current credentials + base URL, or an error when no
+// API key is configured (env or Tech Admin).
+func (g *RunPaymentsGateway) resolve() (GatewayConfig, error) {
+	cfg := g.configProvider()
+	if cfg.APIKey == "" {
+		return cfg, fmt.Errorf("card processing not configured: set RUN_PAYMENTS_API_KEY or the run_payments_api_key setting")
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = runPaymentsDefaultBaseURL
+	}
+	return cfg, nil
 }
 
 // ----- Run Payments API Request/Response types -----
@@ -58,13 +80,14 @@ type runChargeRequest struct {
 	Capture     bool   `json:"capture"` // true = auth+capture, false = auth-only
 }
 
-type runCaptureRequest struct {
-	Amount int64 `json:"amount"` // cents
-}
-
-type runRefundRequest struct {
-	Amount int64  `json:"amount"` // cents
-	Reason string `json:"reason,omitempty"`
+// runVoidOrRefundRequest targets POST /api/v1/transactions/void-or-refund.
+// Field names are the best public mapping — the docs list the endpoint but
+// not its schema; verify on sandbox and adjust here only. Zero Amount = void
+// / full reversal; non-zero = (partial) refund of that many cents.
+type runVoidOrRefundRequest struct {
+	TransactionID string `json:"transaction_id"`
+	Amount        int64  `json:"amount,omitempty"` // cents
+	Reason        string `json:"reason,omitempty"`
 }
 
 type runAPIResponse struct {
@@ -97,7 +120,7 @@ func (g *RunPaymentsGateway) Charge(ctx context.Context, req ChargeRequest) (*Ga
 		Capture:     true, // Auth + capture in one step for POS
 	}
 
-	resp, err := g.doRequest(ctx, "POST", "/payments", body)
+	resp, err := g.doRequest(ctx, "POST", "/api/v1/payments/charge", body)
 	if err != nil {
 		return nil, fmt.Errorf("run payments charge failed: %w", err)
 	}
@@ -105,21 +128,16 @@ func (g *RunPaymentsGateway) Charge(ctx context.Context, req ChargeRequest) (*Ga
 	return g.toResult(resp), nil
 }
 
+// Capture is not exposed by the documented Run Payments API — the charge
+// endpoint authorizes and captures in one step. Kept to satisfy the
+// PaymentGateway interface.
 func (g *RunPaymentsGateway) Capture(ctx context.Context, gatewayTxID string, amountCents int64) (*GatewayResult, error) {
-	body := runCaptureRequest{
-		Amount: amountCents,
-	}
-
-	resp, err := g.doRequest(ctx, "POST", fmt.Sprintf("/payments/%s/capture", gatewayTxID), body)
-	if err != nil {
-		return nil, fmt.Errorf("run payments capture failed: %w", err)
-	}
-
-	return g.toResult(resp), nil
+	return nil, fmt.Errorf("run payments: separate capture is not supported (charge captures immediately)")
 }
 
 func (g *RunPaymentsGateway) Void(ctx context.Context, gatewayTxID string) (*GatewayResult, error) {
-	resp, err := g.doRequest(ctx, "POST", fmt.Sprintf("/payments/%s/void", gatewayTxID), nil)
+	body := runVoidOrRefundRequest{TransactionID: gatewayTxID}
+	resp, err := g.doRequest(ctx, "POST", "/api/v1/transactions/void-or-refund", body)
 	if err != nil {
 		return nil, fmt.Errorf("run payments void failed: %w", err)
 	}
@@ -130,11 +148,8 @@ func (g *RunPaymentsGateway) Void(ctx context.Context, gatewayTxID string) (*Gat
 }
 
 func (g *RunPaymentsGateway) Refund(ctx context.Context, gatewayTxID string, amountCents int64) (*GatewayResult, error) {
-	body := runRefundRequest{
-		Amount: amountCents,
-	}
-
-	resp, err := g.doRequest(ctx, "POST", fmt.Sprintf("/payments/%s/refund", gatewayTxID), body)
+	body := runVoidOrRefundRequest{TransactionID: gatewayTxID, Amount: amountCents}
+	resp, err := g.doRequest(ctx, "POST", "/api/v1/transactions/void-or-refund", body)
 	if err != nil {
 		return nil, fmt.Errorf("run payments refund failed: %w", err)
 	}
@@ -156,14 +171,18 @@ func (g *RunPaymentsGateway) doRequest(ctx context.Context, method, path string,
 		reqBody = bytes.NewReader(jsonBytes)
 	}
 
-	url := g.baseURL + path
+	cfg, err := g.resolve()
+	if err != nil {
+		return nil, err
+	}
+	url := cfg.BaseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+g.apiKey)
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	req.Header.Set("Accept", "application/json")
 
 	g.logger.Info("Run Payments API request",

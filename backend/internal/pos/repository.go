@@ -25,6 +25,13 @@ type Repository interface {
 	AddTender(ctx context.Context, tender *POSTender) error
 	GetTenders(ctx context.Context, txID uuid.UUID) ([]POSTender, error)
 
+	// Till sessions
+	CreateTillSession(ctx context.Context, s *TillSession) error
+	GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error)
+	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
+	CloseTillSession(ctx context.Context, s *TillSession) error
+	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
+
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
 
 	// Offline sync
@@ -66,14 +73,14 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	}
 
 	query := `
-		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at, branch_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
+		INSERT INTO pos_transactions (id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, created_at, synced_from, client_created_at, branch_id, till_session_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')), $13)
 		RETURNING branch_id
 	`
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch,
+		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch, tx.TillSessionID,
 	).Scan(&tx.BranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create POS transaction: %w", err)
@@ -150,16 +157,16 @@ func (r *PostgresRepository) LogSyncBatch(ctx context.Context, batchID, register
 
 func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (*POSTransaction, error) {
 	query := `
-		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, status, completed_at, created_at, branch_id
+		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, change_due, till_session_id, status, completed_at, created_at, branch_id
 		FROM pos_transactions
 		WHERE id = $1
 		  AND ($2::uuid IS NULL OR branch_id = $2)
 	`
 	var tx POSTransaction
-	var subtotal, taxAmount, total float64
+	var subtotal, taxAmount, total, changeDue float64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchctx.IDForQuery(ctx)).Scan(
 		&tx.ID, &tx.RegisterID, &tx.CashierID, &tx.CustomerID,
-		&subtotal, &taxAmount, &total,
+		&subtotal, &taxAmount, &total, &changeDue, &tx.TillSessionID,
 		&tx.Status, &tx.CompletedAt, &tx.CreatedAt, &tx.BranchID,
 	)
 	if err != nil {
@@ -168,13 +175,14 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (
 	tx.Subtotal = int64(subtotal*100.0 + 0.5)
 	tx.TaxAmount = int64(taxAmount*100.0 + 0.5)
 	tx.Total = int64(total*100.0 + 0.5)
+	tx.ChangeDue = int64(changeDue*100.0 + 0.5)
 	return &tx, nil
 }
 
 func (r *PostgresRepository) UpdateTransaction(ctx context.Context, tx *POSTransaction) error {
 	query := `
 		UPDATE pos_transactions
-		SET subtotal = $2, tax_amount = $3, total = $4, status = $5, completed_at = $6, customer_id = $7
+		SET subtotal = $2, tax_amount = $3, total = $4, status = $5, completed_at = $6, customer_id = $7, change_due = $9
 		WHERE id = $1
 		  AND ($8::uuid IS NULL OR branch_id = $8)
 	`
@@ -182,6 +190,7 @@ func (r *PostgresRepository) UpdateTransaction(ctx context.Context, tx *POSTrans
 		tx.ID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
 		tx.Status, tx.CompletedAt, tx.CustomerID, branchctx.IDForQuery(ctx),
+		float64(tx.ChangeDue)/100.0,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update POS transaction: %w", err)
@@ -289,13 +298,14 @@ func (r *PostgresRepository) AddTender(ctx context.Context, tender *POSTender) e
 	tender.CreatedAt = time.Now()
 
 	query := `
-		INSERT INTO pos_tenders (id, transaction_id, method, amount, reference, card_last4, card_brand, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO pos_tenders (id, transaction_id, method, amount, reference, card_last4, card_brand, gateway_tx_id, auth_code, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		tender.ID, tender.TransactionID, tender.Method,
 		float64(tender.Amount)/100.0, tender.Reference,
-		tender.CardLast4, tender.CardBrand, tender.CreatedAt,
+		tender.CardLast4, tender.CardBrand,
+		tender.GatewayTxID, tender.AuthCode, tender.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add POS tender: %w", err)
@@ -306,7 +316,8 @@ func (r *PostgresRepository) AddTender(ctx context.Context, tender *POSTender) e
 func (r *PostgresRepository) GetTenders(ctx context.Context, txID uuid.UUID) ([]POSTender, error) {
 	query := `
 		SELECT id, transaction_id, method, amount, COALESCE(reference, '') as reference,
-			COALESCE(card_last4, '') as card_last4, COALESCE(card_brand, '') as card_brand, created_at
+			COALESCE(card_last4, '') as card_last4, COALESCE(card_brand, '') as card_brand,
+			COALESCE(gateway_tx_id, '') as gateway_tx_id, COALESCE(auth_code, '') as auth_code, created_at
 		FROM pos_tenders
 		WHERE transaction_id = $1
 		ORDER BY created_at ASC
@@ -323,7 +334,7 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, txID uuid.UUID) ([]
 		var amount float64
 		if err := rows.Scan(
 			&t.ID, &t.TransactionID, &t.Method, &amount, &t.Reference,
-			&t.CardLast4, &t.CardBrand, &t.CreatedAt,
+			&t.CardLast4, &t.CardBrand, &t.GatewayTxID, &t.AuthCode, &t.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan POS tender: %w", err)
 		}

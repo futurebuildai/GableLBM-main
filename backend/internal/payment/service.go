@@ -19,7 +19,8 @@ type Service struct {
 	invoiceRepo    invoice.Repository
 	account        account.Service
 	gateway        PaymentGateway // Run Payments (or nil for non-card payments)
-	publicKey      string         // Run Payments public key for Runner.js
+	publicKey      string         // Run Payments public key for Runner.js (static fallback)
+	keyStore       *KeyStore      // Optional: DB-first key resolution (Tech Admin settable)
 	brainNotifier  *BrainNotifier // FB Brain financial engine notifier (or nil)
 	brainOrgID     string         // Brain org_id for this tenant
 	auditLog       *audit.Logger
@@ -57,8 +58,20 @@ func (s *Service) WithAuditLog(l *audit.Logger) *Service {
 	return s
 }
 
+// WithKeyStore enables DB-first gateway credential resolution so keys set
+// at runtime (system_settings via Tech Admin) take effect without restart.
+func (s *Service) WithKeyStore(ks *KeyStore) *Service {
+	s.keyStore = ks
+	return s
+}
+
 // GetPublicKey returns the Run Payments public key for frontend Runner.js integration.
 func (s *Service) GetPublicKey() string {
+	if s.keyStore != nil {
+		if pk := s.keyStore.Resolve().PublicKey; pk != "" {
+			return pk
+		}
+	}
 	return s.publicKey
 }
 

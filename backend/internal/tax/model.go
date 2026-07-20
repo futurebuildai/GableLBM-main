@@ -60,6 +60,11 @@ type TaxPreviewRequest struct {
 	ShipTo      TaxAddress     `json:"ship_to"`
 	Lines       []TaxLineInput `json:"lines"`
 	DocumentType string        `json:"document_type"` // "SalesInvoice", "ReturnInvoice"
+	// RateHint is the caller-resolved fallback rate (e.g. the branch's
+	// locations.default_tax_rate) used by the flat-rate path when Avalara is
+	// not configured. Zero means "use the service's configured flat rate".
+	// The Avalara path ignores it. Exemptions always apply first.
+	RateHint float64 `json:"rate_hint,omitempty"`
 }
 
 // TaxLineInput is a single line item in a tax preview request.

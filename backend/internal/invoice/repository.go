@@ -70,7 +70,7 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *Invoice) er
 	}
 	queryInv := `
 		INSERT INTO invoices (id, order_id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount, payment_terms, due_date, paid_at, created_at, updated_at, branch_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+		VALUES ($1, NULLIF($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
 			COALESCE($14::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
 	`
 	_, err := exec.Exec(ctx, queryInv,

@@ -354,23 +354,47 @@ func main() {
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
 	docHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
 
+	// Sales Tax Module (exemptions + Avalara when configured; wired before
+	// Payment/POS because both consume the tax service).
+	taxExemptionRepo := tax.NewExemptionRepo(db)
+	var avalaraClient *tax.AvalaraClient
+	if cfg.AvalaraAccountID != "" {
+		avalaraClient = tax.NewAvalaraClient(tax.AvalaraConfig{
+			AccountID:   cfg.AvalaraAccountID,
+			LicenseKey:  cfg.AvalaraLicenseKey,
+			Environment: cfg.AvalaraEnvironment,
+			CompanyCode: cfg.AvalaraCompanyCode,
+		}, logger)
+		logger.Info("Avalara AvaTax initialized", "environment", cfg.AvalaraEnvironment)
+	} else {
+		logger.Info("AVALARA_ACCOUNT_ID not set — POS/invoice tax uses the branch default rate (locations.default_tax_rate)")
+	}
+	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
+	taxHandler := tax.NewHandler(taxSvc)
+	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
 	paymentSvc := payment.NewService(db, paymentRepo, invoiceRepo, accountSvc)
 	paymentSvc.WithAuditLog(auditLog)
 
-	// Wire Run Payments gateway if API key is configured
-	if cfg.RunPaymentsAPIKey != "" {
-		rpGateway := payment.NewRunPaymentsGateway(payment.GatewayConfig{
-			APIKey:      cfg.RunPaymentsAPIKey,
-			PublicKey:   cfg.RunPaymentsPublicKey,
-			BaseURL:     cfg.RunPaymentsBaseURL,
-			Environment: cfg.RunPaymentsEnvironment,
-		}, logger)
-		paymentSvc.WithGateway(rpGateway, cfg.RunPaymentsPublicKey)
-		logger.Info("Run Payments gateway initialized", "environment", cfg.RunPaymentsEnvironment)
+	// Run Payments gateway — always constructed; credentials resolve at call
+	// time, DB-first (system_settings run_payments_* keys, settable in Tech
+	// Admin) with RUN_PAYMENTS_* env fallback. Card processing lights up the
+	// moment a key exists, no restart needed.
+	paymentKeys := payment.NewKeyStore(db, payment.GatewayConfig{
+		APIKey:      cfg.RunPaymentsAPIKey,
+		PublicKey:   cfg.RunPaymentsPublicKey,
+		BaseURL:     cfg.RunPaymentsBaseURL,
+		Environment: cfg.RunPaymentsEnvironment,
+	})
+	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger)
+	paymentSvc.WithGateway(rpGateway, cfg.RunPaymentsPublicKey)
+	paymentSvc.WithKeyStore(paymentKeys)
+	if paymentKeys.Configured() {
+		logger.Info("Run Payments gateway configured", "environment", cfg.RunPaymentsEnvironment)
 	} else {
-		logger.Warn("RUN_PAYMENTS_API_KEY not set — card payments disabled (cash/check/account only)")
+		logger.Warn("Run Payments key not set (env or settings) — card charges will fail until run_payments_api_key is configured")
 	}
 
 	paymentHandler := payment.NewHandler(paymentSvc)
@@ -381,6 +405,8 @@ func main() {
 	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
 	posSvc.WithAuditLog(auditLog)
+	posSvc.WithTax(taxSvc, invoiceRepo)
+	posSvc.WithGateway(rpGateway)
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
@@ -409,24 +435,6 @@ func main() {
 	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	reportingHandler.RegisterBuilderRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
-
-	// Sales Tax Module (Avalara AvaTax)
-	taxExemptionRepo := tax.NewExemptionRepo(db)
-	var avalaraClient *tax.AvalaraClient
-	if cfg.AvalaraAccountID != "" {
-		avalaraClient = tax.NewAvalaraClient(tax.AvalaraConfig{
-			AccountID:   cfg.AvalaraAccountID,
-			LicenseKey:  cfg.AvalaraLicenseKey,
-			Environment: cfg.AvalaraEnvironment,
-			CompanyCode: cfg.AvalaraCompanyCode,
-		}, logger)
-		logger.Info("Avalara AvaTax initialized", "environment", cfg.AvalaraEnvironment)
-	} else {
-		logger.Warn("AVALARA_ACCOUNT_ID not set — using flat-rate tax fallback (0%)")
-	}
-	taxSvc := tax.NewService(taxExemptionRepo, avalaraClient, cfg.AvalaraCompanyCode, 0.0, logger)
-	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)

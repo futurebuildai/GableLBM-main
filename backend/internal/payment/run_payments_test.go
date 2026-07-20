@@ -13,7 +13,7 @@ import (
 // TestRunPaymentsCharge tests the charge flow against a mock Run Payments server.
 func TestRunPaymentsCharge(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/payments" {
+		if r.URL.Path != "/v1/api/v1/payments/charge" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != "POST" {
@@ -81,13 +81,16 @@ func TestRunPaymentsCharge(t *testing.T) {
 // TestRunPaymentsRefund tests the refund flow.
 func TestRunPaymentsRefund(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/payments/run_tx_abc123/refund" {
+		if r.URL.Path != "/v1/api/v1/transactions/void-or-refund" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
-		var req runRefundRequest
+		var req runVoidOrRefundRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
+		}
+		if req.TransactionID != "run_tx_abc123" {
+			t.Errorf("expected transaction_id run_tx_abc123, got %s", req.TransactionID)
 		}
 		if req.Amount != 5000 {
 			t.Errorf("expected refund amount 5000, got %d", req.Amount)
@@ -124,7 +127,7 @@ func TestRunPaymentsRefund(t *testing.T) {
 // TestRunPaymentsVoid tests the void flow.
 func TestRunPaymentsVoid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/payments/run_tx_abc123/void" {
+		if r.URL.Path != "/v1/api/v1/transactions/void-or-refund" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
