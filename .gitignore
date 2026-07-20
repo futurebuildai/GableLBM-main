@@ -11,6 +11,7 @@ docker-compose.override.yml
 # Build artifacts
 backend/server
 backend/server_bin
+backend/main
 backend/migrate
 backend/seed
 *.log
@@ -18,8 +19,7 @@ backend/seed
 # Stray binary that ended up committed at the repo root — do not re-add.
 /docker-compose
 
-# Agent/AI directories
-.agent/
+# Agent/AI directories (.agent/ is tracked intentionally — see CLAUDE.md repo structure)
 .agents/
 .claude/
 

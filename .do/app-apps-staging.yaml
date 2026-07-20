@@ -1,0 +1,130 @@
+# Digital Ocean App Platform spec — APPS-PLATFORM TEST environment.
+#
+# TEMPORARY third environment for testing the installable-apps platform
+# (feat/modular-apps-platform → PR to master). Tracks the `apps-staging`
+# branch and serves on the DO-assigned default hostname
+# (<app>-<hash>.ondigitalocean.app) — no custom domain, no DNS work.
+# Tear it down when the PR merges (see "Apps-platform test env" in
+# .do/README.md for teardown).
+#
+# Shares the `gable-pg` cluster with demo/staging but uses its own
+# logical DB (`gable_apps`) so migration 074 + app-toggle testing can't
+# touch demo or staging data.
+#
+# AUTH_MODE=dev, same as demo/staging: the dev-mode pass-through makes
+# every request full admin/owner, which is exactly what testing the
+# admin-gated /api/v1/apps toggles needs.
+#
+# VITE_API_URL is intentionally EMPTY: the SPA then issues relative
+# /api/* requests, which App Platform's path-split routing sends to the
+# backend service on the same hostname — no need to know the assigned
+# hostname before the first build, and same-origin means CORS never
+# applies. If absolute URLs are ever needed, set VITE_API_URL and
+# CORS_ORIGINS to the assigned hostname and `doctl apps update`.
+#
+# Apply with: doctl apps create --spec .do/app-apps-staging.yaml  (first time)
+#             doctl apps update <app-id> --spec .do/app-apps-staging.yaml
+name: gablelbm-apps-staging
+# Co-located with the gable-pg cluster (see app-staging.yaml for why nyc).
+region: nyc
+alerts:
+  - rule: DEPLOYMENT_FAILED
+
+services:
+  - name: backend
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: apps-staging
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    health_check:
+      http_path: /healthz/live
+      initial_delay_seconds: 15
+      period_seconds: 30
+      failure_threshold: 3
+    routes:
+      # preserve_path_prefix keeps the original path when proxying to
+      # the container; without it App Platform strips the matched
+      # prefix and the Go router 404s (e.g. /healthz/live → /live).
+      - path: /api
+        preserve_path_prefix: true
+      - path: /health
+        preserve_path_prefix: true
+      - path: /healthz
+        preserve_path_prefix: true
+      - path: /metrics
+        preserve_path_prefix: true
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: AUTH_MODE
+        value: dev
+      - key: GABLELBM_BRANCH
+        value: apps-staging
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+  - name: frontend
+    dockerfile_path: app/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: apps-staging
+      deploy_on_push: true
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    build_command: ""
+    envs:
+      # Empty on purpose — relative /api/* URLs, same-origin (see header).
+      - key: VITE_API_URL
+        value: ""
+        scope: BUILD_TIME
+      # Surface picker at `/` (ERP/portal/driver/yard/POS launcher) — handy
+      # for exercising app gating across all five surfaces.
+      - key: VITE_DEMO_MODE
+        value: "true"
+        scope: BUILD_TIME
+      - key: BACKEND_URL
+        value: ${backend.PRIVATE_URL}
+        scope: RUN_TIME
+    routes:
+      - path: /
+
+jobs:
+  - name: migrate-and-seed
+    kind: POST_DEPLOY
+    dockerfile_path: backend/Dockerfile
+    source_dir: /
+    github:
+      repo: futurebuildai/GableLBM-main
+      branch: apps-staging
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    # sh -c wrapper is load-bearing — see app-staging.yaml for the war story.
+    run_command: sh -c "./migrate && ./seed"
+    envs:
+      - key: DATABASE_URL
+        value: ${gable-pg.DATABASE_URL}
+        scope: RUN_TIME
+        type: SECRET
+      - key: GABLELBM_BRANCH
+        value: apps-staging
+
+databases:
+  - name: gable-pg
+    engine: PG
+    version: "16"
+    # References the same externally-managed cluster as demo/staging.
+    # The gable_apps logical DB must exist before first deploy:
+    #   doctl databases db create <cluster-id> gable_apps
+    production: true
+    cluster_name: gable-pg
+    db_name: gable_apps
+    db_user: gable_user

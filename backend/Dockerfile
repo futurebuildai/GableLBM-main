@@ -14,7 +14,7 @@ COPY backend/ .
 # `migrate` / `seed` are bundled so DO App Platform post-deploy jobs can
 # invoke them against the production image without needing a separate
 # build step.
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o main ./cmd/server/main.go && \
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o main ./cmd/server && \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o migrate ./cmd/migrate && \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o seed ./cmd/seed
 

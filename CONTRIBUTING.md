@@ -116,5 +116,12 @@ proprietary integrations — fork the repo and add adapters instead.
 
 ## License
 
-By contributing, you agree your contributions are licensed under the same
-license as the project (see [`LICENSE`](./LICENSE)).
+The project uses a conditional dual license — GPL-3.0-or-later for
+single-dealer deployments, AGPL-3.0-or-later for multi-dealer operation
+(see [`LICENSE`](./LICENSE) for the conditions and `LICENSES/` for the
+full texts).
+
+By contributing, you license your contribution under **both**
+GPL-3.0-or-later and AGPL-3.0-or-later, so the project can extend both
+grants. This is the standard inbound=outbound model — no CLA, no
+copyright assignment.
