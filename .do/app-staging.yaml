@@ -79,8 +79,12 @@ services:
     http_port: 8080
     build_command: ""
     envs:
+      # Empty on purpose: the SPA issues relative /api/* requests, which App
+      # Platform's path routing sends to the backend on the same hostname —
+      # works identically on the default *.ondigitalocean.app hostname and on
+      # staging.gablelbm.com once DNS attaches, with no rebuild in between.
       - key: VITE_API_URL
-        value: https://staging.gablelbm.com
+        value: ""
         scope: BUILD_TIME
       - key: BACKEND_URL
         value: ${backend.PRIVATE_URL}
