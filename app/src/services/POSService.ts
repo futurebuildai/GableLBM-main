@@ -3,7 +3,9 @@ import type {
     QuickSearchResult,
     AddLineItemRequest,
     AddTenderRequest,
-    TransactionSummary
+    TransactionSummary,
+    TillSession,
+    TillReport
 } from '../types/pos';
 import { fetchWithAuth } from './fetchClient';
 
@@ -82,6 +84,47 @@ export const posService = {
         if (query.length < 2) return [];
         const response = await fetchWithAuth(`${API_URL}/api/v1/pos/products/search?q=${encodeURIComponent(query)}`);
         if (!response.ok) throw new Error('Failed to search products');
+        return response.json();
+    },
+
+    // --- Till sessions (drawer lifecycle) ---
+
+    currentTill: async (registerID: string): Promise<TillSession | null> => {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pos/till/current?register_id=${encodeURIComponent(registerID)}`);
+        if (!response.ok) throw new Error('Failed to look up till');
+        const data = await response.json();
+        return data.session ?? null;
+    },
+
+    openTill: async (registerID: string, openingFloat: number): Promise<TillSession> => {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pos/till/open`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ register_id: registerID, opening_float: openingFloat }),
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body?.error?.message || 'Failed to open till');
+        }
+        return response.json();
+    },
+
+    tillReport: async (sessionID: string): Promise<TillReport> => {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/report`);
+        if (!response.ok) throw new Error('Failed to load till report');
+        return response.json();
+    },
+
+    closeTill: async (sessionID: string, countedByMethod: Record<string, number>, notes: string): Promise<TillReport> => {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/pos/till/${sessionID}/close`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ counted_by_method: countedByMethod, notes }),
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body?.error?.message || 'Failed to close till');
+        }
         return response.json();
     },
 };

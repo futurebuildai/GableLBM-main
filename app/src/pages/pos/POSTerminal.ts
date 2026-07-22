@@ -1,8 +1,11 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { posService } from '../../services/POSService';
-import type { POSTransaction, QuickSearchResult, POSLineItem } from '../../types/pos';
+import type { POSTransaction, QuickSearchResult, POSLineItem, TillSession, TillReport } from '../../types/pos';
 import '../../components/BarcodeScanner.ts';
+
+const REGISTER_ID = 'REG-01';
+const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /**
  * POSTerminal -- Full-screen retail counter sales interface.
@@ -27,6 +30,16 @@ export class POSTerminal extends LitElement {
   @state() private _success: string | null = null;
   @state() private _isScanning = false;
 
+  // Till (drawer) state
+  @state() private _till: TillSession | null = null;
+  @state() private _showTillOpen = false;
+  @state() private _openingFloat = '';
+  @state() private _showTillClose = false;
+  @state() private _tillReport: TillReport | null = null;
+  @state() private _counts: Record<string, string> = {};
+  @state() private _closeResult: TillReport | null = null;
+  @state() private _tillBusy = false;
+
   @query('#pos-search-input') private _searchInput!: HTMLInputElement;
 
   private _newTxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -35,7 +48,77 @@ export class POSTerminal extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    void this._loadTill();
     this._startNewTransaction();
+  }
+
+  /* ---- Till (drawer) lifecycle ---- */
+
+  private async _loadTill() {
+    try {
+      this._till = await posService.currentTill(REGISTER_ID);
+    } catch {
+      this._till = null;
+    }
+  }
+
+  private async _openTill() {
+    const float = parseFloat(this._openingFloat);
+    if (isNaN(float) || float < 0) {
+      this._error = 'Enter a valid opening float';
+      return;
+    }
+    try {
+      this._tillBusy = true;
+      this._till = await posService.openTill(REGISTER_ID, float);
+      this._showTillOpen = false;
+      this._openingFloat = '';
+      this._success = `Till opened with ${fmt(this._till.opening_float)} float`;
+      this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
+      // Re-start the transaction so it attaches to the new session.
+      void this._startNewTransaction();
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to open till';
+    } finally {
+      this._tillBusy = false;
+    }
+  }
+
+  private async _beginCloseTill() {
+    if (!this._till) return;
+    try {
+      this._tillBusy = true;
+      this._tillReport = await posService.tillReport(this._till.id);
+      // Seed blind-count inputs for every method the drawer expects (+ CASH).
+      const methods = new Set<string>(['CASH', ...Object.keys(this._tillReport.expected_by_method || {})]);
+      const seed: Record<string, string> = {};
+      methods.forEach((m) => { seed[m] = ''; });
+      this._counts = seed;
+      this._closeResult = null;
+      this._showTillClose = true;
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to load till report';
+    } finally {
+      this._tillBusy = false;
+    }
+  }
+
+  private async _confirmCloseTill() {
+    if (!this._till) return;
+    const counted: Record<string, number> = {};
+    for (const [method, val] of Object.entries(this._counts)) {
+      const n = parseFloat(val);
+      if (!isNaN(n)) counted[method] = n;
+    }
+    try {
+      this._tillBusy = true;
+      this._closeResult = await posService.closeTill(this._till.id, counted, '');
+      this._till = null; // session closed
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to close till';
+    } finally {
+      this._tillBusy = false;
+    }
   }
 
   disconnectedCallback() {
@@ -164,7 +247,10 @@ export class POSTerminal extends LitElement {
         amount,
       }]);
       this._transaction = completed;
-      this._success = `Sale completed! Total: $${(completed.total / 100).toFixed(2)}`;
+      const change = completed.change_due || 0;
+      this._success = change > 0
+        ? `Sale complete — ${fmt(completed.total)} · CHANGE DUE ${fmt(change)}`
+        : `Sale complete — ${fmt(completed.total)}`;
       this._showTender = false;
 
       // Auto-start new transaction after 2 seconds
@@ -189,6 +275,96 @@ export class POSTerminal extends LitElement {
     }
   }
 
+  /* ---- Till modals ---- */
+
+  private _overlay(inner: unknown) {
+    return html`
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div style="width:440px;max-width:92vw;background:#161b22;border:1px solid #30363d;border-radius:14px;padding:24px;color:#e6edf3;font-family:'Outfit',-apple-system,sans-serif">
+          ${inner}
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderTillOpenModal() {
+    if (!this._showTillOpen) return nothing;
+    return this._overlay(html`
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Open Till</h2>
+      <p style="margin:0 0 16px;font-size:13px;color:#8b949e">Count the starting cash in the drawer and enter the opening float.</p>
+      <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:6px">Opening float ($)</label>
+      <input type="number" step="0.01" .value=${this._openingFloat}
+        @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; }}
+        style="width:100%;box-sizing:border-box;padding:14px;background:#0d1117;border:2px solid #8957e5;border-radius:8px;color:#e6edf3;font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="200.00" />
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening…' : 'Open Till'}</button>
+      </div>
+    `);
+  }
+
+  private _renderTillCloseModal() {
+    if (!this._showTillClose) return nothing;
+    const close = () => { this._showTillClose = false; this._tillReport = null; this._closeResult = null; };
+
+    // Result view (Z-report): expected vs counted vs over/short.
+    if (this._closeResult) {
+      const r = this._closeResult;
+      const os = r.session.over_short ?? 0;
+      const osColor = os === 0 ? '#3fb950' : os < 0 ? '#f85149' : '#d29922';
+      const osLabel = os === 0 ? 'BALANCED' : os < 0 ? `SHORT ${fmt(Math.abs(os))}` : `OVER ${fmt(os)}`;
+      return this._overlay(html`
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report — Till Closed</h2>
+        <div style="text-align:center;padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:10px;margin-bottom:16px">
+          <div style="font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
+          <div style="font-size:32px;font-weight:800;color:${osColor}">${osLabel}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="color:#8b949e;text-align:right">
+            <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>Δ</th>
+          </tr></thead>
+          <tbody>
+            ${Object.keys(r.session.expected_by_method || {}).map((m) => {
+              const exp = r.session.expected_by_method?.[m] ?? 0;
+              const cnt = r.session.counted_by_method?.[m] ?? 0;
+              const d = cnt - exp;
+              return html`<tr style="text-align:right;border-top:1px solid #21262d">
+                <td style="text-align:left;padding:6px 0">${m}</td>
+                <td>${fmt(exp)}</td><td>${fmt(cnt)}</td>
+                <td style="color:${d === 0 ? '#8b949e' : d < 0 ? '#f85149' : '#d29922'}">${fmt(d)}</td>
+              </tr>`;
+            })}
+          </tbody>
+        </table>
+        <div style="font-size:12px;color:#8b949e;margin-top:14px">${r.sale_count} sales · ${fmt(r.sales_total)} rung · ${fmt(r.tax_total)} tax · ${fmt(r.change_given)} change given</div>
+        <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">Done</button>
+      `);
+    }
+
+    // Count view (blind — expected figures hidden until close posts).
+    const rep = this._tillReport;
+    const methods = Object.keys(this._counts);
+    return this._overlay(html`
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till — Blind Count</h2>
+      <p style="margin:0 0 16px;font-size:13px;color:#8b949e">
+        Count the drawer and enter actuals by tender. Expected totals stay hidden until you post — that's the blind count.
+        ${rep ? html`<br>${rep.sale_count} sales rung this session.` : nothing}
+      </p>
+      ${methods.map((m) => html`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <label style="width:90px;font-size:13px;color:#c9d1d9">${m}</label>
+          <input type="number" step="0.01" .value=${this._counts[m]}
+            @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
+            style="flex:1;box-sizing:border-box;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;text-align:right;outline:none" placeholder="0.00" />
+        </div>
+      `)}
+      <div style="display:flex;gap:8px;margin-top:20px">
+        <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting…' : 'Post Count & Close'}</button>
+      </div>
+    `);
+  }
+
   /* ---- Render ---- */
 
   render() {
@@ -204,6 +380,15 @@ export class POSTerminal extends LitElement {
           <div style="display:flex;align-items:center;gap:12px">
             <h1 style="font-size:18px;font-weight:700;margin:0;color:#e6edf3">POS Terminal</h1>
             <span style="font-size:11px;padding:2px 8px;background:#238636;border-radius:12px;color:#fff;font-weight:600">REG-01</span>
+            ${this._till ? html`
+              <span title="Drawer open" style="font-size:11px;padding:2px 8px;background:#8957e5;border-radius:12px;color:#fff;font-weight:600">
+                ● TILL OPEN · float ${fmt(this._till.opening_float)}
+              </span>
+            ` : html`
+              <span style="font-size:11px;padding:2px 8px;background:#6e2f2f;border-radius:12px;color:#ffb4b4;font-weight:600">
+                ○ NO TILL
+              </span>
+            `}
             ${this._transaction ? html`
               <span style="font-size:11px;padding:2px 8px;background:#1f6feb;border-radius:12px;color:#fff;font-family:monospace">
                 TX: ${this._transaction.id.slice(0, 8)}
@@ -211,11 +396,23 @@ export class POSTerminal extends LitElement {
             ` : nothing}
           </div>
           <div style="display:flex;gap:8px">
+            ${this._till ? html`
+              <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy} style="padding:6px 16px;background:#21262d;border:1px solid #8957e5;border-radius:6px;color:#d2a8ff;font-size:13px;cursor:pointer">
+                Close Till · Z-Report
+              </button>
+            ` : html`
+              <button @click=${() => { this._showTillOpen = true; }} style="padding:6px 16px;background:#8957e5;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
+                Open Till
+              </button>
+            `}
             <button @click=${() => this._startNewTransaction()} style="padding:6px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;cursor:pointer">
               New Sale
             </button>
           </div>
         </div>
+
+        ${this._renderTillOpenModal()}
+        ${this._renderTillCloseModal()}
 
         <!-- Alerts -->
         ${this._error ? html`

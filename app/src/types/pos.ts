@@ -10,11 +10,41 @@ export interface POSTransaction {
     subtotal: number;
     tax_amount: number;
     total: number;
+    change_due: number; // cents, set at completion
+    till_session_id?: string;
     status: TransactionStatus;
     completed_at?: string;
     created_at: string;
     line_items?: POSLineItem[];
     tenders?: POSTender[];
+}
+
+// --- Till sessions (drawer lifecycle) ---
+
+export type TillSessionStatus = 'OPEN' | 'CLOSED';
+
+export interface TillSession {
+    id: string;
+    register_id: string;
+    cashier_id: string;
+    status: TillSessionStatus;
+    opening_float: number; // cents
+    opened_at: string;
+    closed_at?: string;
+    expected_by_method?: Record<string, number>; // cents
+    counted_by_method?: Record<string, number>;  // cents
+    over_short?: number; // cents; negative = short
+    notes: string;
+}
+
+export interface TillReport {
+    session: TillSession;
+    sale_count: number;
+    sales_total: number;   // cents
+    tax_total: number;     // cents
+    change_given: number;  // cents
+    tendered_by_method: Record<string, number>; // cents
+    expected_by_method: Record<string, number>; // cents
 }
 
 export interface POSLineItem {
