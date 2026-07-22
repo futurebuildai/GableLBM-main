@@ -48,7 +48,7 @@ func (k *KeyStore) Resolve() GatewayConfig {
 		defer cancel()
 		rows, err := k.db.Pool.Query(ctx,
 			`SELECT key, value FROM system_settings WHERE key IN
-			 ('run_payments_api_key','run_payments_public_key','run_payments_base_url')`)
+			 ('run_payments_api_key','run_payments_public_key','run_payments_mid','run_payments_base_url')`)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -64,6 +64,8 @@ func (k *KeyStore) Resolve() GatewayConfig {
 					cfg.APIKey = value
 				case "run_payments_public_key":
 					cfg.PublicKey = value
+				case "run_payments_mid":
+					cfg.MID = value
 				case "run_payments_base_url":
 					cfg.BaseURL = value
 				}
@@ -78,7 +80,33 @@ func (k *KeyStore) Resolve() GatewayConfig {
 	return cfg
 }
 
-// Configured reports whether an API key is currently available.
+// Configured reports whether card charging is possible (api key + MID + base).
 func (k *KeyStore) Configured() bool {
-	return k.Resolve().APIKey != ""
+	cfg := k.Resolve()
+	return cfg.APIKey != "" && cfg.MID != "" && cfg.BaseURL != ""
+}
+
+// PersistRotatedKey writes a refreshed api_key (and optional refresh token)
+// back to system_settings so the rotation survives restarts, then busts the
+// cache. Best-effort: a failure is logged by the caller, not fatal.
+func (k *KeyStore) PersistRotatedKey(apiKey, refreshToken string) error {
+	if k.db == nil || apiKey == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := k.db.Pool.Exec(ctx,
+		`INSERT INTO system_settings (key, value) VALUES ('run_payments_api_key', $1)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, apiKey); err != nil {
+		return err
+	}
+	if refreshToken != "" {
+		_, _ = k.db.Pool.Exec(ctx,
+			`INSERT INTO system_settings (key, value) VALUES ('run_payments_refresh_token', $1)
+			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, refreshToken)
+	}
+	k.mu.Lock()
+	k.cachedAt = time.Time{} // force re-resolve on next call
+	k.mu.Unlock()
+	return nil
 }

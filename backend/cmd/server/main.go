@@ -385,10 +385,19 @@ func main() {
 	paymentKeys := payment.NewKeyStore(db, payment.GatewayConfig{
 		APIKey:      cfg.RunPaymentsAPIKey,
 		PublicKey:   cfg.RunPaymentsPublicKey,
+		MID:         cfg.RunPaymentsMID,
 		BaseURL:     cfg.RunPaymentsBaseURL,
 		Environment: cfg.RunPaymentsEnvironment,
 	})
-	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger)
+	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger).
+		OnKeyRotated(func(apiKey, refreshToken string) {
+			// The Run api_key is an expiring JWT — persist the refreshed one.
+			if err := paymentKeys.PersistRotatedKey(apiKey, refreshToken); err != nil {
+				logger.Error("failed to persist rotated Run Payments api_key", "error", err)
+			} else {
+				logger.Info("Run Payments api_key rotated and persisted")
+			}
+		})
 	paymentSvc.WithGateway(rpGateway, cfg.RunPaymentsPublicKey)
 	paymentSvc.WithKeyStore(paymentKeys)
 	if paymentKeys.Configured() {

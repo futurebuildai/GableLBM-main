@@ -20,6 +20,7 @@ type Config struct {
 	// Run Payments Gateway
 	RunPaymentsAPIKey      string
 	RunPaymentsPublicKey   string
+	RunPaymentsMID         string // Run merchant ID (the `mid` header)
 	RunPaymentsBaseURL     string
 	RunPaymentsEnvironment string // "sandbox" or "production"
 
@@ -85,6 +86,7 @@ func Load() (*Config, error) {
 		// Run Payments — defaults to sandbox mode
 		RunPaymentsAPIKey:      getEnv("RUN_PAYMENTS_API_KEY", ""),
 		RunPaymentsPublicKey:   getEnv("RUN_PAYMENTS_PUBLIC_KEY", ""),
+		RunPaymentsMID:         getEnv("RUN_PAYMENTS_MID", ""),
 		RunPaymentsBaseURL:     getEnv("RUN_PAYMENTS_BASE_URL", ""),
 		RunPaymentsEnvironment: getEnv("RUN_PAYMENTS_ENV", "sandbox"),
 

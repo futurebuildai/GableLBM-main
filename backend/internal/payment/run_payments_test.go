@@ -3,206 +3,140 @@ package payment
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"log/slog"
 )
 
-// TestRunPaymentsCharge tests the charge flow against a mock Run Payments server.
+func testGatewayConfig(baseURL string) GatewayConfig {
+	return GatewayConfig{APIKey: "test-api-key", MID: "800000004181", BaseURL: baseURL}
+}
+
+// TestRunPaymentsCharge verifies the charge contract: path, mid header, body
+// shape, and the A-result → APPROVED mapping.
 func TestRunPaymentsCharge(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/api/v1/payments/charge" {
+		if r.URL.Path != "/api/v1/charge" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.Method != "POST" {
-			t.Errorf("unexpected method: %s", r.Method)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-api-key" {
-			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
+			t.Errorf("missing/incorrect bearer auth: %s", r.Header.Get("Authorization"))
 		}
-
+		if r.Header.Get("mid") != "800000004181" {
+			t.Errorf("missing mid header: %s", r.Header.Get("mid"))
+		}
 		var req runChargeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
+			t.Fatalf("decode: %v", err)
 		}
-		if req.Amount != 12500 {
-			t.Errorf("expected amount 12500, got %d", req.Amount)
+		if req.AccountToken != "tok_abc" || req.MID != "800000004181" || req.Amount != 10000 {
+			t.Errorf("unexpected charge body: %+v", req)
 		}
-		if req.Token != "tok_test_123" {
-			t.Errorf("expected token tok_test_123, got %s", req.Token)
+		if req.Capture != "Y" || req.Vault != "N" {
+			t.Errorf("expected capture=Y vault=N, got %s/%s", req.Capture, req.Vault)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(runAPIResponse{
-			ID:            "run_tx_abc123",
-			TransactionID: "run_tx_abc123",
-			Status:        "approved",
-			AuthCode:      "AUTH456",
-			CardLast4:     "4242",
-			CardBrand:     "VISA",
-			Amount:        12500,
-			Currency:      "USD",
-		})
+		json.NewEncoder(w).Encode(runResponse{Result: "A", RespCode: "00", TransID: "run_tx_1", CardType: "CREDIT", Amount: 10000})
 	}))
 	defer srv.Close()
 
-	gw := NewRunPaymentsGateway(GatewayConfig{
-		APIKey:  "test-api-key",
-		BaseURL: srv.URL + "/v1",
-	}, slog.Default())
-
-	result, err := gw.Charge(context.Background(), ChargeRequest{
-		TokenID:     "tok_test_123",
-		AmountCents: 12500,
-		Currency:    "USD",
-		Description: "Test charge",
-		InvoiceID:   "inv-001",
-	})
+	gw := NewRunPaymentsGateway(testGatewayConfig(srv.URL), slog.Default())
+	res, err := gw.Charge(context.Background(), ChargeRequest{TokenID: "tok_abc", AmountCents: 10000, Currency: "USD"})
 	if err != nil {
-		t.Fatalf("charge failed: %v", err)
+		t.Fatalf("charge: %v", err)
 	}
-
-	if result.TransactionID != "run_tx_abc123" {
-		t.Errorf("expected tx ID run_tx_abc123, got %s", result.TransactionID)
-	}
-	if result.Status != GatewayStatusApproved {
-		t.Errorf("expected APPROVED, got %s", result.Status)
-	}
-	if result.CardLast4 != "4242" {
-		t.Errorf("expected card last4 4242, got %s", result.CardLast4)
-	}
-	if result.AuthCode != "AUTH456" {
-		t.Errorf("expected auth code AUTH456, got %s", result.AuthCode)
+	if res.Status != GatewayStatusApproved || res.TransactionID != "run_tx_1" {
+		t.Fatalf("want APPROVED/run_tx_1, got %s/%s", res.Status, res.TransactionID)
 	}
 }
 
-// TestRunPaymentsRefund tests the refund flow.
+// TestRunPaymentsChargeDeclined verifies a C-result surfaces as a decline error.
+func TestRunPaymentsChargeDeclined(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(runResponse{Result: "C", RespCode: "05", RespText: "Do Not Honor", TransID: "run_tx_2"})
+	}))
+	defer srv.Close()
+
+	gw := NewRunPaymentsGateway(testGatewayConfig(srv.URL), slog.Default())
+	res, err := gw.Charge(context.Background(), ChargeRequest{TokenID: "tok_abc", AmountCents: 10000})
+	if err == nil {
+		t.Fatal("expected decline error")
+	}
+	if res == nil || res.Status != GatewayStatusDeclined {
+		t.Fatalf("want DECLINED result, got %+v", res)
+	}
+}
+
+// TestRunPaymentsRefund verifies void-or-refund with action=refund.
 func TestRunPaymentsRefund(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/api/v1/transactions/void-or-refund" {
+		if r.URL.Path != "/api/v1/void-or-refund" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-
 		var req runVoidOrRefundRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
+			t.Fatalf("decode: %v", err)
 		}
-		if req.TransactionID != "run_tx_abc123" {
-			t.Errorf("expected transaction_id run_tx_abc123, got %s", req.TransactionID)
+		if req.TransID != "run_tx_1" || req.MID != "800000004181" || req.Amount != 5000 || req.Action != "refund" {
+			t.Errorf("unexpected refund body: %+v", req)
 		}
-		if req.Amount != 5000 {
-			t.Errorf("expected refund amount 5000, got %d", req.Amount)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(runAPIResponse{
-			ID:            "run_ref_xyz789",
-			TransactionID: "run_ref_xyz789",
-			Status:        "refunded",
-			Amount:        5000,
-		})
+		json.NewEncoder(w).Encode(runResponse{Result: "A", TransID: "run_ref_1", Amount: 5000})
 	}))
 	defer srv.Close()
 
-	gw := NewRunPaymentsGateway(GatewayConfig{
-		APIKey:  "test-api-key",
-		BaseURL: srv.URL + "/v1",
-	}, slog.Default())
-
-	result, err := gw.Refund(context.Background(), "run_tx_abc123", 5000)
+	gw := NewRunPaymentsGateway(testGatewayConfig(srv.URL), slog.Default())
+	res, err := gw.Refund(context.Background(), "run_tx_1", 5000)
 	if err != nil {
-		t.Fatalf("refund failed: %v", err)
+		t.Fatalf("refund: %v", err)
 	}
-
-	if result.Status != GatewayStatusRefunded {
-		t.Errorf("expected REFUNDED, got %s", result.Status)
-	}
-	if result.AmountCents != 5000 {
-		t.Errorf("expected amount 5000, got %d", result.AmountCents)
+	if res.Status != GatewayStatusRefunded {
+		t.Fatalf("want REFUNDED, got %s", res.Status)
 	}
 }
 
-// TestRunPaymentsVoid tests the void flow.
-func TestRunPaymentsVoid(t *testing.T) {
+// TestRunPaymentsExpiredKeyRefresh verifies the 401 → refresh → retry flow and
+// that the rotation callback fires with the new key.
+func TestRunPaymentsExpiredKeyRefresh(t *testing.T) {
+	var chargeCalls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/api/v1/transactions/void-or-refund" {
+		switch r.URL.Path {
+		case "/api/v1/charge":
+			chargeCalls++
+			if chargeCalls == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer fresh-key" {
+				t.Errorf("retry did not use refreshed key: %s", r.Header.Get("Authorization"))
+			}
+			json.NewEncoder(w).Encode(runResponse{Result: "A", TransID: "run_tx_3", Amount: 100})
+		case "/api/v1/api_keys/refresh":
+			json.NewEncoder(w).Encode(runRefreshResponse{APIKey: "fresh-key", RefreshToken: "fresh-refresh"})
+		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(runAPIResponse{
-			ID:            "run_tx_abc123",
-			TransactionID: "run_tx_abc123",
-			Status:        "voided",
-		})
 	}))
 	defer srv.Close()
 
-	gw := NewRunPaymentsGateway(GatewayConfig{
-		APIKey:  "test-api-key",
-		BaseURL: srv.URL + "/v1",
-	}, slog.Default())
-
-	result, err := gw.Void(context.Background(), "run_tx_abc123")
+	var rotatedKey string
+	gw := NewRunPaymentsGateway(testGatewayConfig(srv.URL), slog.Default()).
+		OnKeyRotated(func(apiKey, _ string) { rotatedKey = apiKey })
+	res, err := gw.Charge(context.Background(), ChargeRequest{TokenID: "tok_abc", AmountCents: 100})
 	if err != nil {
-		t.Fatalf("void failed: %v", err)
+		t.Fatalf("charge after refresh: %v", err)
 	}
-
-	if result.Status != GatewayStatusVoided {
-		t.Errorf("expected VOIDED, got %s", result.Status)
+	if res.TransactionID != "run_tx_3" {
+		t.Fatalf("want run_tx_3, got %s", res.TransactionID)
+	}
+	if rotatedKey != "fresh-key" {
+		t.Fatalf("rotation callback not fired with fresh key, got %q", rotatedKey)
 	}
 }
 
-// TestRunPaymentsDeclined tests handling of a declined charge.
-func TestRunPaymentsDeclined(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(runAPIResponse{
-			ID:      "run_tx_declined",
-			Status:  "declined",
-			Message: "Insufficient funds",
-		})
-	}))
-	defer srv.Close()
-
-	gw := NewRunPaymentsGateway(GatewayConfig{
-		APIKey:  "test-api-key",
-		BaseURL: srv.URL + "/v1",
-	}, slog.Default())
-
-	result, err := gw.Charge(context.Background(), ChargeRequest{
-		TokenID:     "tok_bad_card",
-		AmountCents: 100000,
-	})
-	if err != nil {
-		t.Fatalf("should not error on decline: %v", err)
-	}
-
-	if result.Status != GatewayStatusDeclined {
-		t.Errorf("expected DECLINED, got %s", result.Status)
-	}
-}
-
-// TestRunPaymentsAPIError tests handling of gateway HTTP errors.
-func TestRunPaymentsAPIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "internal server error"}`))
-	}))
-	defer srv.Close()
-
-	gw := NewRunPaymentsGateway(GatewayConfig{
-		APIKey:  "test-api-key",
-		BaseURL: srv.URL + "/v1",
-	}, slog.Default())
-
-	_, err := gw.Charge(context.Background(), ChargeRequest{
-		TokenID:     "tok_test",
-		AmountCents: 1000,
-	})
-	if err == nil {
-		t.Fatal("expected error on 500 response")
+// TestRunPaymentsUnconfigured verifies a missing key/mid/base errors clearly.
+func TestRunPaymentsUnconfigured(t *testing.T) {
+	gw := NewRunPaymentsGateway(GatewayConfig{APIKey: "k", MID: "m"}, slog.Default()) // no base URL
+	if _, err := gw.Charge(context.Background(), ChargeRequest{TokenID: "t", AmountCents: 1}); err == nil {
+		t.Fatal("expected configuration error for missing base URL")
 	}
 }

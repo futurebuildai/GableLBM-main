@@ -58,6 +58,7 @@ const (
 type GatewayConfig struct {
 	APIKey      string
 	PublicKey   string
+	MID         string // Run merchant ID (sent as the `mid` header + charge body field)
 	BaseURL     string
 	Environment string // "sandbox" or "production"
 }
