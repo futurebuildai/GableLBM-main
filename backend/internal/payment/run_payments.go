@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -204,9 +205,16 @@ func (g *RunPaymentsGateway) doAuthed(ctx context.Context, cfg GatewayConfig, pa
 		return nil, err
 	}
 	if status == http.StatusUnauthorized {
+		// Surface Run's 401 reason (error_description) — the api_key is an
+		// expiring credential, so this is usually "expired"/"invalid". The
+		// body is Run's error envelope, never our key.
+		unauth := strings.TrimSpace(string(raw))
+		if g.logger != nil {
+			g.logger.Warn("Run Payments 401 on charge — api_key rejected", "reason", unauth)
+		}
 		newKey, newRefresh, rerr := g.refreshAPIKey(ctx, cfg.BaseURL, cfg.APIKey)
 		if rerr != nil {
-			return nil, fmt.Errorf("api_key refresh failed: %w", rerr)
+			return nil, fmt.Errorf("authentication failed (api_key rejected: %s); auto-refresh also failed: %w", unauth, rerr)
 		}
 		if g.onRotate != nil {
 			g.onRotate(newKey, newRefresh)
