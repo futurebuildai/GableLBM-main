@@ -226,15 +226,19 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 		}
 	}
 
-	// Charge card tenders that carry a token. Declines abort the sale
-	// before anything is recorded.
+	// Card handling. POS counter cards ride the CARD-PRESENT rail (Clover
+	// terminal): the device captures the card out-of-band and the tender is
+	// recorded as externally-settled — no token, no online charge here. A
+	// token is only ever present if a card-present terminal gateway is wired
+	// via WithGateway; absent that, a token-bearing CARD tender is rejected
+	// rather than silently recorded (it would imply an uncaptured charge).
 	chargeResults := make([]*payment.GatewayResult, len(tenders))
 	for i, t := range tenders {
 		if t.Method != "CARD" || t.TokenID == "" {
 			continue
 		}
 		if s.gateway == nil {
-			return nil, fmt.Errorf("card processing is not configured on this instance")
+			return nil, fmt.Errorf("card-present terminal is not configured on this register; record the card tender without a token (the terminal settles it) or wire the Clover terminal gateway")
 		}
 		res, chargeErr := s.gateway.Charge(ctx, payment.ChargeRequest{
 			TokenID:     t.TokenID,

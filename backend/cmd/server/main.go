@@ -415,7 +415,12 @@ func main() {
 	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
 	posSvc.WithAuditLog(auditLog)
 	posSvc.WithTax(taxSvc, invoiceRepo)
-	posSvc.WithGateway(rpGateway)
+	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal /
+	// Run Terminal API), NOT the Run online/keyed-web charge API (rpGateway) —
+	// that rail is the Contractor Portal / invoice online-payment path. Until
+	// the Clover terminal integration lands, counter CARD tenders are recorded
+	// as externally-captured (the device settles); posSvc.WithGateway is where
+	// the Clover terminal gateway wires in.
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
