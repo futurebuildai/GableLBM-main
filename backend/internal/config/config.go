@@ -23,6 +23,7 @@ type Config struct {
 	RunPaymentsMID         string // Run merchant ID (the `mid` header)
 	RunPaymentsBaseURL     string
 	RunPaymentsEnvironment string // "sandbox" or "production"
+	PaymentVaultKey        string // PAYMENT_VAULT_KEY: 32-byte hex; seals processor creds at rest
 
 	// Avalara Sales Tax
 	AvalaraAccountID   string
@@ -89,6 +90,7 @@ func Load() (*Config, error) {
 		RunPaymentsMID:         getEnv("RUN_PAYMENTS_MID", ""),
 		RunPaymentsBaseURL:     getEnv("RUN_PAYMENTS_BASE_URL", ""),
 		RunPaymentsEnvironment: getEnv("RUN_PAYMENTS_ENV", "sandbox"),
+		PaymentVaultKey:        getEnv("PAYMENT_VAULT_KEY", ""),
 
 		// Avalara Sales Tax — defaults to sandbox mode
 		AvalaraAccountID:   getEnv("AVALARA_ACCOUNT_ID", ""),

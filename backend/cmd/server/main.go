@@ -382,13 +382,25 @@ func main() {
 	// time, DB-first (system_settings run_payments_* keys, settable in Tech
 	// Admin) with RUN_PAYMENTS_* env fallback. Card processing lights up the
 	// moment a key exists, no restart needed.
+	// Credential vault: seals Run api_key/refresh_token at rest (AES-256-GCM).
+	// A malformed key is logged and the store falls back to plaintext with a
+	// prominent warning rather than bricking boot.
+	paymentVault, verr := payment.NewVault(cfg.PaymentVaultKey)
+	if verr != nil {
+		logger.Error("PAYMENT_VAULT_KEY invalid — payment credentials will NOT be encrypted at rest", "error", verr)
+		paymentVault = &payment.Vault{}
+	} else if paymentVault.Present() {
+		logger.Info("payment credential vault active (AES-256-GCM at rest)")
+	} else {
+		logger.Warn("PAYMENT_VAULT_KEY not set — Run Payments credentials stored plaintext; set a 32-byte hex key to encrypt at rest")
+	}
 	paymentKeys := payment.NewKeyStore(db, payment.GatewayConfig{
 		APIKey:      cfg.RunPaymentsAPIKey,
 		PublicKey:   cfg.RunPaymentsPublicKey,
 		MID:         cfg.RunPaymentsMID,
 		BaseURL:     cfg.RunPaymentsBaseURL,
 		Environment: cfg.RunPaymentsEnvironment,
-	})
+	}).WithVault(paymentVault).WithLogger(logger)
 	rpGateway := payment.NewRunPaymentsGatewayDynamic(paymentKeys.Resolve, logger).
 		OnKeyRotated(func(apiKey, refreshToken string) {
 			// The Run api_key is an expiring JWT — persist the refreshed one.
