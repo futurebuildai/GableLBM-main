@@ -62,7 +62,7 @@ func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) 
 	err := row.Scan(
 		&s.ID, &s.RegisterID, &s.BranchID, &s.CashierID, &s.Status,
 		&openingFloat, &s.OpenedAt, &s.ClosedAt,
-		&expectedJSON, &countedJSON, &overShort, &s.Notes,
+		&expectedJSON, &countedJSON, &overShort, &s.GLEntryID, &s.Notes,
 	)
 	if err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) 
 	return &s, nil
 }
 
-const tillSessionColumns = `id, register_id, branch_id, cashier_id, status, opening_float, opened_at, closed_at, expected_by_method, counted_by_method, over_short, notes`
+const tillSessionColumns = `id, register_id, branch_id, cashier_id, status, opening_float, opened_at, closed_at, expected_by_method, counted_by_method, over_short, gl_entry_id, notes`
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
@@ -138,6 +138,16 @@ func (r *PostgresRepository) CloseTillSession(ctx context.Context, s *TillSessio
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("till session %s is not open", s.ID)
+	}
+	return nil
+}
+
+// SetTillSessionGLEntry links a closed session to its over/short journal entry.
+func (r *PostgresRepository) SetTillSessionGLEntry(ctx context.Context, sessionID, glEntryID uuid.UUID) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE till_sessions SET gl_entry_id = $2 WHERE id = $1`, sessionID, glEntryID)
+	if err != nil {
+		return fmt.Errorf("failed to link till session to GL entry: %w", err)
 	}
 	return nil
 }

@@ -35,6 +35,12 @@ type BranchRateResolver interface {
 	GetBranchTaxRate(ctx context.Context, branchID *uuid.UUID) (float64, bool)
 }
 
+// TillLedgerPoster posts a till drawer over/short to the GL (implemented by
+// gl.Service). Returns the journal entry ID (uuid.Nil when variance is zero).
+type TillLedgerPoster interface {
+	PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error)
+}
+
 // Service handles POS business logic.
 type Service struct {
 	db           *database.DB
@@ -47,8 +53,15 @@ type Service struct {
 	taxCalc      TaxCalculator
 	branchRates  BranchRateResolver
 	gateway      payment.PaymentGateway
+	tillLedger   TillLedgerPoster
 	auditLog     *audit.Logger
 	logger       *slog.Logger
+}
+
+// WithTillLedger wires GL posting of till drawer over/short at close.
+func (s *Service) WithTillLedger(p TillLedgerPoster) *Service {
+	s.tillLedger = p
+	return s
 }
 
 // WithPricing enables customer-specific pricing resolution for POS line items.

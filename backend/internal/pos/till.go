@@ -34,6 +34,7 @@ type TillSession struct {
 	ExpectedByMethod map[string]int64 `json:"expected_by_method,omitempty"`
 	CountedByMethod  map[string]int64 `json:"counted_by_method,omitempty"`
 	OverShort        *int64           `json:"over_short,omitempty"` // Cents; negative = short
+	GLEntryID        *uuid.UUID       `json:"gl_entry_id,omitempty"`
 	Notes            string           `json:"notes"`
 }
 
@@ -171,6 +172,25 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		return nil, err
 	}
 	report.Session = session
+
+	// Post the drawer variance to the GL (best-effort, post-close): a GL
+	// hiccup must not block a completed count. A nonzero over/short books a
+	// balanced Cash Over/Short entry; the entry is linked back onto the
+	// session so the ledger and the till reconcile.
+	if s.tillLedger != nil && overShort != 0 {
+		if glID, err := s.tillLedger.PostTillOverShort(ctx, sessionID, overShort); err != nil {
+			s.logger.Error("CRITICAL: till closed but over/short GL posting failed — reconcile manually",
+				"session", sessionID, "over_short_cents", overShort, "error", err)
+		} else if glID != uuid.Nil {
+			if err := s.repo.SetTillSessionGLEntry(ctx, sessionID, glID); err != nil {
+				s.logger.Error("till over/short posted to GL but session link update failed",
+					"session", sessionID, "gl_entry_id", glID, "error", err)
+			} else {
+				session.GLEntryID = &glID
+				report.Session = session
+			}
+		}
+	}
 
 	if s.auditLog != nil {
 		s.auditLog.Log(ctx, audit.Entry{

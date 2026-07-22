@@ -28,9 +28,10 @@ func NewService(repo Repository, adapter integration.GLAdapter, logger *slog.Log
 // by migration 025 and are matched by code (not by free-text name) so a rename
 // of an account never silently breaks posting.
 const (
-	AccountCodeCash    = "1010"
-	AccountCodeAR      = "1020"
-	AccountCodeRevenue = "4010"
+	AccountCodeCash      = "1010"
+	AccountCodeAR        = "1020"
+	AccountCodeRevenue   = "4010"
+	AccountCodeOverShort = "5030" // Cash Over/Short (till drawer variance)
 )
 
 // resolveAccountIDs loads the chart of accounts and returns the IDs for the
@@ -300,6 +301,56 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 }
 
 // SyncVendorInvoice creates a journal entry: DR Expense/Inventory / CR Accounts Payable.
+// PostTillOverShort books a balanced journal entry for a drawer variance at
+// till close and returns the entry ID. over_short = counted − expected:
+//   - short (negative): DR Cash Over/Short, CR Cash (book cash drops to the
+//     counted amount; the shortage is an expense)
+//   - over  (positive): DR Cash, CR Cash Over/Short (book cash rises; the
+//     overage is a credit against the expense)
+// A zero variance posts nothing and returns uuid.Nil.
+func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, overShortCents int64) (uuid.UUID, error) {
+	if overShortCents == 0 {
+		return uuid.Nil, nil
+	}
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeOverShort)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	mag := overShortCents
+	if mag < 0 {
+		mag = -mag
+	}
+
+	cashID, osID := ids[AccountCodeCash], ids[AccountCodeOverShort]
+	var lines []JournalLine
+	if overShortCents < 0 { // short
+		lines = []JournalLine{
+			{AccountID: osID, Description: "Cash short", Debit: mag, Credit: 0},
+			{AccountID: cashID, Description: "Cash", Debit: 0, Credit: mag},
+		}
+	} else { // over
+		lines = []JournalLine{
+			{AccountID: cashID, Description: "Cash", Debit: mag, Credit: 0},
+			{AccountID: osID, Description: "Cash over", Debit: 0, Credit: mag},
+		}
+	}
+
+	ref := sessionID
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("Till over/short — session %s", sessionID),
+		Source:      SourceAdjustment,
+		SourceRefID: &ref,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines:       lines,
+	}
+	if err := s.CreateJournalEntry(ctx, entry); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post till over/short to GL: %w", err)
+	}
+	return entry.ID, nil
+}
+
 func (s *Service) SyncVendorInvoice(ctx context.Context, invoiceID uuid.UUID, totalCents int64, lineDetails []VendorInvoiceLineDetail) error {
 	entry := &JournalEntry{
 		EntryDate:   time.Now(),

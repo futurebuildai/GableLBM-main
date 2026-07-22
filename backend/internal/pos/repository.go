@@ -30,6 +30,7 @@ type Repository interface {
 	GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error)
 	GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error)
 	CloseTillSession(ctx context.Context, s *TillSession) error
+	SetTillSessionGLEntry(ctx context.Context, sessionID, glEntryID uuid.UUID) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
 
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
