@@ -32,6 +32,9 @@ const (
 	AccountCodeAR        = "1020"
 	AccountCodeRevenue   = "4010"
 	AccountCodeOverShort = "5030" // Cash Over/Short (till drawer variance)
+
+	// SourceReversal marks a net-zero reversing entry.
+	SourceReversal = "REVERSAL"
 )
 
 // resolveAccountIDs loads the chart of accounts and returns the IDs for the
@@ -157,6 +160,10 @@ func (s *Service) PostJournalEntry(ctx context.Context, id uuid.UUID) error {
 }
 
 // VoidJournalEntry marks a POSTED entry as VOID.
+//
+// Deprecated for posted-entry correction: a posted entry is a historical
+// fact and should be corrected with ReverseJournalEntry (which leaves an
+// audit trail) rather than silently voided. Retained for compatibility.
 func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 	entry, err := s.repo.GetJournalEntry(ctx, id)
 	if err != nil {
@@ -166,6 +173,61 @@ func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("can only void entries in POSTED status (current: %s)", entry.Status)
 	}
 	return s.repo.UpdateJournalEntryStatus(ctx, id, StatusVoid, "")
+}
+
+// ReverseJournalEntry books a net-zero reversing entry for a posted entry:
+// same accounts, debits and credits swapped, linked via reverses_entry_id.
+// The original stays POSTED (it happened); the reversal cancels its effect.
+// Enforced once per entry (DB unique index + a pre-check). The reversal is
+// dated today, so it is period-checked at post time like any other entry.
+func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason string) (uuid.UUID, error) {
+	orig, err := s.repo.GetJournalEntry(ctx, id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if orig.Status != StatusPosted {
+		return uuid.Nil, fmt.Errorf("can only reverse POSTED entries (current: %s)", orig.Status)
+	}
+	if reversed, err := s.repo.IsReversed(ctx, id); err != nil {
+		return uuid.Nil, err
+	} else if reversed {
+		return uuid.Nil, fmt.Errorf("journal entry %s has already been reversed", id)
+	}
+	if len(orig.Lines) < 2 {
+		return uuid.Nil, fmt.Errorf("journal entry %s has no lines to reverse", id)
+	}
+
+	memo := fmt.Sprintf("Reversal of #%d", orig.EntryNumber)
+	if reason != "" {
+		memo += ": " + reason
+	}
+	rev := &JournalEntry{
+		EntryDate:       time.Now(),
+		Memo:            memo,
+		Source:          SourceReversal,
+		SourceRefID:     &orig.ID,
+		Status:          StatusPosted,
+		PostedBy:        "system",
+		ReversesEntryID: &orig.ID,
+	}
+	for _, l := range orig.Lines {
+		rev.Lines = append(rev.Lines, JournalLine{
+			AccountID:   l.AccountID,
+			Description: "Reversal: " + l.Description,
+			Debit:       l.Credit, // swap
+			Credit:      l.Debit,
+		})
+	}
+	if err := s.CreateJournalEntry(ctx, rev); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post reversal: %w", err)
+	}
+	return rev.ID, nil
+}
+
+// ReopenFiscalPeriod flips a CLOSED period back to OPEN (correction path;
+// should be a controller-privileged action at the handler layer).
+func (s *Service) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID) error {
+	return s.repo.ReopenFiscalPeriod(ctx, id, "system")
 }
 
 // --- Trial Balance ---

@@ -43,6 +43,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/gl/journal-entries", guard(h.HandleCreateJournalEntry))
 	mux.HandleFunc("POST /api/v1/gl/journal-entries/{id}/post", guard(h.HandlePostJournalEntry))
 	mux.HandleFunc("POST /api/v1/gl/journal-entries/{id}/void", guard(h.HandleVoidJournalEntry))
+	mux.HandleFunc("POST /api/v1/gl/journal-entries/{id}/reverse", guard(h.HandleReverseJournalEntry))
 
 	// Trial Balance
 	mux.HandleFunc("GET /api/v1/gl/trial-balance", guard(h.HandleTrialBalance))
@@ -50,6 +51,42 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Fiscal Periods
 	mux.HandleFunc("GET /api/v1/gl/fiscal-periods", guard(h.HandleListFiscalPeriods))
 	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/close", guard(h.HandleCloseFiscalPeriod))
+	mux.HandleFunc("POST /api/v1/gl/fiscal-periods/{id}/reopen", guard(h.HandleReopenFiscalPeriod))
+}
+
+// HandleReverseJournalEntry posts a net-zero reversal of a posted entry.
+func (h *Handler) HandleReverseJournalEntry(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid journal entry ID", http.StatusBadRequest, err)
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	revID, err := h.svc.ReverseJournalEntry(r.Context(), id, body.Reason)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to reverse journal entry", http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"reversal_entry_id": revID})
+}
+
+// HandleReopenFiscalPeriod reopens a closed period (controller correction).
+func (h *Handler) HandleReopenFiscalPeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "invalid fiscal period ID", http.StatusBadRequest, err)
+		return
+	}
+	if err := h.svc.ReopenFiscalPeriod(r.Context(), id); err != nil {
+		httputil.RespondError(w, r, "failed to reopen fiscal period", http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "reopened"})
 }
 
 // --- Account Handlers ---

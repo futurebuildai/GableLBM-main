@@ -71,6 +71,7 @@ type JournalEntry struct {
 	SourceRefID *uuid.UUID    `json:"source_ref_id,omitempty"`
 	Status      string        `json:"status"`
 	PostedBy    string        `json:"posted_by"`
+	ReversesEntryID *uuid.UUID `json:"reverses_entry_id,omitempty"` // set on a reversal entry
 	TotalDebit  int64         `json:"total_debit"`  // Computed, cents
 	TotalCredit int64         `json:"total_credit"` // Computed, cents
 	Lines       []JournalLine `json:"lines,omitempty"`

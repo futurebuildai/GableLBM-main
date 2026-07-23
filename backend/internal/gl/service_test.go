@@ -104,6 +104,20 @@ func (m *MockRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, cl
 	return nil
 }
 
+func (m *MockRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error {
+	for i := range m.periods {
+		if m.periods[i].ID == id {
+			m.periods[i].Status = PeriodOpen
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *MockRepository) IsReversed(ctx context.Context, id uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 // --- Tests ---
 
 func newTestService() (*Service, *MockRepository) {

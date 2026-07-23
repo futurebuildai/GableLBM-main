@@ -31,6 +31,8 @@ type Repository interface {
 	ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error)
 	GetFiscalPeriodForDate(ctx context.Context, date time.Time) (*FiscalPeriod, error)
 	CloseFiscalPeriod(ctx context.Context, id uuid.UUID, closedBy string) error
+	ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error
+	IsReversed(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 // PostgresRepository implements Repository backed by PostgreSQL.
@@ -176,13 +178,13 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 		ex := r.db.GetExecutor(ctx)
 
 		queryHeader := `
-			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING entry_number
 		`
 		if err := ex.QueryRow(ctx, queryHeader,
 			entry.ID, entry.EntryDate, entry.Memo, entry.Source, entry.SourceRefID,
-			entry.Status, entry.PostedBy, entry.CreatedAt, entry.UpdatedAt,
+			entry.Status, entry.PostedBy, entry.ReversesEntryID, entry.CreatedAt, entry.UpdatedAt,
 		).Scan(&entry.EntryNumber); err != nil {
 			return fmt.Errorf("failed to insert journal entry: %w", err)
 		}
@@ -395,4 +397,26 @@ func (r *PostgresRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID
 		return fmt.Errorf("fiscal period not found or already closed")
 	}
 	return nil
+}
+
+// ReopenFiscalPeriod flips a CLOSED period back to OPEN (correction path).
+func (r *PostgresRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, reopenedBy string) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE gl_fiscal_periods SET status='OPEN', closed_at=NULL, closed_by=$1 WHERE id=$2 AND status='CLOSED'`,
+		reopenedBy, id)
+	if err != nil {
+		return fmt.Errorf("failed to reopen fiscal period: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("fiscal period not found or not closed")
+	}
+	return nil
+}
+
+// IsReversed reports whether a reversal entry already points at this entry.
+func (r *PostgresRepository) IsReversed(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM gl_journal_entries WHERE reverses_entry_id=$1)`, id).Scan(&exists)
+	return exists, err
 }
