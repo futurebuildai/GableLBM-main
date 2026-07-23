@@ -98,6 +98,14 @@ func (m *MockGLRepository) CloseFiscalPeriod(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
+func (m *MockGLRepository) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID, user string) error {
+	return nil
+}
+
+func (m *MockGLRepository) IsReversed(ctx context.Context, id uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 type MockDatabase struct{}
 
 func (m *MockDatabase) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error {

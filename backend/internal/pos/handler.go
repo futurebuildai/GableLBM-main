@@ -55,6 +55,71 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/zreport", guard(h.GetZReport))
 	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
+
+	// Returns / refunds
+	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
+	mux.HandleFunc("GET /api/v1/pos/returns/{id}", guard(h.GetReturn))
+	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
+}
+
+// CreateReturn records a merchandise return and issues the refund.
+func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
+	var req ReturnRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+		return
+	}
+	if req.RegisterID == "" {
+		req.RegisterID = "REG-01"
+	}
+	cashierID := uuid.New() // Dev-mode fallback; real deployments carry JWT identity
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		if parsed, err := uuid.Parse(claims.Subject); err == nil {
+			cashierID = parsed
+		}
+	}
+	ret, err := h.service.ReturnSale(r.Context(), cashierID, req)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(ret)
+}
+
+// GetReturn returns a single return with its lines.
+func (h *Handler) GetReturn(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid return ID", http.StatusBadRequest, err)
+		return
+	}
+	ret, err := h.service.GetReturn(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ret)
+}
+
+// ListReturns lists returns (optional register_id + date query params).
+func (h *Handler) ListReturns(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	var date time.Time
+	if d := r.URL.Query().Get("date"); d != "" {
+		if parsed, err := time.Parse("2006-01-02", d); err == nil {
+			date = parsed
+		}
+	}
+	list, err := h.service.ListReturns(r.Context(), registerID, date)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list returns", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"returns": list})
 }
 
 // GetZReport returns the immutable Z snapshot for a closed session.

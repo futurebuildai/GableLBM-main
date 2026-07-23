@@ -130,6 +130,9 @@ func newTestService() (*Service, *MockRepository) {
 			{ID: cashID, Code: "1010", Name: "Cash", Type: AccountTypeAsset, NormalBalance: NormalDebit},
 			{ID: arID, Code: "1020", Name: "Accounts Receivable", Type: AccountTypeAsset, NormalBalance: NormalDebit},
 			{ID: revenueID, Code: "4010", Name: "Sales Revenue", Type: AccountTypeRevenue, NormalBalance: NormalCredit},
+			// Appended (indices 3+) so existing positional references stay valid.
+			{ID: uuid.New(), Code: "5030", Name: "Cash Over/Short", Type: AccountTypeExpense, NormalBalance: NormalDebit},
+			{ID: uuid.New(), Code: "2200", Name: "Customer Deposits", Type: AccountTypeLiability, NormalBalance: NormalCredit},
 		},
 		periods: []FiscalPeriod{
 			{ID: uuid.New(), Name: "Jan 2026", StartDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), Status: PeriodOpen},

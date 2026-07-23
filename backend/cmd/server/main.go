@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/gl"
@@ -263,6 +264,13 @@ func main() {
 	invoiceSvc.WithAuditLog(auditLog)
 	invoiceHandler := invoice.NewHandler(invoiceSvc)
 	invoiceHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"))
+
+	// Deposit Module (customer prepayments held as 2200 liability, applied to AR)
+	depositRepo := deposit.NewRepository(db)
+	depositSvc := deposit.NewService(db, depositRepo, glSvc, accountSvc, logger)
+	depositSvc.WithAuditLog(auditLog)
+	depositHandler := deposit.NewHandler(depositSvc)
+	depositHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"))
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)

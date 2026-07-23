@@ -28,13 +28,18 @@ func NewService(repo Repository, adapter integration.GLAdapter, logger *slog.Log
 // by migration 025 and are matched by code (not by free-text name) so a rename
 // of an account never silently breaks posting.
 const (
-	AccountCodeCash      = "1010"
-	AccountCodeAR        = "1020"
-	AccountCodeRevenue   = "4010"
-	AccountCodeOverShort = "5030" // Cash Over/Short (till drawer variance)
+	AccountCodeCash            = "1010"
+	AccountCodeAR              = "1020"
+	AccountCodeRevenue         = "4010"
+	AccountCodeOverShort       = "5030" // Cash Over/Short (till drawer variance)
+	AccountCodeCustomerDeposit = "2200" // Customer Deposits (prepayment liability)
 
 	// SourceReversal marks a net-zero reversing entry.
 	SourceReversal = "REVERSAL"
+	// SourceReturn marks a POS return/refund (sale reversal at the till).
+	SourceReturn = "RETURN"
+	// SourceDeposit marks a customer prepayment taken or applied.
+	SourceDeposit = "DEPOSIT"
 )
 
 // resolveAccountIDs loads the chart of accounts and returns the IDs for the
@@ -360,6 +365,141 @@ func (s *Service) SyncCashSale(ctx context.Context, posTxID string, amount int64
 		return fmt.Errorf("failed to post POS cash sale to internal GL: %w", err)
 	}
 	return nil
+}
+
+// SyncCashReturn posts a point-of-sale cash refund: DR Sales Revenue / CR Cash.
+// This is the exact mirror of SyncCashSale — a refunded sale unwinds the
+// revenue and pays cash back out of the drawer. amount is the refunded total
+// in cents (positive). Tagged RETURN so refunds are filterable in the ledger.
+// Returns the journal entry ID so the return row can link back to its entry.
+func (s *Service) SyncCashReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+	if amount <= 0 {
+		return uuid.Nil, fmt.Errorf("cash return amount must be positive, got %d", amount)
+	}
+	sourceRefID, _ := uuid.Parse(refID)
+
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeRevenue)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("POS Return %s", refID),
+		Source:      SourceReturn,
+		SourceRefID: &sourceRefID,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines: []JournalLine{
+			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue (return)", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeCash], Description: "Cash refund", Debit: 0, Credit: amount},
+		},
+	}
+
+	if err := s.CreateJournalEntry(ctx, entry); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post POS cash return to internal GL: %w", err)
+	}
+	return entry.ID, nil
+}
+
+// SyncAccountReturn posts a POS return refunded as store credit against the
+// customer's account: DR Sales Revenue / CR Accounts Receivable — the mirror
+// of an on-account sale. No cash leaves the drawer; the customer simply owes
+// less. The balance-due subledger effect is posted separately by the caller.
+// Returns the journal entry ID so the return row can link back to its entry.
+func (s *Service) SyncAccountReturn(ctx context.Context, refID string, amount int64) (uuid.UUID, error) {
+	if amount <= 0 {
+		return uuid.Nil, fmt.Errorf("account return amount must be positive, got %d", amount)
+	}
+	sourceRefID, _ := uuid.Parse(refID)
+
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeAR, AccountCodeRevenue)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("POS Return (account credit) %s", refID),
+		Source:      SourceReturn,
+		SourceRefID: &sourceRefID,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines: []JournalLine{
+			{AccountID: ids[AccountCodeRevenue], Description: "Sales Revenue (return)", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable (credit)", Debit: 0, Credit: amount},
+		},
+	}
+
+	if err := s.CreateJournalEntry(ctx, entry); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post POS account return to internal GL: %w", err)
+	}
+	return entry.ID, nil
+}
+
+// SyncCustomerDeposit books a customer prepayment taken at the counter:
+// DR Cash / CR Customer Deposits. The deposit is a liability we hold until it
+// is applied against the customer's AR (see ApplyCustomerDeposit). Returns the
+// journal entry ID so the deposit row can link back to its ledger entry.
+func (s *Service) SyncCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+	if amount <= 0 {
+		return uuid.Nil, fmt.Errorf("deposit amount must be positive, got %d", amount)
+	}
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCash, AccountCodeCustomerDeposit)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	ref := depositID
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("Customer deposit %s", depositID),
+		Source:      SourceDeposit,
+		SourceRefID: &ref,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines: []JournalLine{
+			{AccountID: ids[AccountCodeCash], Description: "Cash", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeCustomerDeposit], Description: "Customer deposit received", Debit: 0, Credit: amount},
+		},
+	}
+	if err := s.CreateJournalEntry(ctx, entry); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post customer deposit to GL: %w", err)
+	}
+	return entry.ID, nil
+}
+
+// ApplyCustomerDeposit draws a held deposit down against the customer's AR:
+// DR Customer Deposits / CR Accounts Receivable. This relieves the liability
+// and reduces the receivable (the balance-due subledger effect is posted
+// separately by the deposit service via account.PostTransaction). Returns the
+// journal entry ID so each application can link back to its ledger entry.
+func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID, amount int64) (uuid.UUID, error) {
+	if amount <= 0 {
+		return uuid.Nil, fmt.Errorf("applied amount must be positive, got %d", amount)
+	}
+	ids, err := s.resolveAccountIDs(ctx, AccountCodeCustomerDeposit, AccountCodeAR)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	ref := depositID
+	entry := &JournalEntry{
+		EntryDate:   time.Now(),
+		Memo:        fmt.Sprintf("Customer deposit %s applied to AR", depositID),
+		Source:      SourceDeposit,
+		SourceRefID: &ref,
+		Status:      StatusPosted,
+		PostedBy:    "system",
+		Lines: []JournalLine{
+			{AccountID: ids[AccountCodeCustomerDeposit], Description: "Customer deposit applied", Debit: amount, Credit: 0},
+			{AccountID: ids[AccountCodeAR], Description: "Accounts Receivable", Debit: 0, Credit: amount},
+		},
+	}
+	if err := s.CreateJournalEntry(ctx, entry); err != nil {
+		return uuid.Nil, fmt.Errorf("failed to post deposit application to GL: %w", err)
+	}
+	return entry.ID, nil
 }
 
 // SyncVendorInvoice creates a journal entry: DR Expense/Inventory / CR Accounts Payable.

@@ -202,6 +202,42 @@ func (s *Service) PostCashSaleToGL(ctx context.Context, posTxID string, amountCe
 	return s.gl.SyncCashSale(ctx, posTxID, amountCents)
 }
 
+// PostCashReturnToGL posts a POS cash refund to the GL (DR Sales Revenue /
+// CR Cash), the exact mirror of PostCashSaleToGL. Lets the till book a refund
+// without taking a direct GL dependency; best-effort, called AFTER the return
+// commits (a GL hiccup must never block a completed refund). Returns the GL
+// entry ID so the return row can link back to its ledger entry (uuid.Nil when
+// no GL is wired).
+func (s *Service) PostCashReturnToGL(ctx context.Context, returnID string, amountCents int64) (uuid.UUID, error) {
+	if s.gl == nil {
+		return uuid.Nil, nil
+	}
+	return s.gl.SyncCashReturn(ctx, returnID, amountCents)
+}
+
+// PostAccountReturnToLedger books a POS return refunded as store credit: the
+// GL leg (DR Sales Revenue / CR Accounts Receivable) plus a balance-reducing
+// subledger entry, the mirror of PostInvoiceToLedger. Store credit lowers what
+// the customer owes, so the subledger amount is negative (payment-shaped).
+// Best-effort at the POS layer, same policy as PostCashReturnToGL. Returns the
+// GL entry ID (uuid.Nil when no GL is wired).
+func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, returnID uuid.UUID, amountCents int64) (uuid.UUID, error) {
+	var glEntryID uuid.UUID
+	if s.gl != nil {
+		id, err := s.gl.SyncAccountReturn(ctx, returnID.String(), amountCents)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("failed to post account return to GL: %w", err)
+		}
+		glEntryID = id
+	}
+	if s.account != nil {
+		if _, err := s.account.PostTransaction(ctx, customerID, account.TransactionTypeRefund, -amountCents, &returnID, "POS return credit #"+returnID.String()); err != nil {
+			return glEntryID, fmt.Errorf("failed to post account return to subledger: %w", err)
+		}
+	}
+	return glEntryID, nil
+}
+
 // C2: Credit memo workflow
 func (s *Service) CreateCreditMemo(ctx context.Context, customerID uuid.UUID, invoiceID *uuid.UUID, amountCents int64, reason string) (*CreditMemo, error) {
 	if amountCents <= 0 {

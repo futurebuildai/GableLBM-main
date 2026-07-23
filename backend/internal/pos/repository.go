@@ -38,6 +38,13 @@ type Repository interface {
 	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
 	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
 
+	// Returns
+	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
+	CreateReturn(ctx context.Context, ret *POSReturn) error
+	SetReturnGLEntry(ctx context.Context, returnID, glEntryID uuid.UUID) error
+	GetReturn(ctx context.Context, id uuid.UUID) (*POSReturn, error)
+	ListReturns(ctx context.Context, registerID string, date time.Time) ([]POSReturn, error)
+
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
 
 	// Offline sync
