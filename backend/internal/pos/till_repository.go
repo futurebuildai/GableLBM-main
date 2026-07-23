@@ -189,3 +189,76 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 	}
 	return agg, rows.Err()
 }
+
+// --- Z-reports ---
+
+func (r *PostgresRepository) CreateZReport(ctx context.Context, z *ZReport) error {
+	if z.ID == uuid.Nil {
+		z.ID = uuid.New()
+	}
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO till_z_reports (id, till_session_id, register_id, branch_id, over_short, payload)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+		ON CONFLICT (till_session_id) DO NOTHING`,
+		z.ID, z.TillSessionID, z.RegisterID, z.BranchID, float64(z.OverShort)/100.0, string(z.Payload))
+	if err != nil {
+		return fmt.Errorf("failed to create Z-report: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) scanZReport(row pgx.Row) (*ZReport, error) {
+	var z ZReport
+	var overShort float64
+	var payload []byte
+	if err := row.Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &overShort, &payload, &z.GeneratedAt); err != nil {
+		return nil, err
+	}
+	if overShort >= 0 {
+		z.OverShort = int64(overShort*100.0 + 0.5)
+	} else {
+		z.OverShort = int64(overShort*100.0 - 0.5)
+	}
+	z.Payload = payload
+	return &z, nil
+}
+
+const zReportColumns = `id, till_session_id, register_id, branch_id, over_short, payload, generated_at`
+
+func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {
+	row := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT `+zReportColumns+` FROM till_z_reports WHERE till_session_id = $1`, sessionID)
+	z, err := r.scanZReport(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("no Z-report for session %s (not closed?)", sessionID)
+		}
+		return nil, fmt.Errorf("failed to get Z-report: %w", err)
+	}
+	return z, nil
+}
+
+func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
+	q := `SELECT ` + zReportColumns + ` FROM till_z_reports WHERE ($1 = '' OR register_id = $1)`
+	args := []any{registerID}
+	if !date.IsZero() {
+		start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+		q += ` AND generated_at >= $2 AND generated_at < $3`
+		args = append(args, start, start.Add(24*time.Hour))
+	}
+	q += ` ORDER BY generated_at DESC`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
+	}
+	defer rows.Close()
+	var out []ZReport
+	for rows.Next() {
+		z, err := r.scanZReport(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan Z-report: %w", err)
+		}
+		out = append(out, *z)
+	}
+	return out, rows.Err()
+}

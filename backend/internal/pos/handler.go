@@ -53,6 +53,42 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/till/current", guard(h.CurrentTill))
 	mux.HandleFunc("GET /api/v1/pos/till/{id}/report", guard(h.TillReportHandler))
 	mux.HandleFunc("POST /api/v1/pos/till/{id}/close", guard(h.CloseTill))
+	mux.HandleFunc("GET /api/v1/pos/till/{id}/zreport", guard(h.GetZReport))
+	mux.HandleFunc("GET /api/v1/pos/zreports", guard(h.ListZReports))
+}
+
+// GetZReport returns the immutable Z snapshot for a closed session.
+func (h *Handler) GetZReport(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httputil.RespondError(w, r, "Invalid till session ID", http.StatusBadRequest, err)
+		return
+	}
+	z, err := h.service.GetZReport(r.Context(), id)
+	if err != nil {
+		httputil.RespondError(w, r, err.Error(), http.StatusNotFound, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(z)
+}
+
+// ListZReports lists Z snapshots (optional register_id + date query params).
+func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
+	registerID := r.URL.Query().Get("register_id")
+	var date time.Time
+	if d := r.URL.Query().Get("date"); d != "" {
+		if parsed, err := time.Parse("2006-01-02", d); err == nil {
+			date = parsed
+		}
+	}
+	list, err := h.service.ListZReports(r.Context(), registerID, date)
+	if err != nil {
+		httputil.RespondError(w, r, "failed to list Z-reports", http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"z_reports": list})
 }
 
 // --- Till handlers ---

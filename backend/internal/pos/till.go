@@ -192,6 +192,9 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		}
 	}
 
+	// Freeze the sovereign Z-report snapshot (generate-once, never recomputed).
+	s.generateZReport(ctx, report)
+
 	if s.auditLog != nil {
 		s.auditLog.Log(ctx, audit.Entry{
 			Action:     "pos.till.closed",

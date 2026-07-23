@@ -33,6 +33,11 @@ type Repository interface {
 	SetTillSessionGLEntry(ctx context.Context, sessionID, glEntryID uuid.UUID) error
 	AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error)
 
+	// Z-reports
+	CreateZReport(ctx context.Context, z *ZReport) error
+	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
+	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
+
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
 
 	// Offline sync
